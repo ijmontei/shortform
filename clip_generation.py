@@ -44,7 +44,7 @@ CANDIDATE_STRIDE_SECONDS = 5
 MIN_SELECTED_CLIP_SCORE = 0.25
 MIN_WORDS_PER_CANDIDATE = 22
 MIN_CLIP_SPACING_SECONDS = 2
-SCORING_MODEL_VERSION = "2026-06-10-v3"
+SCORING_MODEL_VERSION = "2026-06-10-v4"
 
 
 # =========================
@@ -497,6 +497,7 @@ class CandidateClip:
     audio_score: float
     text_score: float
     opening_score: float
+    comment_score: float
     pacing_score: float
     duration_score: float
     rank_signals: dict
@@ -658,6 +659,14 @@ FILLER_WORDS = {
     "yeah", "okay", "like", "just", "really", "actually", "basically", "kind",
     "sort", "stuff", "thing", "things", "know", "mean", "right", "well",
     "um", "uh", "you", "i", "we",
+}
+
+COMMENT_TRIGGER_WORDS = {
+    "should", "shouldn't", "wrong", "right", "why", "how", "what", "agree",
+    "disagree", "crazy", "insane", "scary", "evil", "victim", "victims",
+    "default", "defaults", "debt", "money", "rich", "poor", "government",
+    "college", "tax", "illegal", "fraud", "scam", "fair", "unfair",
+    "freedom", "problem", "truth", "reality", "angry", "offended",
 }
 
 
@@ -891,7 +900,7 @@ def score_text_window(text):
 
     question_hits = text.count("?")
     number_hits = len(re.findall(r"\b\d+[\d,.]*%?\b", text))
-    money_hits = len(re.findall(r"[$€£]\s?\d+|\b\d+[\d,.]*\s?(dollars?|bucks?)\b", text, re.IGNORECASE))
+    money_hits = len(re.findall(r"\$\s?\d+|\b\d+[\d,.]*\s?(dollars?|bucks?)\b", text, re.IGNORECASE))
     percent_hits = len(re.findall(r"\b\d+[\d,.]*\s?%\b|\bpercent\b", normalized_text))
     specificity_hits = number_hits + money_hits + percent_hits
 
@@ -967,13 +976,42 @@ def score_opening_text(text):
     if re.search(r"\b(why|what|how|here'?s|look|first of all|the truth|the problem|nobody|most people)\b", normalized_text):
         first_line_bonus += 0.25
 
-    if re.search(r"\b\d+[\d,.]*%?\b|[$€£]\s?\d+", text):
+    if re.search(r"\b\d+[\d,.]*%?\b|\$\s?\d+", text):
         first_line_bonus += 0.15
 
     if any(word in normalized_text for word in ["crazy", "insane", "scary", "brutal", "wrong", "debt", "money"]):
         first_line_bonus += 0.18
 
     return min(1.0, details["score"] * 0.75 + details["hook_score"] * 0.25 + first_line_bonus)
+
+
+def score_comment_potential(text):
+    normalized_text = text.lower()
+    words = re.findall(r"[a-zA-Z][a-zA-Z']+", normalized_text)
+
+    if not words:
+        return 0.0
+
+    trigger_hits = sum(1 for word in words if word in COMMENT_TRIGGER_WORDS)
+    question_hits = text.count("?")
+    contrast_hits = len(re.findall(r"\b(but|however|actually|instead|first of all|the truth is|the problem is)\b", normalized_text))
+    absolute_hits = len(re.findall(r"\b(always|never|everyone|nobody|all|none|everybody|impossible|guaranteed)\b", normalized_text))
+    money_or_number_hits = len(re.findall(r"\$\s?\d+|\b\d+[\d,.]*%?\b|\b\d+[\d,.]*\s?(dollars?|bucks?)\b", text, re.IGNORECASE))
+    debate_phrase_hits = len(re.findall(
+        r"\b(do you think|would you|should you|is it fair|is this fair|hot take|unpopular opinion|people don'?t understand)\b",
+        normalized_text,
+    ))
+
+    raw_score = (
+        trigger_hits * 0.22
+        + question_hits * 0.55
+        + contrast_hits * 0.30
+        + absolute_hits * 0.28
+        + money_or_number_hits * 0.16
+        + debate_phrase_hits * 0.75
+    )
+
+    return min(1.0, saturating_score(raw_score, 2.6))
 
 
 def score_spoken_pacing(text, duration):
@@ -1106,15 +1144,17 @@ def build_candidate_clips(transcript_payload, audio_payload):
             text_score = text_details["score"]
             opening_text_score = score_opening_text(opening_text or text[:320])
             opening_score = max(0.0, min(1.0, 0.68 * opening_text_score + 0.32 * opening_audio))
+            comment_score = score_comment_potential(text)
             pacing_score = score_spoken_pacing(text, actual_duration)
             duration_score = score_duration(actual_duration)
 
             score = (
-                0.38 * text_score
-                + 0.29 * audio_score
-                + 0.18 * opening_score
-                + 0.10 * pacing_score
-                + 0.05 * duration_score
+                0.34 * text_score
+                + 0.27 * audio_score
+                + 0.17 * opening_score
+                + 0.10 * comment_score
+                + 0.08 * pacing_score
+                + 0.04 * duration_score
             )
 
             candidates.append(CandidateClip(
@@ -1124,6 +1164,7 @@ def build_candidate_clips(transcript_payload, audio_payload):
                 audio_score=float(audio_score),
                 text_score=float(text_score),
                 opening_score=float(opening_score),
+                comment_score=float(comment_score),
                 pacing_score=float(pacing_score),
                 duration_score=float(duration_score),
                 rank_signals=text_details,
@@ -1188,7 +1229,7 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en"):
             f"    Clip {index}: {clip.start_time:.1f}s-{clip.end_time:.1f}s "
             f"| score={clip.score:.3f} text={clip.text_score:.3f} "
             f"audio={clip.audio_score:.3f} opening={clip.opening_score:.3f} "
-            f"pace={clip.pacing_score:.3f}"
+            f"comment={clip.comment_score:.3f} pace={clip.pacing_score:.3f}"
         )
 
     if clips:

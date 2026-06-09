@@ -11,6 +11,7 @@ if os.path.isdir(FFMPEG_BIN) and hasattr(os, "add_dll_directory"):
     os.add_dll_directory(FFMPEG_BIN)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FONTS_PATH = os.path.join(BASE_DIR, "assets", "fonts")
 CLIPS_PATH = os.path.join(BASE_DIR, "output", "clips")
 UPLOAD_PATH = os.path.join(BASE_DIR, "output", "upload")
 SUBTITLE_TEMP_PATH = os.path.join(BASE_DIR, "output", "temp", "subtitles")
@@ -24,6 +25,7 @@ if not os.path.exists(FFMPEG_EXE):
 
 SUBTITLE_MODEL_SIZE = os.getenv("SHORTFORM_SUBTITLE_MODEL", "base")
 REGENERATE_UPLOAD_CLIPS = True
+CAPTION_FONT_FAMILY = "Montserrat"
 
 MAX_WORDS_PER_CAPTION = 4
 MAX_CHARS_PER_CAPTION = 24
@@ -205,15 +207,15 @@ def style_word_for_ass(word, duration_cs, rel_start_cs, rel_end_cs):
     rel_end_cs = max(rel_start_cs + 1, int(rel_end_cs))
     pulse_mid_cs = rel_start_cs + max(1, int((rel_end_cs - rel_start_cs) * 0.45))
     pulse = (
-        f"\\t({rel_start_cs},{pulse_mid_cs},\\fscx106\\fscy106)"
+        f"\\t({rel_start_cs},{pulse_mid_cs},\\fscx105\\fscy105)"
         f"\\t({pulse_mid_cs},{rel_end_cs},\\fscx100\\fscy100)"
     )
 
     if plain in IMPACT_WORDS or re.search(r"\d", cleaned):
         return (
-            f"{{\\kf{duration_cs}\\bord6\\shad3{pulse}}}"
+            f"{{\\kf{duration_cs}\\bord5.8\\shad2.4{pulse}}}"
             f"{cleaned.upper()}"
-            f"{{\\fscx100\\fscy100\\bord5\\shad2}}"
+            f"{{\\fscx100\\fscy100\\bord5.2\\shad2}}"
         )
 
     return f"{{\\kf{duration_cs}{pulse}}}{cleaned.upper()}{{\\fscx100\\fscy100}}"
@@ -222,7 +224,7 @@ def style_word_for_ass(word, duration_cs, rel_start_cs, rel_end_cs):
 def build_ass_subtitles(words, ass_path):
     lines = split_caption_lines(words)
 
-    header = """[Script Info]
+    header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -230,7 +232,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,Impact,82,&H0038D8FF,&H00FFFFFF,&H00000000,&HAA000000,-1,0,0,0,100,100,1,0,1,5.5,2.2,2,80,80,330,1
+Style: Caption,{CAPTION_FONT_FAMILY},74,&H0038D8FF,&H00FFFFFF,&H00000000,&HAA000000,-1,0,0,0,100,100,0.4,0,1,5.2,2,2,80,80,330,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -276,7 +278,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def burn_subtitles(input_video, ass_path, output_video):
-    ass_filter = f"ass='{ffmpeg_filter_path(ass_path)}'"
+    ass_filter = (
+        f"ass='{ffmpeg_filter_path(ass_path)}'"
+        f":fontsdir='{ffmpeg_filter_path(FONTS_PATH)}'"
+    )
 
     run_subprocess([
         FFMPEG_EXE,
