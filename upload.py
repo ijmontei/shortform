@@ -1,16 +1,12 @@
 import os
-from apiclient.discovery import build
-from apiclient.errors import HttpError
-from apiclient.http import MediaFileUpload
-from oauth2client.client import flow_from_clientsecrets
-from oauth2client.file import Storage
-from oauth2client.tools import argparser, run_flow
 
 # OAuth 2.0 details
 CLIENT_SECRETS_FILE = "client_secrets.json"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_PATH = os.path.join(BASE_DIR, "output", "upload")
 MISSING_CLIENT_SECRETS_MESSAGE = """
 WARNING: Please configure OAuth 2.0
 To make this script work, you need to populate the client_secrets.json file.
@@ -18,6 +14,17 @@ To make this script work, you need to populate the client_secrets.json file.
 
 # Function to get authenticated service
 def get_authenticated_service():
+    try:
+        from googleapiclient.discovery import build
+        from oauth2client.client import flow_from_clientsecrets
+        from oauth2client.file import Storage
+        from oauth2client.tools import run_flow
+    except ImportError as error:
+        raise RuntimeError(
+            "YouTube upload dependencies are missing. Install "
+            "google-api-python-client and oauth2client to enable uploading."
+        ) from error
+
     flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE, scope=YOUTUBE_UPLOAD_SCOPE, message=MISSING_CLIENT_SECRETS_MESSAGE)
     storage = Storage("oauth2.json")
     credentials = storage.get()
@@ -30,6 +37,14 @@ def get_authenticated_service():
 """ DEFAULT TO THIS IF THE BELOW FUNCTION DOESNT WORK
 # Function to upload a video to YouTube
 def upload_video(youtube, video_path, title, description, privacy_status):
+    try:
+        from googleapiclient.http import MediaFileUpload
+    except ImportError as error:
+        raise RuntimeError(
+            "YouTube upload dependencies are missing. Install "
+            "google-api-python-client to enable uploading."
+        ) from error
+
     tags = None
     body = {
         'snippet': {
@@ -91,10 +106,14 @@ def delete_file(file_path):
 # Main function
 def upload_function():
     # Get authenticated YouTube service
-    youtube = get_authenticated_service()
+    try:
+        youtube = get_authenticated_service()
+    except RuntimeError as error:
+        print(error)
+        return
 
-    # Folder containing subtitled clips
-    subtitled_clips_folder = 'themes/Sigma/subtitled_clips'
+    # Folder containing upload-ready clips
+    subtitled_clips_folder = UPLOAD_PATH
 
     # Iterate over subtitled clips in the folder
     for filename in os.listdir(subtitled_clips_folder):
@@ -113,8 +132,6 @@ def upload_function():
 
                 # Delete the uploaded file
                 delete_file(video_path)
-            except HttpError as e:
-                print("An HTTP error occurred:", e)
             except Exception as e:
                 print("An error occurred:", e)
 

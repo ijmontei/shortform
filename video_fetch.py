@@ -1,57 +1,72 @@
 import os
 import json
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import StaleElementReferenceException
 import time
+from datetime import datetime
+import yt_dlp
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_PATH = os.path.join(BASE_DIR, "src")
+CHANNELS_FILE = os.path.join(SRC_PATH, "channels.txt")
+ID_FILE = os.path.join(SRC_PATH, "id.json")
 
 def run_video_fetch():
     # Start time for performance measurement
     start = time.time()
 
-    # Function to get latest video URL for a given channel
+    # Function to get latest video URL for a given channel using yt-dlp
     def get_latest_video(channel_url):
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")  # Run Chrome in headless mode to improve speed
-        driver = webdriver.Chrome(options=options)  # You may need to adjust this based on your WebDriver setup
-        driver.get(channel_url)
+        # yt-dlp options to simulate extraction without downloading
+        ydl_opts = {
+            'extract_flat': False, # Ensure we get full metadata (like views)
+            'playlist_items': '1', # Grab only the most recent video
+            'quiet': True,         # Suppress console output
+            'no_warnings': True,
+            'simulate': True       # Do not download the video
+        }
         
         try:
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div#details')))
-            title_element = driver.find_element(By.CSS_SELECTOR, 'a#video-title-link')
-            title = title_element.get_attribute('title')
-            vurl = title_element.get_attribute('href')
-            views_element = driver.find_element(By.XPATH, './/*[@id="metadata"]//span[@class="inline-metadata-item style-scope ytd-video-meta-block"][1]')
-            views = views_element.text
-            date_time_element = driver.find_element(By.XPATH, './/*[@id="metadata"]//span[@class="inline-metadata-item style-scope ytd-video-meta-block"][2]')
-            date_time = date_time_element.text
-            latest_video = {
-                'title': title,
-                'video_url': vurl,
-                'views': views,
-                'date_time': date_time
-            }
-        except StaleElementReferenceException:
-            # Element reference became stale, retry
-            return get_latest_video(channel_url)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
+                
+                # yt-dlp returns a dictionary; if it's a channel/playlist, videos are in 'entries'
+                if 'entries' in info and info['entries']:
+                    video = info['entries'][0]
+                else:
+                    video = info
+                
+                # Format the view count to include commas and the word 'views' (e.g., "1,234 views")
+                views_int = video.get('view_count', 0)
+                views_str = f"{views_int:,} views" if views_int else "N/A"
+
+                # Format the date from YYYYMMDD to a readable format (e.g., "Oct 24, 2023")
+                raw_date = video.get('upload_date')
+                if raw_date:
+                    date_str = datetime.strptime(raw_date, '%Y%m%d').strftime('%b %d, %Y')
+                else:
+                    date_str = "N/A"
+                    
+                latest_video = {
+                    'title': video.get('title', 'Unknown Title'),
+                    'video_url': video.get('webpage_url') or f"https://www.youtube.com/watch?v={video.get('id')}",
+                    'views': views_str,
+                    'date_time': date_str
+                }
+                
+                return latest_video
+                
         except Exception as e:
             print(f"Error collecting video data for {channel_url}: {e}")
-            latest_video = None
+            return None
 
-        driver.quit()
-        return latest_video
+    os.makedirs(SRC_PATH, exist_ok=True)
 
     # Read YouTube channels from file
-    with open('themes/Sigma/video_pull/channels.txt', 'r') as file:
-        channels = file.readlines()
-
-    # Remove whitespace characters like `\n` at the end of each line
-    channels = [channel.strip() for channel in channels]
+    with open(CHANNELS_FILE, 'r') as file:
+        # Added a check to ignore empty lines
+        channels = [channel.strip() for channel in file.readlines() if channel.strip()]
 
     # Define the path to the JSON file
-    json_filename = 'themes/Sigma/video_pull/id.json'
+    json_filename = ID_FILE
 
     # Load existing JSON data
     existing_videos = {}
@@ -70,7 +85,8 @@ def run_video_fetch():
         latest_video = get_latest_video(channel)
         if latest_video:
             # Check if the latest video already exists in the existing videos
-            if latest_video['video_url'] not in [v['video_url'] for v in existing_videos.values()]:
+            existing_urls = [v['video_url'] for v in existing_videos.values()]
+            if latest_video['video_url'] not in existing_urls:
                 latest_videos[channel] = latest_video
 
     # Merge latest videos with existing videos
@@ -85,6 +101,9 @@ def run_video_fetch():
     # End time for performance measurement
     end = time.time()
     # Calculate execution time
-    length = end-start
-    print("It took", round((length)/60,2), "minutes!")
+    length = end - start
+    print(f"It took {round(length / 60, 2)} minutes!")
 
+# Optional block so you can run this script directly
+if __name__ == '__main__':
+    run_video_fetch()
