@@ -69,6 +69,26 @@ YTDL_COMMON_OPTS = {
 }
 
 
+def build_ytdl_opts(extra_opts=None):
+    opts = {**YTDL_COMMON_OPTS}
+
+    cookies_file = os.getenv(
+        "SHORTFORM_YTDLP_COOKIES",
+        os.path.join(base_dir, "cookies.txt"),
+    )
+    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome")
+
+    if os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
+    elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
+        opts["cookiesfrombrowser"] = (cookies_browser,)
+
+    if extra_opts:
+        opts.update(extra_opts)
+
+    return opts
+
+
 # =========================
 # Helpers
 # =========================
@@ -141,8 +161,7 @@ def download_media(video_url, cleaned_title):
     video_filename = os.path.join(videos_path, f"{cleaned_title}.mp4")
     audio_filename = os.path.join(audio_path, f"{cleaned_title}.m4a")
 
-    ydl_opts_combined = {
-        **YTDL_COMMON_OPTS,
+    ydl_opts_combined = build_ytdl_opts({
         "format": (
             "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
             "best[height<=1080][ext=mp4]/"
@@ -150,7 +169,7 @@ def download_media(video_url, cleaned_title):
         ),
         "merge_output_format": "mp4",
         "outtmpl": video_filename,
-    }
+    })
 
     start_download = time.time()
 
@@ -309,6 +328,10 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
 
     camera_center_x = None
     target_center_x = None
+    locked_face_center_x = None
+    pending_face_center_x = None
+    pending_face_hits = 0
+    fallback_person_center_x = None
     frame_count = 0
 
     face_cascades = load_face_cascades()
@@ -319,10 +342,12 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
     min_person_confidence = 0.35
 
     # Tuned for interviews: keep the face steady and avoid body-driven drift.
-    face_dead_zone_px = int(output_width * 0.09)
-    fallback_dead_zone_px = int(output_width * 0.20)
-    smoothing_factor = 0.026
-    max_center_move_per_frame = max(5, int(output_width * 0.007))
+    face_dead_zone_px = int(output_width * 0.12)
+    fallback_dead_zone_px = int(output_width * 0.28)
+    face_relock_threshold_px = int(output_width * 0.24)
+    face_lock_min_hits = 2
+    smoothing_factor = 0.018
+    max_center_move_per_frame = max(4, int(output_width * 0.005))
 
     written_frames = 0
 
@@ -370,9 +395,60 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                 face_center_x = detect_face_center_x(detection_frame, face_cascades)
 
                 if face_center_x is not None:
-                    detected_center_x = face_center_x / detection_scale
-                    detected_source = "face"
-                else:
+                    raw_face_center_x = face_center_x / detection_scale
+
+                    if locked_face_center_x is None:
+                        if pending_face_center_x is None:
+                            pending_face_center_x = raw_face_center_x
+                            pending_face_hits = 1
+                        elif abs(raw_face_center_x - pending_face_center_x) <= face_relock_threshold_px:
+                            pending_face_center_x = (
+                                pending_face_center_x * 0.65
+                                + raw_face_center_x * 0.35
+                            )
+                            pending_face_hits += 1
+                        else:
+                            pending_face_center_x = raw_face_center_x
+                            pending_face_hits = 1
+
+                        if pending_face_hits >= face_lock_min_hits:
+                            locked_face_center_x = pending_face_center_x
+                            detected_center_x = locked_face_center_x
+                            detected_source = "face"
+                    else:
+                        face_drift_from_lock = abs(raw_face_center_x - locked_face_center_x)
+
+                        if face_drift_from_lock <= face_relock_threshold_px:
+                            locked_face_center_x = (
+                                locked_face_center_x * 0.88
+                                + raw_face_center_x * 0.12
+                            )
+                            pending_face_center_x = None
+                            pending_face_hits = 0
+                            detected_center_x = locked_face_center_x
+                            detected_source = "face"
+                        else:
+                            if pending_face_center_x is None:
+                                pending_face_center_x = raw_face_center_x
+                                pending_face_hits = 1
+                            elif abs(raw_face_center_x - pending_face_center_x) <= face_relock_threshold_px:
+                                pending_face_center_x = (
+                                    pending_face_center_x * 0.70
+                                    + raw_face_center_x * 0.30
+                                )
+                                pending_face_hits += 1
+                            else:
+                                pending_face_center_x = raw_face_center_x
+                                pending_face_hits = 1
+
+                            if pending_face_hits >= face_lock_min_hits + 2:
+                                locked_face_center_x = pending_face_center_x
+                                detected_center_x = locked_face_center_x
+                                detected_source = "face"
+                                pending_face_center_x = None
+                                pending_face_hits = 0
+
+                elif locked_face_center_x is None:
                     results = model.predict(
                         detection_frame,
                         verbose=False,
@@ -406,10 +482,20 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                                     largest_box = [x1, y1, x2, y2]
 
                     if largest_box is not None:
-                        detected_center_x = (
+                        raw_person_center_x = (
                             (largest_box[0] + largest_box[2]) / 2
                         ) / detection_scale
+
+                        if fallback_person_center_x is None:
+                            fallback_person_center_x = raw_person_center_x
+
+                        detected_center_x = fallback_person_center_x
                         detected_source = "person"
+                else:
+                    # Once the face is locked, hold the camera through brief face
+                    # detection misses instead of chasing shoulders/body boxes.
+                    detected_center_x = locked_face_center_x
+                    detected_source = "face"
 
             if detected_center_x is not None:
                 drift = abs(detected_center_x - camera_center_x)
@@ -1399,7 +1485,7 @@ def process_video(video_url, executed_data):
     try:
         start_video_total = time.time()
 
-        with yt_dlp.YoutubeDL(YTDL_COMMON_OPTS) as ydl:
+        with yt_dlp.YoutubeDL(build_ytdl_opts()) as ydl:
             info = ydl.extract_info(video_url, download=False)
 
             if info is None:

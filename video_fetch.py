@@ -9,6 +9,29 @@ SRC_PATH = os.path.join(BASE_DIR, "src")
 CHANNELS_FILE = os.path.join(SRC_PATH, "channels.txt")
 ID_FILE = os.path.join(SRC_PATH, "id.json")
 
+
+def build_ytdl_opts(extra_opts=None):
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    cookies_file = os.getenv(
+        "SHORTFORM_YTDLP_COOKIES",
+        os.path.join(BASE_DIR, "cookies.txt"),
+    )
+    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome")
+
+    if os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
+    elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
+        opts["cookiesfrombrowser"] = (cookies_browser,)
+
+    if extra_opts:
+        opts.update(extra_opts)
+
+    return opts
+
 def run_video_fetch():
     # Start time for performance measurement
     start = time.time()
@@ -16,13 +39,11 @@ def run_video_fetch():
     # Function to get latest video URL for a given channel using yt-dlp
     def get_latest_video(channel_url):
         # yt-dlp options to simulate extraction without downloading
-        ydl_opts = {
+        ydl_opts = build_ytdl_opts({
             'extract_flat': False, # Ensure we get full metadata (like views)
             'playlist_items': '1', # Grab only the most recent video
-            'quiet': True,         # Suppress console output
-            'no_warnings': True,
             'simulate': True       # Do not download the video
-        }
+        })
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

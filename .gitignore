@@ -18,4 +18,6 @@ src/executed_id.json
 
 client_secrets.json
 oauth2.json
+cookies.txt
+youtube_cookies.txt
 .env
