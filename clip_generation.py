@@ -274,15 +274,14 @@ def load_face_cascades():
     return cascades
 
 
-def detect_face_center_x(frame, face_cascades):
+def detect_faces(frame, face_cascades):
     if not face_cascades:
-        return None
+        return []
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     frame_width = gray.shape[1]
-    best_face = None
-    best_area = 0
+    faces = []
 
     for cascade in face_cascades:
         detections = cascade.detectMultiScale(
@@ -293,11 +292,14 @@ def detect_face_center_x(frame, face_cascades):
         )
 
         for x, y, w, h in detections:
-            area = w * h
-
-            if area > best_area:
-                best_area = area
-                best_face = (x, y, w, h)
+            faces.append({
+                "x": float(x),
+                "y": float(y),
+                "w": float(w),
+                "h": float(h),
+                "center_x": float(x + w / 2),
+                "area": float(w * h),
+            })
 
         flipped = cv2.flip(gray, 1)
         flipped_detections = cascade.detectMultiScale(
@@ -308,17 +310,58 @@ def detect_face_center_x(frame, face_cascades):
         )
 
         for x, y, w, h in flipped_detections:
-            area = w * h
+            real_x = frame_width - x - w
+            faces.append({
+                "x": float(real_x),
+                "y": float(y),
+                "w": float(w),
+                "h": float(h),
+                "center_x": float(real_x + w / 2),
+                "area": float(w * h),
+            })
 
-            if area > best_area:
-                best_area = area
-                best_face = (frame_width - x - w, y, w, h)
+    deduped_faces = []
 
-    if best_face is None:
-        return None
+    for face in sorted(faces, key=lambda item: item["area"], reverse=True):
+        duplicate = any(
+            abs(face["center_x"] - existing["center_x"]) < max(face["w"], existing["w"]) * 0.35
+            and abs(face["y"] - existing["y"]) < max(face["h"], existing["h"]) * 0.35
+            for existing in deduped_faces
+        )
 
-    x, _, w, _ = best_face
-    return x + w / 2
+        if not duplicate:
+            deduped_faces.append(face)
+
+    return deduped_faces
+
+
+def score_face_motion(current_gray, previous_gray, face):
+    if previous_gray is None or current_gray is None:
+        return 0.0
+
+    height, width = current_gray.shape[:2]
+    x1 = max(0, int(face["x"] + face["w"] * 0.18))
+    x2 = min(width, int(face["x"] + face["w"] * 0.82))
+    y1 = max(0, int(face["y"] + face["h"] * 0.48))
+    y2 = min(height, int(face["y"] + face["h"] * 0.92))
+
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+
+    current_roi = current_gray[y1:y2, x1:x2]
+    previous_roi = previous_gray[y1:y2, x1:x2]
+
+    if current_roi.shape != previous_roi.shape or current_roi.size == 0:
+        return 0.0
+
+    return float(np.mean(cv2.absdiff(current_roi, previous_roi)))
+
+
+def clamp_center_x(center_x, resized_w, output_width):
+    if resized_w >= output_width:
+        return max(output_width / 2, min(center_x, resized_w - output_width / 2))
+
+    return resized_w / 2
 
 
 def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
@@ -356,33 +399,37 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
         raise RuntimeError(f"OpenCV could not create output video: {temp_tracked_avi}")
 
     camera_center_x = None
-    target_center_x = None
-    locked_face_center_x = None
-    pending_face_center_x = None
-    pending_face_hits = 0
+    locked_speaker_center_x = None
+    pending_speaker_center_x = None
+    pending_speaker_hits = 0
+    offcenter_hits = 0
     fallback_person_center_x = None
     frame_count = 0
     detection_checks = 0
     face_detection_hits = 0
     person_detection_hits = 0
     target_switches = 0
+    speaker_switches = 0
+    offcenter_reframes = 0
     previous_detected_source = None
+    previous_detection_gray = None
     camera_positions = []
 
     face_cascades = load_face_cascades()
 
-    detection_interval_seconds = 0.75
+    detection_interval_seconds = 0.35
     skip_frames = max(1, int(round(fps * detection_interval_seconds)))
     detection_max_height = 640
     min_person_confidence = 0.35
 
-    # Tuned for interviews: keep the face steady and avoid body-driven drift.
-    face_dead_zone_px = int(output_width * 0.12)
+    # Interview framing: hold a locked shot, then switch quickly when needed.
+    material_offcenter_px = int(output_width * 0.24)
     fallback_dead_zone_px = int(output_width * 0.28)
-    face_relock_threshold_px = int(output_width * 0.24)
-    face_lock_min_hits = 2
-    smoothing_factor = 0.018
-    max_center_move_per_frame = max(4, int(output_width * 0.005))
+    speaker_match_px = int(output_width * 0.26)
+    speaker_switch_px = int(output_width * 0.32)
+    switch_min_hits = 2
+    offcenter_min_hits = 4
+    motion_switch_margin = 3.0
 
     written_frames = 0
 
@@ -407,12 +454,12 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                 interpolation=cv2.INTER_AREA,
             )
 
-            detected_center_x = None
+            requested_center_x = None
             detected_source = None
+            force_recenter = False
 
             if camera_center_x is None:
                 camera_center_x = resized_w / 2
-                target_center_x = camera_center_x
 
             if resized_w >= output_width and frame_count % skip_frames == 0:
                 detection_checks += 1
@@ -428,64 +475,109 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                 else:
                     detection_frame = frame_resized
 
-                face_center_x = detect_face_center_x(detection_frame, face_cascades)
+                detection_gray = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2GRAY)
+                faces = detect_faces(detection_frame, face_cascades)
 
-                if face_center_x is not None:
+                if faces:
                     face_detection_hits += 1
-                    raw_face_center_x = face_center_x / detection_scale
 
-                    if locked_face_center_x is None:
-                        if pending_face_center_x is None:
-                            pending_face_center_x = raw_face_center_x
-                            pending_face_hits = 1
-                        elif abs(raw_face_center_x - pending_face_center_x) <= face_relock_threshold_px:
-                            pending_face_center_x = (
-                                pending_face_center_x * 0.65
-                                + raw_face_center_x * 0.35
-                            )
-                            pending_face_hits += 1
-                        else:
-                            pending_face_center_x = raw_face_center_x
-                            pending_face_hits = 1
+                    for face in faces:
+                        face["motion_score"] = score_face_motion(
+                            detection_gray,
+                            previous_detection_gray,
+                            face,
+                        )
+                        face["scaled_center_x"] = face["center_x"] / detection_scale
 
-                        if pending_face_hits >= face_lock_min_hits:
-                            locked_face_center_x = pending_face_center_x
-                            detected_center_x = locked_face_center_x
-                            detected_source = "face"
+                    if len(faces) == 1:
+                        selected_face = faces[0]
                     else:
-                        face_drift_from_lock = abs(raw_face_center_x - locked_face_center_x)
-
-                        if face_drift_from_lock <= face_relock_threshold_px:
-                            locked_face_center_x = (
-                                locked_face_center_x * 0.88
-                                + raw_face_center_x * 0.12
+                        if locked_speaker_center_x is not None:
+                            current_face = min(
+                                faces,
+                                key=lambda item: abs(item["scaled_center_x"] - locked_speaker_center_x),
                             )
-                            pending_face_center_x = None
-                            pending_face_hits = 0
-                            detected_center_x = locked_face_center_x
-                            detected_source = "face"
                         else:
-                            if pending_face_center_x is None:
-                                pending_face_center_x = raw_face_center_x
-                                pending_face_hits = 1
-                            elif abs(raw_face_center_x - pending_face_center_x) <= face_relock_threshold_px:
-                                pending_face_center_x = (
-                                    pending_face_center_x * 0.70
-                                    + raw_face_center_x * 0.30
+                            current_face = None
+
+                        motion_sorted = sorted(
+                            faces,
+                            key=lambda item: (
+                                item["motion_score"],
+                                item["area"],
+                            ),
+                            reverse=True,
+                        )
+                        selected_face = motion_sorted[0]
+
+                        if current_face is not None:
+                            current_motion = current_face["motion_score"]
+                            selected_motion = selected_face["motion_score"]
+                            selected_is_different_speaker = (
+                                abs(selected_face["scaled_center_x"] - locked_speaker_center_x)
+                                > speaker_switch_px
+                            )
+
+                            if (
+                                not selected_is_different_speaker
+                                or selected_motion < current_motion + motion_switch_margin
+                            ):
+                                selected_face = current_face
+
+                    selected_center_x = selected_face["scaled_center_x"]
+
+                    if locked_speaker_center_x is None:
+                        locked_speaker_center_x = selected_center_x
+                        requested_center_x = selected_center_x
+                        detected_source = "face"
+                        force_recenter = True
+                    else:
+                        speaker_delta = abs(selected_center_x - locked_speaker_center_x)
+
+                        if speaker_delta > speaker_switch_px and len(faces) > 1:
+                            if (
+                                pending_speaker_center_x is not None
+                                and abs(selected_center_x - pending_speaker_center_x) <= speaker_match_px
+                            ):
+                                pending_speaker_hits += 1
+                                pending_speaker_center_x = (
+                                    pending_speaker_center_x * 0.55
+                                    + selected_center_x * 0.45
                                 )
-                                pending_face_hits += 1
                             else:
-                                pending_face_center_x = raw_face_center_x
-                                pending_face_hits = 1
+                                pending_speaker_center_x = selected_center_x
+                                pending_speaker_hits = 1
 
-                            if pending_face_hits >= face_lock_min_hits + 2:
-                                locked_face_center_x = pending_face_center_x
-                                detected_center_x = locked_face_center_x
+                            if pending_speaker_hits >= switch_min_hits:
+                                locked_speaker_center_x = pending_speaker_center_x
+                                requested_center_x = locked_speaker_center_x
                                 detected_source = "face"
-                                pending_face_center_x = None
-                                pending_face_hits = 0
+                                force_recenter = True
+                                target_switches += 1
+                                speaker_switches += 1
+                                pending_speaker_center_x = None
+                                pending_speaker_hits = 0
+                        else:
+                            pending_speaker_center_x = None
+                            pending_speaker_hits = 0
+                            face_offset = abs(selected_center_x - camera_center_x)
 
-                elif locked_face_center_x is None:
+                            if face_offset > material_offcenter_px:
+                                offcenter_hits += 1
+                            else:
+                                offcenter_hits = 0
+
+                            if offcenter_hits >= offcenter_min_hits:
+                                locked_speaker_center_x = selected_center_x
+                                requested_center_x = locked_speaker_center_x
+                                detected_source = "face"
+                                force_recenter = True
+                                offcenter_reframes += 1
+                                offcenter_hits = 0
+
+                    previous_detection_gray = detection_gray
+
+                elif locked_speaker_center_x is None:
                     results = model.predict(
                         detection_frame,
                         verbose=False,
@@ -527,49 +619,22 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                         if fallback_person_center_x is None:
                             fallback_person_center_x = raw_person_center_x
 
-                        detected_center_x = fallback_person_center_x
+                        requested_center_x = fallback_person_center_x
                         detected_source = "person"
-                else:
-                    # Once the face is locked, hold the camera through brief face
-                    # detection misses instead of chasing shoulders/body boxes.
-                    detected_center_x = locked_face_center_x
-                    detected_source = "face"
 
-            if detected_center_x is not None:
+            if requested_center_x is not None:
                 if previous_detected_source and previous_detected_source != detected_source:
                     target_switches += 1
 
                 previous_detected_source = detected_source
+                requested_center_x = clamp_center_x(requested_center_x, resized_w, output_width)
 
-                drift = abs(detected_center_x - camera_center_x)
-                dead_zone_px = face_dead_zone_px if detected_source == "face" else fallback_dead_zone_px
+                if force_recenter:
+                    camera_center_x = requested_center_x
+                elif abs(requested_center_x - camera_center_x) > fallback_dead_zone_px:
+                    camera_center_x = requested_center_x
 
-                if drift > dead_zone_px:
-                    target_center_x = detected_center_x
-
-            if target_center_x is None:
-                target_center_x = resized_w / 2
-
-            if resized_w >= output_width:
-                target_center_x = max(
-                    output_width / 2,
-                    min(target_center_x, resized_w - output_width / 2),
-                )
-            else:
-                target_center_x = resized_w / 2
-
-            if camera_center_x is None:
-                camera_center_x = target_center_x
-            else:
-                center_delta = target_center_x - camera_center_x
-
-                if abs(center_delta) > 1:
-                    center_step = center_delta * smoothing_factor
-                    center_step = max(
-                        -max_center_move_per_frame,
-                        min(center_step, max_center_move_per_frame),
-                    )
-                    camera_center_x += center_step
+            camera_center_x = clamp_center_x(camera_center_x, resized_w, output_width)
 
             camera_positions.append(float(camera_center_x))
 
@@ -637,6 +702,8 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
         "avg_camera_move_px": float(avg_camera_move),
         "max_camera_jump_px": float(max_camera_jump),
         "target_switches": int(target_switches),
+        "speaker_switches": int(speaker_switches),
+        "offcenter_reframes": int(offcenter_reframes),
         "framing_score": float(framing_score),
     }
 
@@ -750,7 +817,12 @@ def build_render_qc(video_path, crop_stats, expected_duration):
     if crop_stats.get("framing_score", 1.0) < 0.55:
         flags.append("low framing confidence")
 
-    if crop_stats.get("max_camera_jump_px", 0.0) > 22:
+    intentional_reframes = (
+        crop_stats.get("speaker_switches", 0)
+        + crop_stats.get("offcenter_reframes", 0)
+    )
+
+    if crop_stats.get("max_camera_jump_px", 0.0) > 22 and intentional_reframes == 0:
         flags.append("noticeable camera jump")
 
     return {
