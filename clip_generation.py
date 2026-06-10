@@ -3,12 +3,13 @@ FFMPEG_BIN = r"C:\ffmpeg\bin"
 if os.path.isdir(FFMPEG_BIN) and hasattr(os, "add_dll_directory"):
     os.add_dll_directory(FFMPEG_BIN)
 
+import csv
 import json
 import subprocess
 import time
 import re
 import wave
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 import yt_dlp
 import cv2
 import numpy as np
@@ -29,8 +30,9 @@ videos_path = os.path.join(base_dir, "output", "temp", "videos")
 audio_path = os.path.join(base_dir, "output", "temp", "audios")
 transcriptions_path = os.path.join(base_dir, "output", "temp", "transcripts")
 clips_path = os.path.join(base_dir, "output", "clips")
+metadata_path = os.path.join(base_dir, "output", "metadata")
 
-for path in [videos_path, audio_path, transcriptions_path, clips_path]:
+for path in [videos_path, audio_path, transcriptions_path, clips_path, metadata_path]:
     os.makedirs(path, exist_ok=True)
 
 # Keep this True while tuning reframing so older choppy clips are replaced.
@@ -44,7 +46,8 @@ CANDIDATE_STRIDE_SECONDS = 5
 MIN_SELECTED_CLIP_SCORE = 0.25
 MIN_WORDS_PER_CANDIDATE = 22
 MIN_CLIP_SPACING_SECONDS = 2
-SCORING_MODEL_VERSION = "2026-06-10-v4"
+MAX_TOPIC_SIMILARITY = 0.58
+SCORING_MODEL_VERSION = "2026-06-10-v5"
 
 
 # =========================
@@ -54,6 +57,10 @@ SCORING_MODEL_VERSION = "2026-06-10-v4"
 FFMPEG_EXE = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 if not os.path.exists(FFMPEG_EXE):
     FFMPEG_EXE = "ffmpeg"
+
+FFPROBE_EXE = os.path.join(FFMPEG_BIN, "ffprobe.exe")
+if not os.path.exists(FFPROBE_EXE):
+    FFPROBE_EXE = "ffprobe"
 
 
 # =========================
@@ -333,6 +340,12 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
     pending_face_hits = 0
     fallback_person_center_x = None
     frame_count = 0
+    detection_checks = 0
+    face_detection_hits = 0
+    person_detection_hits = 0
+    target_switches = 0
+    previous_detected_source = None
+    camera_positions = []
 
     face_cascades = load_face_cascades()
 
@@ -380,6 +393,7 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                 target_center_x = camera_center_x
 
             if resized_w >= output_width and frame_count % skip_frames == 0:
+                detection_checks += 1
                 detection_scale = min(1.0, detection_max_height / output_height)
                 detection_w = max(1, int(resized_w * detection_scale))
 
@@ -395,6 +409,7 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                 face_center_x = detect_face_center_x(detection_frame, face_cascades)
 
                 if face_center_x is not None:
+                    face_detection_hits += 1
                     raw_face_center_x = face_center_x / detection_scale
 
                     if locked_face_center_x is None:
@@ -482,6 +497,7 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                                     largest_box = [x1, y1, x2, y2]
 
                     if largest_box is not None:
+                        person_detection_hits += 1
                         raw_person_center_x = (
                             (largest_box[0] + largest_box[2]) / 2
                         ) / detection_scale
@@ -498,6 +514,11 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                     detected_source = "face"
 
             if detected_center_x is not None:
+                if previous_detected_source and previous_detected_source != detected_source:
+                    target_switches += 1
+
+                previous_detected_source = detected_source
+
                 drift = abs(detected_center_x - camera_center_x)
                 dead_zone_px = face_dead_zone_px if detected_source == "face" else fallback_dead_zone_px
 
@@ -527,6 +548,8 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                         min(center_step, max_center_move_per_frame),
                     )
                     camera_center_x += center_step
+
+            camera_positions.append(float(camera_center_x))
 
             # Calculate crop window
             start_x = int(camera_center_x - output_width / 2)
@@ -570,6 +593,152 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
 
     assert_file_exists(temp_tracked_avi, "Tracked intermediate video")
 
+    if len(camera_positions) > 1:
+        camera_deltas = np.abs(np.diff(np.asarray(camera_positions, dtype=np.float32)))
+        avg_camera_move = float(np.mean(camera_deltas))
+        max_camera_jump = float(np.max(camera_deltas))
+    else:
+        avg_camera_move = 0.0
+        max_camera_jump = 0.0
+
+    face_detection_rate = face_detection_hits / detection_checks if detection_checks else 0.0
+    person_detection_rate = person_detection_hits / detection_checks if detection_checks else 0.0
+    camera_stability = max(0.0, min(1.0, 1.0 - (avg_camera_move / 7.0)))
+    detection_quality = max(face_detection_rate, person_detection_rate * 0.65)
+    framing_score = max(0.0, min(1.0, 0.68 * camera_stability + 0.32 * detection_quality))
+
+    return {
+        "frames_written": int(written_frames),
+        "detection_checks": int(detection_checks),
+        "face_detection_rate": float(face_detection_rate),
+        "person_detection_rate": float(person_detection_rate),
+        "avg_camera_move_px": float(avg_camera_move),
+        "max_camera_jump_px": float(max_camera_jump),
+        "target_switches": int(target_switches),
+        "framing_score": float(framing_score),
+    }
+
+
+def probe_video_file(video_path):
+    metadata = {
+        "duration": 0.0,
+        "width": 0,
+        "height": 0,
+        "fps": 0.0,
+        "has_audio": False,
+    }
+
+    cmd = [
+        FFPROBE_EXE,
+        "-v", "error",
+        "-print_format", "json",
+        "-show_streams",
+        "-show_format",
+        video_path,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        if result.returncode != 0:
+            return metadata
+
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        return metadata
+
+    format_info = payload.get("format", {})
+    metadata["duration"] = float(format_info.get("duration") or 0.0)
+
+    for stream in payload.get("streams", []):
+        codec_type = stream.get("codec_type")
+
+        if codec_type == "video" and not metadata["width"]:
+            metadata["width"] = int(stream.get("width") or 0)
+            metadata["height"] = int(stream.get("height") or 0)
+            rate = stream.get("avg_frame_rate") or stream.get("r_frame_rate") or "0/1"
+
+            try:
+                numerator, denominator = rate.split("/")
+                metadata["fps"] = float(numerator) / max(1.0, float(denominator))
+            except Exception:
+                metadata["fps"] = 0.0
+
+        if codec_type == "audio":
+            metadata["has_audio"] = True
+
+    return metadata
+
+
+def estimate_black_frame_ratio(video_path, max_samples=18):
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        return 1.0
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    samples = []
+
+    if frame_count <= 0:
+        cap.release()
+        return 1.0
+
+    for frame_index in np.linspace(0, max(0, frame_count - 1), num=min(max_samples, frame_count), dtype=int):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+        ret, frame = cap.read()
+
+        if not ret or frame is None:
+            continue
+
+        samples.append(float(np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))))
+
+    cap.release()
+
+    if not samples:
+        return 1.0
+
+    black_samples = sum(1 for value in samples if value < 8.0)
+    return black_samples / len(samples)
+
+
+def build_render_qc(video_path, crop_stats, expected_duration):
+    probe = probe_video_file(video_path)
+    black_frame_ratio = estimate_black_frame_ratio(video_path)
+    flags = []
+
+    if probe["width"] != 1080 or probe["height"] != 1920:
+        flags.append("unexpected resolution")
+
+    if not probe["has_audio"]:
+        flags.append("missing audio")
+
+    if expected_duration and abs(probe["duration"] - expected_duration) > 1.25:
+        flags.append("duration drift")
+
+    if black_frame_ratio > 0.08:
+        flags.append("possible black frames")
+
+    if crop_stats.get("framing_score", 1.0) < 0.55:
+        flags.append("low framing confidence")
+
+    if crop_stats.get("max_camera_jump_px", 0.0) > 22:
+        flags.append("noticeable camera jump")
+
+    return {
+        **probe,
+        "black_frame_ratio": float(black_frame_ratio),
+        "crop": crop_stats,
+        "flags": flags,
+        "passed": not flags,
+    }
+
 
 # =========================
 # Viral clip scoring
@@ -586,8 +755,17 @@ class CandidateClip:
     comment_score: float
     pacing_score: float
     duration_score: float
+    boundary_score: float
+    diversity_score: float
     rank_signals: dict
     transcript_excerpt: str
+    hook_reason: str = ""
+    topic_fingerprint: list = field(default_factory=list)
+    suggested_title: str = ""
+    suggested_caption: str = ""
+    hashtags: list = field(default_factory=list)
+    render_qc: dict = field(default_factory=dict)
+    output_file: str = ""
 
 
 VIRAL_KEYWORD_WEIGHTS = {
@@ -755,6 +933,47 @@ COMMENT_TRIGGER_WORDS = {
     "freedom", "problem", "truth", "reality", "angry", "offended",
 }
 
+WEAK_START_WORDS = {
+    "and", "but", "so", "because", "then", "that", "this", "those", "these",
+    "they", "them", "their", "he", "she", "his", "her", "him", "it", "its",
+    "we", "you", "i", "there", "which", "who", "when", "where",
+}
+
+FILLER_OPENERS = {
+    "yeah", "yes", "no", "okay", "well", "like", "um", "uh", "right",
+    "actually", "basically", "literally", "honestly",
+}
+
+STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "then", "than", "that",
+    "this", "these", "those", "is", "are", "was", "were", "be", "been",
+    "being", "to", "of", "for", "with", "in", "on", "at", "by", "from",
+    "as", "it", "its", "i", "you", "we", "they", "he", "she", "them",
+    "him", "her", "my", "your", "our", "their", "me", "us", "do", "does",
+    "did", "have", "has", "had", "not", "so", "just", "like", "know",
+    "think", "really", "right", "yeah", "well", "what", "when", "where",
+    "why", "how",
+}
+
+HASHTAG_KEYWORDS = {
+    "money": "#money",
+    "debt": "#debt",
+    "credit": "#credit",
+    "college": "#college",
+    "business": "#business",
+    "ai": "#ai",
+    "crypto": "#crypto",
+    "bitcoin": "#bitcoin",
+    "government": "#politics",
+    "politics": "#politics",
+    "health": "#health",
+    "dating": "#dating",
+    "marriage": "#relationships",
+    "crime": "#truecrime",
+    "job": "#career",
+    "jobs": "#career",
+}
+
 
 def normalize_array(values):
     values = np.asarray(values, dtype=np.float32)
@@ -776,6 +995,329 @@ def saturating_score(value, scale):
         return 0.0
 
     return float(1 - np.exp(-value / scale))
+
+
+def words_from_text(text):
+    return re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", text.lower())
+
+
+def first_spoken_word(text):
+    words = words_from_text(text)
+    return words[0] if words else ""
+
+
+def compact_text(text, max_chars=90):
+    text = re.sub(r"\s+", " ", text).strip(" -._")
+
+    if len(text) <= max_chars:
+        return text
+
+    shortened = text[:max_chars].rsplit(" ", 1)[0].strip(" -._")
+    return shortened or text[:max_chars].strip(" -._")
+
+
+def extract_topic_fingerprint(text, max_terms=10):
+    words = words_from_text(text)
+    weighted_terms = {}
+
+    for word in words:
+        if word in STOPWORDS or len(word) < 3:
+            continue
+
+        weight = 1.0
+
+        if word in TOPIC_KEYWORDS:
+            weight += 2.0
+        if word in EMOTION_KEYWORDS or word in CONFLICT_KEYWORDS:
+            weight += 1.4
+        if word in COMMENT_TRIGGER_WORDS:
+            weight += 0.8
+
+        weighted_terms[word] = weighted_terms.get(word, 0.0) + weight
+
+    for phrase, weight in VIRAL_KEYWORD_WEIGHTS.items():
+        if " " in phrase and phrase in text.lower():
+            weighted_terms[phrase.replace(" ", "_")] = weighted_terms.get(phrase.replace(" ", "_"), 0.0) + weight
+
+    return [
+        term
+        for term, _ in sorted(weighted_terms.items(), key=lambda item: item[1], reverse=True)[:max_terms]
+    ]
+
+
+def topic_similarity(left_terms, right_terms):
+    left = set(left_terms)
+    right = set(right_terms)
+
+    if not left or not right:
+        return 0.0
+
+    return len(left & right) / len(left | right)
+
+
+def explain_hook(text, text_details, opening_score, audio_score):
+    normalized_text = text.lower()
+
+    for pattern in HOOK_PATTERNS:
+        match = re.search(pattern, normalized_text)
+
+        if match:
+            return f"hook phrase: {match.group(0)}"
+
+    if text.count("?"):
+        return "question creates curiosity"
+
+    for word in words_from_text(text):
+        if word in CONFLICT_KEYWORDS:
+            return f"conflict word: {word}"
+        if word in EMOTION_KEYWORDS:
+            return f"emotion word: {word}"
+        if word in TOPIC_KEYWORDS:
+            return f"mainstream topic: {word}"
+
+    if text_details.get("specificity_score", 0) >= 0.45:
+        return "specific numbers or money"
+
+    if opening_score >= 0.65:
+        return "strong opening"
+
+    if audio_score >= 0.65:
+        return "high audio energy"
+
+    return "balanced interest signals"
+
+
+def score_boundary_quality(matching_segments, clip_start, clip_end):
+    if not matching_segments:
+        return 0.0, ["no transcript segments"]
+
+    flags = []
+    score = 1.0
+    opening_word = first_spoken_word(matching_segments[0]["text"])
+    closing_text = matching_segments[-1]["text"].strip()
+
+    if opening_word in WEAK_START_WORDS:
+        score -= 0.22
+        flags.append(f"context opener: {opening_word}")
+
+    if opening_word in FILLER_OPENERS:
+        score -= 0.12
+        flags.append(f"soft opener: {opening_word}")
+
+    if closing_text and closing_text[-1] not in ".?!":
+        score -= 0.10
+        flags.append("ending may be mid-thought")
+
+    duration = clip_end - clip_start
+
+    if duration > 56:
+        score -= 0.08
+        flags.append("near max duration")
+
+    if duration < 34:
+        score -= 0.08
+        flags.append("short context window")
+
+    return max(0.0, min(1.0, score)), flags
+
+
+def naturalize_clip_window(segments, provisional_start, duration, total_duration):
+    window_end = min(provisional_start + duration, total_duration)
+    window_segments = [
+        segment
+        for segment in segments
+        if segment["end"] > provisional_start and segment["start"] < window_end
+    ]
+
+    if not window_segments:
+        return None
+
+    first_segment = next(
+        (
+            segment
+            for segment in window_segments
+            if segment["end"] > provisional_start + 0.25 and segment["text"].strip()
+        ),
+        window_segments[0],
+    )
+    first_index = segments.index(first_segment)
+    opening_word = first_spoken_word(first_segment["text"])
+
+    if opening_word in WEAK_START_WORDS or opening_word in FILLER_OPENERS:
+        if first_index > 0:
+            previous_segment = segments[first_index - 1]
+            gap = float(first_segment["start"]) - float(previous_segment["end"])
+
+            if gap <= 1.8 and float(first_segment["start"]) - float(previous_segment["start"]) <= 9:
+                first_segment = previous_segment
+
+    clip_start = max(0.0, float(first_segment["start"]) - 0.22)
+    clip_end_limit = min(clip_start + duration, total_duration)
+    matching_segments = [
+        segment
+        for segment in segments
+        if segment["end"] > clip_start and segment["start"] < clip_end_limit
+    ]
+
+    completed_segments = [
+        segment
+        for segment in matching_segments
+        if segment["end"] <= clip_end_limit
+    ]
+
+    if completed_segments:
+        clip_end = min(total_duration, float(completed_segments[-1]["end"]) + 0.24)
+    else:
+        clip_end = clip_end_limit
+
+    matching_segments = [
+        segment
+        for segment in matching_segments
+        if segment["start"] < clip_end and segment["end"] <= clip_end + 0.05
+    ]
+
+    if clip_end - clip_start > MAX_CLIP_DURATION:
+        clip_end = clip_start + MAX_CLIP_DURATION
+        matching_segments = [
+            segment
+            for segment in matching_segments
+            if segment["end"] <= clip_end + 0.05
+        ]
+
+    return clip_start, clip_end, matching_segments
+
+
+def build_suggested_copy(text, hook_reason, topic_terms):
+    sentences = [
+        compact_text(sentence, 78)
+        for sentence in re.split(r"(?<=[.?!])\s+", text)
+        if len(sentence.strip()) >= 18
+    ]
+
+    title = ""
+
+    for sentence in sentences[:5]:
+        sentence_terms = set(words_from_text(sentence))
+        signal_terms = CONFLICT_KEYWORDS | EMOTION_KEYWORDS | TOPIC_KEYWORDS
+
+        if "?" in sentence or bool(sentence_terms & signal_terms):
+            title = sentence
+            break
+
+    if not title:
+        title = sentences[0] if sentences else compact_text(text, 78)
+
+    if title and title[-1] not in ".?!":
+        title = title.rstrip(",;:")
+
+    hook_label = hook_reason.replace("hook phrase: ", "").replace("mainstream topic: ", "")
+    caption = compact_text(f"{title} ({hook_label})", 120)
+
+    hashtags = []
+    for term in topic_terms:
+        normalized = term.replace("_", " ")
+        tag = HASHTAG_KEYWORDS.get(normalized) or HASHTAG_KEYWORDS.get(normalized.split(" ")[0])
+
+        if tag and tag not in hashtags:
+            hashtags.append(tag)
+
+        if len(hashtags) >= 4:
+            break
+
+    for fallback in ["#podcast", "#shorts"]:
+        if fallback not in hashtags:
+            hashtags.append(fallback)
+
+    return title, caption, hashtags[:5]
+
+
+def candidate_to_dict(candidate):
+    return asdict(candidate)
+
+
+def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
+    review_json = os.path.join(metadata_path, f"{cleaned_title}_clip_review.json")
+    review_csv = os.path.join(metadata_path, f"{cleaned_title}_clip_review.csv")
+
+    selected_payload = [candidate_to_dict(clip) for clip in selected_clips]
+    top_candidate_payload = []
+
+    if candidates is not None:
+        top_candidate_payload = [
+            candidate_to_dict(clip)
+            for clip in sorted(candidates, key=lambda item: item.score, reverse=True)[:50]
+        ]
+    elif os.path.exists(review_json) and os.path.getsize(review_json) > 0:
+        try:
+            with open(review_json, "r", encoding="utf-8") as f:
+                top_candidate_payload = json.load(f).get("top_candidates", [])
+        except Exception:
+            top_candidate_payload = []
+
+    with open(review_json, "w", encoding="utf-8") as f:
+        json.dump({
+            "scoring_model_version": SCORING_MODEL_VERSION,
+            "selected": selected_payload,
+            "top_candidates": top_candidate_payload,
+        }, f, indent=4)
+
+    columns = [
+        "clip_number",
+        "start_time",
+        "end_time",
+        "duration",
+        "score",
+        "text_score",
+        "audio_score",
+        "opening_score",
+        "comment_score",
+        "pacing_score",
+        "duration_score",
+        "boundary_score",
+        "diversity_score",
+        "hook_reason",
+        "topic_fingerprint",
+        "suggested_title",
+        "suggested_caption",
+        "hashtags",
+        "output_file",
+        "qc_passed",
+        "qc_flags",
+        "transcript_excerpt",
+    ]
+
+    with open(review_csv, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+
+        for index, clip in enumerate(selected_clips, start=1):
+            qc_flags = clip.render_qc.get("flags", []) if clip.render_qc else []
+            writer.writerow({
+                "clip_number": index,
+                "start_time": f"{clip.start_time:.2f}",
+                "end_time": f"{clip.end_time:.2f}",
+                "duration": f"{clip.end_time - clip.start_time:.2f}",
+                "score": f"{clip.score:.4f}",
+                "text_score": f"{clip.text_score:.4f}",
+                "audio_score": f"{clip.audio_score:.4f}",
+                "opening_score": f"{clip.opening_score:.4f}",
+                "comment_score": f"{clip.comment_score:.4f}",
+                "pacing_score": f"{clip.pacing_score:.4f}",
+                "duration_score": f"{clip.duration_score:.4f}",
+                "boundary_score": f"{clip.boundary_score:.4f}",
+                "diversity_score": f"{clip.diversity_score:.4f}",
+                "hook_reason": clip.hook_reason,
+                "topic_fingerprint": ", ".join(clip.topic_fingerprint),
+                "suggested_title": clip.suggested_title,
+                "suggested_caption": clip.suggested_caption,
+                "hashtags": " ".join(clip.hashtags),
+                "output_file": clip.output_file,
+                "qc_passed": clip.render_qc.get("passed", "") if clip.render_qc else "",
+                "qc_flags": ", ".join(qc_flags),
+                "transcript_excerpt": clip.transcript_excerpt,
+            })
+
+    return review_json, review_csv
 
 
 def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en"):
@@ -1137,49 +1679,17 @@ def build_candidate_clips(transcript_payload, audio_payload):
 
     for start in range(0, max(1, total_duration - MIN_CLIP_DURATION + 1), CANDIDATE_STRIDE_SECONDS):
         for duration in CANDIDATE_CLIP_DURATIONS:
-            provisional_end = min(start + duration, total_duration)
+            naturalized = naturalize_clip_window(
+                segments=segments,
+                provisional_start=start,
+                duration=duration,
+                total_duration=total_duration,
+            )
 
-            window_segments = [
-                segment
-                for segment in segments
-                if segment["end"] > start and segment["start"] < provisional_end
-            ]
-
-            if not window_segments:
+            if naturalized is None:
                 continue
 
-            first_segment = next(
-                (
-                    segment
-                    for segment in window_segments
-                    if segment["end"] > start + 0.25 and segment["text"].strip()
-                ),
-                window_segments[0],
-            )
-            clip_start = max(0.0, float(first_segment["start"]) - 0.18)
-            clip_end_limit = min(clip_start + duration, total_duration)
-            matching_segments = [
-                segment
-                for segment in segments
-                if segment["end"] > clip_start and segment["start"] < clip_end_limit
-            ]
-
-            completed_segments = [
-                segment
-                for segment in matching_segments
-                if segment["end"] <= clip_end_limit
-            ]
-
-            if completed_segments:
-                clip_end = min(total_duration, float(completed_segments[-1]["end"]) + 0.22)
-            else:
-                clip_end = clip_end_limit
-
-            matching_segments = [
-                segment
-                for segment in matching_segments
-                if segment["start"] < clip_end and segment["end"] <= clip_end + 0.05
-            ]
+            clip_start, clip_end, matching_segments = naturalized
             actual_duration = clip_end - clip_start
 
             if actual_duration < MIN_CLIP_DURATION or not matching_segments:
@@ -1233,14 +1743,32 @@ def build_candidate_clips(transcript_payload, audio_payload):
             comment_score = score_comment_potential(text)
             pacing_score = score_spoken_pacing(text, actual_duration)
             duration_score = score_duration(actual_duration)
+            boundary_score, boundary_flags = score_boundary_quality(
+                matching_segments=matching_segments,
+                clip_start=clip_start,
+                clip_end=clip_end,
+            )
+            topic_terms = extract_topic_fingerprint(text)
+            hook_reason = explain_hook(
+                text=text,
+                text_details=text_details,
+                opening_score=opening_score,
+                audio_score=audio_score,
+            )
+            suggested_title, suggested_caption, hashtags = build_suggested_copy(
+                text=text,
+                hook_reason=hook_reason,
+                topic_terms=topic_terms,
+            )
 
             score = (
-                0.34 * text_score
-                + 0.27 * audio_score
+                0.30 * text_score
+                + 0.24 * audio_score
                 + 0.17 * opening_score
                 + 0.10 * comment_score
-                + 0.08 * pacing_score
+                + 0.07 * pacing_score
                 + 0.04 * duration_score
+                + 0.08 * boundary_score
             )
 
             candidates.append(CandidateClip(
@@ -1253,8 +1781,18 @@ def build_candidate_clips(transcript_payload, audio_payload):
                 comment_score=float(comment_score),
                 pacing_score=float(pacing_score),
                 duration_score=float(duration_score),
-                rank_signals=text_details,
+                boundary_score=float(boundary_score),
+                diversity_score=1.0,
+                rank_signals={
+                    **text_details,
+                    "boundary_flags": boundary_flags,
+                },
                 transcript_excerpt=text[:260].strip(),
+                hook_reason=hook_reason,
+                topic_fingerprint=topic_terms,
+                suggested_title=suggested_title,
+                suggested_caption=suggested_caption,
+                hashtags=hashtags,
             ))
 
     return candidates
@@ -1274,6 +1812,18 @@ def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO):
         )
 
         if overlaps:
+            continue
+
+        max_topic_overlap = max(
+            (
+                topic_similarity(candidate.topic_fingerprint, clip.topic_fingerprint)
+                for clip in selected
+            ),
+            default=0.0,
+        )
+        candidate.diversity_score = float(1.0 - max_topic_overlap)
+
+        if max_topic_overlap > MAX_TOPIC_SIMILARITY:
             continue
 
         selected.append(candidate)
@@ -1300,23 +1850,30 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en"):
     with open(scoring_filepath, "w", encoding="utf-8") as f:
         json.dump({
             "scoring_model_version": SCORING_MODEL_VERSION,
-            "selected": [clip.__dict__ for clip in clips],
+            "selected": [candidate_to_dict(clip) for clip in clips],
             "top_candidates": [
-                clip.__dict__
+                candidate_to_dict(clip)
                 for clip in sorted(candidates, key=lambda item: item.score, reverse=True)[:25]
             ],
         }, f, indent=4)
 
+    review_json, review_csv = write_clip_review_exports(cleaned_title, clips, candidates)
+
     print(f" -> Viral clip scoring took: {time.time() - start_finding:.2f} seconds")
     print(f" -> Selected {len(clips)} non-overlapping clips\n")
+    print(f" -> Clip review JSON: {review_json}")
+    print(f" -> Clip review CSV: {review_csv}\n")
 
     for index, clip in enumerate(clips, start=1):
         print(
             f"    Clip {index}: {clip.start_time:.1f}s-{clip.end_time:.1f}s "
             f"| score={clip.score:.3f} text={clip.text_score:.3f} "
             f"audio={clip.audio_score:.3f} opening={clip.opening_score:.3f} "
-            f"comment={clip.comment_score:.3f} pace={clip.pacing_score:.3f}"
+            f"comment={clip.comment_score:.3f} boundary={clip.boundary_score:.3f} "
+            f"diversity={clip.diversity_score:.3f}"
         )
+        print(f"        Hook: {clip.hook_reason}")
+        print(f"        Title: {clip.suggested_title}")
 
     if clips:
         print("")
@@ -1427,7 +1984,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en")
             # STEP 2: Smart crop / reframe with OpenCV + YOLO
             start_step2 = time.time()
 
-            smart_crop_to_shorts(
+            crop_stats = smart_crop_to_shorts(
                 temp_subclip=temp_subclip,
                 temp_tracked_avi=temp_tracked_avi,
                 model=model,
@@ -1457,10 +2014,29 @@ def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en")
             ], "FFmpeg audio muxing")
 
             assert_file_exists(final_filename, "Final clip")
+            clip.output_file = os.path.abspath(final_filename)
+            clip.render_qc = build_render_qc(
+                video_path=final_filename,
+                crop_stats=crop_stats,
+                expected_duration=duration,
+            )
 
             print(f" -> Step 3 (FFmpeg Audio Muxing) took: {time.time() - start_step3:.2f} seconds")
 
+            if clip.render_qc.get("passed"):
+                print(
+                    " -> QC passed "
+                    f"(framing={clip.render_qc['crop']['framing_score']:.2f}, "
+                    f"face={clip.render_qc['crop']['face_detection_rate']:.2f})"
+                )
+            else:
+                print(f" -> QC warnings: {', '.join(clip.render_qc.get('flags', []))}")
+
         except Exception as clip_err:
+            clip.render_qc = {
+                "passed": False,
+                "flags": [f"processing failed: {clip_err}"],
+            }
             print(f" -> Failed while processing clip {clip_number}: {clip_err}")
 
         finally:
@@ -1473,6 +2049,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en")
                     pass
 
         print(f" -> Clip {clip_number} finished processing in: {time.time() - start_clip_total:.2f} seconds\n")
+        write_clip_review_exports(cleaned_title, clips)
 
         clip_number += 1
 

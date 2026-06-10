@@ -15,6 +15,10 @@ Version 1 short-form clip generation pipeline.
 - Audio + transcript scoring for high-interest clips.
 - Comment-potential scoring for polarizing or debate-worthy moments.
 - Segment-boundary clip starts/ends to avoid mid-thought cuts.
+- Natural boundary repair when a candidate starts with weak context words.
+- Duplicate-topic avoidance so a batch of clips covers more distinct moments.
+- Render QC for duration, resolution, audio presence, black frames, and framing stability.
+- Review exports in `output/metadata` with score breakdowns, hook reasons, suggested titles, captions, hashtags, and QC flags.
 - Montserrat captions bundled in `assets/fonts`.
 - High-contrast word-timed subtitles with subtle active-word scaling.
 
