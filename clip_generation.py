@@ -105,7 +105,7 @@ def build_ytdl_opts(extra_opts=None):
         "SHORTFORM_YTDLP_COOKIES",
         os.path.join(base_dir, "cookies.txt"),
     )
-    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome")
+    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "")
 
     if os.path.exists(cookies_file):
         opts["cookiefile"] = cookies_file

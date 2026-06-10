@@ -26,7 +26,7 @@ def build_ytdl_opts(extra_opts=None):
         "SHORTFORM_YTDLP_COOKIES",
         os.path.join(BASE_DIR, "cookies.txt"),
     )
-    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome")
+    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "")
 
     if os.path.exists(cookies_file):
         opts["cookiefile"] = cookies_file
@@ -47,8 +47,19 @@ def latest_video_for_channel(channel_url):
     })
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(channel_url, download=False)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
+        except Exception as error:
+            if "Could not copy Chrome cookie database" not in str(error):
+                raise
+
+            print(" -> Chrome cookie access failed; retrying without browser cookies.")
+            retry_opts = dict(ydl_opts)
+            retry_opts.pop("cookiesfrombrowser", None)
+
+            with yt_dlp.YoutubeDL(retry_opts) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
 
         if not info:
             return None
