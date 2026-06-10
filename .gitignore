@@ -8,6 +8,8 @@ venv_*/
 output/
 src/id.json
 src/executed_id.json
+src/themes/*/id.json
+src/themes/*/executed_id.json
 
 *.pt
 *.onnx

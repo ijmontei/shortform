@@ -3,11 +3,15 @@ import json
 import time
 from datetime import datetime
 import yt_dlp
+from theme_config import BASE_DIR, discover_themes, ensure_theme
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_PATH = os.path.join(BASE_DIR, "src")
-CHANNELS_FILE = os.path.join(SRC_PATH, "channels.txt")
-ID_FILE = os.path.join(SRC_PATH, "id.json")
+
+def read_channels(channels_file):
+    if not os.path.exists(channels_file):
+        return []
+
+    with open(channels_file, "r", encoding="utf-8") as file:
+        return [channel.strip() for channel in file.readlines() if channel.strip()]
 
 
 def build_ytdl_opts(extra_opts=None):
@@ -32,9 +36,13 @@ def build_ytdl_opts(extra_opts=None):
 
     return opts
 
-def run_video_fetch():
+def run_video_fetch_for_theme(theme_name):
     # Start time for performance measurement
     start = time.time()
+    theme_paths = ensure_theme(theme_name)
+    channels_file = theme_paths["channels_file"]
+    json_filename = theme_paths["id_file"]
+    theme = theme_paths["theme"]
 
     # Function to get latest video URL for a given channel using yt-dlp
     def get_latest_video(channel_url):
@@ -79,15 +87,12 @@ def run_video_fetch():
             print(f"Error collecting video data for {channel_url}: {e}")
             return None
 
-    os.makedirs(SRC_PATH, exist_ok=True)
+    print(f"=== Fetching latest videos for theme: {theme} ===")
+    channels = read_channels(channels_file)
 
-    # Read YouTube channels from file
-    with open(CHANNELS_FILE, 'r') as file:
-        # Added a check to ignore empty lines
-        channels = [channel.strip() for channel in file.readlines() if channel.strip()]
-
-    # Define the path to the JSON file
-    json_filename = ID_FILE
+    if not channels:
+        print(f"No channels found for theme '{theme}'. Add URLs to {channels_file}")
+        return
 
     # Load existing JSON data
     existing_videos = {}
@@ -117,13 +122,20 @@ def run_video_fetch():
     with open(json_filename, 'w') as json_file:
         json.dump(existing_videos, json_file, indent=4)
 
-    print("Latest videos have been saved to", json_filename)
+    print(f"Latest {theme} videos have been saved to {json_filename}")
 
     # End time for performance measurement
     end = time.time()
     # Calculate execution time
     length = end - start
-    print(f"It took {round(length / 60, 2)} minutes!")
+    print(f"It took {round(length / 60, 2)} minutes!\n")
+
+
+def run_video_fetch(theme=None):
+    themes = [theme] if theme else discover_themes()
+
+    for theme_name in themes:
+        run_video_fetch_for_theme(theme_name)
 
 # Optional block so you can run this script directly
 if __name__ == '__main__':

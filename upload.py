@@ -1,18 +1,34 @@
+import json
 import os
+
+from theme_config import discover_themes, ensure_theme
+
 
 # OAuth 2.0 details
 CLIENT_SECRETS_FILE = "client_secrets.json"
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_PATH = os.path.join(BASE_DIR, "output", "upload")
+CURRENT_THEME = None
+UPLOAD_PATH = None
 MISSING_CLIENT_SECRETS_MESSAGE = """
 WARNING: Please configure OAuth 2.0
 To make this script work, you need to populate the client_secrets.json file.
 """
 
-# Function to get authenticated service
+
+def configure_theme(theme_name):
+    global CURRENT_THEME, UPLOAD_PATH
+
+    theme_paths = ensure_theme(theme_name)
+    CURRENT_THEME = theme_paths["theme"]
+    UPLOAD_PATH = theme_paths["upload_path"]
+    return theme_paths
+
+
+configure_theme(os.getenv("SHORTFORM_THEME", "general"))
+
+
 def get_authenticated_service():
     try:
         from googleapiclient.discovery import build
@@ -25,7 +41,11 @@ def get_authenticated_service():
             "google-api-python-client and oauth2client to enable uploading."
         ) from error
 
-    flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE, scope=YOUTUBE_UPLOAD_SCOPE, message=MISSING_CLIENT_SECRETS_MESSAGE)
+    flow = flow_from_clientsecrets(
+        CLIENT_SECRETS_FILE,
+        scope=YOUTUBE_UPLOAD_SCOPE,
+        message=MISSING_CLIENT_SECRETS_MESSAGE,
+    )
     storage = Storage("oauth2.json")
     credentials = storage.get()
 
@@ -34,9 +54,8 @@ def get_authenticated_service():
 
     return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
 
-""" DEFAULT TO THIS IF THE BELOW FUNCTION DOESNT WORK
-# Function to upload a video to YouTube
-def upload_video(youtube, video_path, title, description, privacy_status):
+
+def upload_video(youtube, video_path, title, description, privacy_status, tags=None):
     try:
         from googleapiclient.http import MediaFileUpload
     except ImportError as error:
@@ -45,95 +64,117 @@ def upload_video(youtube, video_path, title, description, privacy_status):
             "google-api-python-client to enable uploading."
         ) from error
 
-    tags = None
     body = {
-        'snippet': {
-            'title': title,
-            'description': description,
-            'tags': tags,
-            'categoryId': '22'
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": "22",
         },
-        'status': {
-            'privacyStatus': privacy_status
-        }
+        "status": {
+            "privacyStatus": privacy_status,
+        },
     }
 
     insert_request = youtube.videos().insert(
-        part=",".join(body.keys()),
+        part="snippet,status",
         body=body,
-        media_body=MediaFileUpload(video_path, chunksize=-1, resumable=True)
+        media_body=MediaFileUpload(video_path, chunksize=256 * 1024, resumable=True),
     )
 
-    response = insert_request.execute()
-    return response
-"""
+    return insert_request.execute()
 
-# Function to upload a video to YouTube
-def upload_video(youtube, video_path, title, description, privacy_status):
-    tags = None
-    body = {
-        'snippet': {
-            'title': title,
-            'description': description,
-            'tags': tags,
-            'categoryId': '22'
-        },
-        'status': {
-            'privacyStatus': privacy_status
-        }
-    }
 
-    # Specify only the necessary parts
-    parts_to_include = "snippet,status"
+def load_upload_manifest():
+    manifest_path = os.path.join(UPLOAD_PATH, "_upload_manifest.json")
 
-    insert_request = youtube.videos().insert(
-        part=parts_to_include,
-        body=body,
-        media_body=MediaFileUpload(video_path, chunksize=256 * 1024, resumable=True)
-    )
+    if not os.path.exists(manifest_path) or os.path.getsize(manifest_path) == 0:
+        return []
 
-    response = insert_request.execute()
-    return response
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as error:
+        print(f"Could not read upload manifest: {error}")
+        return []
 
-# Function to delete a file
+
+def package_for_video(video_path, manifest):
+    absolute_path = os.path.abspath(video_path)
+
+    for item in manifest:
+        if item.get("video_file") == absolute_path:
+            return item
+
+    return {}
+
+
 def delete_file(file_path):
     try:
         os.remove(file_path)
         print(f"Deleted file: {file_path}")
-    except Exception as e:
-        print(f"Error deleting file: {e}")
+    except Exception as error:
+        print(f"Error deleting file: {error}")
 
-# Main function
-def upload_function():
-    # Get authenticated YouTube service
+
+def upload_function(theme=None):
+    if theme:
+        return upload_function_for_theme(theme)
+
+    requested_theme = os.getenv("SHORTFORM_THEME")
+
+    if requested_theme:
+        return upload_function_for_theme(requested_theme)
+
+    for theme_name in discover_themes():
+        upload_function_for_theme(theme_name)
+
+
+def upload_function_for_theme(theme_name):
+    configure_theme(theme_name)
+
     try:
         youtube = get_authenticated_service()
     except RuntimeError as error:
         print(error)
         return
 
-    # Folder containing upload-ready clips
-    subtitled_clips_folder = UPLOAD_PATH
+    if not os.path.isdir(UPLOAD_PATH):
+        print(f"No upload folder for theme '{CURRENT_THEME}': {UPLOAD_PATH}")
+        return
 
-    # Iterate over subtitled clips in the folder
-    for filename in os.listdir(subtitled_clips_folder):
-        if filename.endswith('.mp4'):
-            video_path = os.path.join(subtitled_clips_folder, filename)
-            title = filename.split('.')[0]  # Use filename as title
-            description = "Uploaded via Python"  # Modify as needed
-            #tags
-            privacy_status = "public"  # Modify as needed
-            print("Check")
-            # Upload video to YouTube
-            try:
-                response = upload_video(youtube, video_path, title, description, privacy_status)
-                print("Video uploaded successfully!")
-                print("Video ID:", response['id'])
+    manifest = load_upload_manifest()
+    delete_after_upload = os.getenv("SHORTFORM_DELETE_AFTER_UPLOAD") == "1"
 
-                # Delete the uploaded file
+    for filename in os.listdir(UPLOAD_PATH):
+        if not filename.endswith(".mp4"):
+            continue
+
+        video_path = os.path.join(UPLOAD_PATH, filename)
+        package = package_for_video(video_path, manifest)
+        youtube_package = package.get("platforms", {}).get("youtube_shorts", {})
+        title = youtube_package.get("title") or package.get("title") or os.path.splitext(filename)[0]
+        description = youtube_package.get("description") or package.get("description") or "Uploaded via shortform"
+        tags = youtube_package.get("tags") or package.get("tags")
+        privacy_status = youtube_package.get("privacy_status", "private")
+
+        try:
+            response = upload_video(
+                youtube,
+                video_path,
+                title,
+                description,
+                privacy_status,
+                tags=tags,
+            )
+            print("Video uploaded successfully!")
+            print("Video ID:", response["id"])
+
+            if delete_after_upload:
                 delete_file(video_path)
-            except Exception as e:
-                print("An error occurred:", e)
+        except Exception as error:
+            print("An error occurred:", error)
+
 
 if __name__ == "__main__":
     upload_function()

@@ -15,25 +15,45 @@ import cv2
 import numpy as np
 from faster_whisper import WhisperModel
 from ultralytics import YOLO
+from theme_config import BASE_DIR, discover_themes, ensure_theme
 
 
 # =========================
 # Base directories and paths
 # =========================
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
+base_dir = BASE_DIR
 
-json_filename = os.path.join(base_dir, "src", "id.json")
-executed_json_filename = os.path.join(base_dir, "src", "executed_id.json")
+CURRENT_THEME = None
+json_filename = None
+executed_json_filename = None
 
-videos_path = os.path.join(base_dir, "output", "temp", "videos")
-audio_path = os.path.join(base_dir, "output", "temp", "audios")
-transcriptions_path = os.path.join(base_dir, "output", "temp", "transcripts")
-clips_path = os.path.join(base_dir, "output", "clips")
-metadata_path = os.path.join(base_dir, "output", "metadata")
+videos_path = None
+audio_path = None
+transcriptions_path = None
+clips_path = None
+metadata_path = None
 
-for path in [videos_path, audio_path, transcriptions_path, clips_path, metadata_path]:
-    os.makedirs(path, exist_ok=True)
+
+def configure_theme(theme_name):
+    global CURRENT_THEME
+    global json_filename, executed_json_filename
+    global videos_path, audio_path, transcriptions_path, clips_path, metadata_path
+
+    theme_paths = ensure_theme(theme_name)
+    CURRENT_THEME = theme_paths["theme"]
+    json_filename = theme_paths["id_file"]
+    executed_json_filename = theme_paths["executed_id_file"]
+    videos_path = theme_paths["videos_path"]
+    audio_path = theme_paths["audio_path"]
+    transcriptions_path = theme_paths["transcriptions_path"]
+    clips_path = theme_paths["clips_path"]
+    metadata_path = theme_paths["metadata_path"]
+
+    return theme_paths
+
+
+configure_theme(os.getenv("SHORTFORM_THEME", "general"))
 
 # Keep this True while tuning reframing so older choppy clips are replaced.
 REGENERATE_EXISTING_CLIPS = True
@@ -2099,7 +2119,21 @@ def process_video(video_url, executed_data):
 # Main batch runner
 # =========================
 
-def run_clip_generation():
+def run_clip_generation(theme=None):
+    if theme:
+        return run_clip_generation_for_theme(theme)
+
+    requested_theme = os.getenv("SHORTFORM_THEME")
+
+    if requested_theme:
+        return run_clip_generation_for_theme(requested_theme)
+
+    for theme_name in discover_themes():
+        run_clip_generation_for_theme(theme_name)
+
+
+def run_clip_generation_for_theme(theme_name):
+    configure_theme(theme_name)
     run_start = time.time()
 
     existing_data = []
@@ -2120,6 +2154,7 @@ def run_clip_generation():
 
     videos_to_process = [v for v in existing_data if v not in executed_data]
 
+    print(f"=== Generating clips for theme: {CURRENT_THEME} ===")
     print(f"Videos found: {len(existing_data)}")
     print(f"Already executed: {len(executed_data)}")
     print(f"Videos left to process: {len(videos_to_process)}\n")
@@ -2131,7 +2166,7 @@ def run_clip_generation():
         json.dump(executed_data, executed_json_file, indent=4)
 
     print("Updated executed_id.json")
-    print(f"Script completely finished. Total batch run time: {time.time() - run_start:.2f} seconds")
+    print(f"Theme '{CURRENT_THEME}' finished. Total run time: {time.time() - run_start:.2f} seconds\n")
 
 
 if __name__ == "__main__":

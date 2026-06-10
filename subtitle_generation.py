@@ -1,23 +1,39 @@
 import os
+import json
 import re
 import subprocess
 import time
 
 from faster_whisper import WhisperModel
+from theme_config import BASE_DIR, discover_themes, ensure_theme
 
 
 FFMPEG_BIN = r"C:\ffmpeg\bin"
 if os.path.isdir(FFMPEG_BIN) and hasattr(os, "add_dll_directory"):
     os.add_dll_directory(FFMPEG_BIN)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONTS_PATH = os.path.join(BASE_DIR, "assets", "fonts")
-CLIPS_PATH = os.path.join(BASE_DIR, "output", "clips")
-UPLOAD_PATH = os.path.join(BASE_DIR, "output", "upload")
-SUBTITLE_TEMP_PATH = os.path.join(BASE_DIR, "output", "temp", "subtitles")
 
-for path in [UPLOAD_PATH, SUBTITLE_TEMP_PATH]:
-    os.makedirs(path, exist_ok=True)
+CURRENT_THEME = None
+CLIPS_PATH = None
+UPLOAD_PATH = None
+SUBTITLE_TEMP_PATH = None
+METADATA_PATH = None
+
+
+def configure_theme(theme_name):
+    global CURRENT_THEME, CLIPS_PATH, UPLOAD_PATH, SUBTITLE_TEMP_PATH, METADATA_PATH
+
+    theme_paths = ensure_theme(theme_name)
+    CURRENT_THEME = theme_paths["theme"]
+    CLIPS_PATH = theme_paths["clips_path"]
+    UPLOAD_PATH = theme_paths["upload_path"]
+    SUBTITLE_TEMP_PATH = theme_paths["subtitle_temp_path"]
+    METADATA_PATH = theme_paths["metadata_path"]
+    return theme_paths
+
+
+configure_theme(os.getenv("SHORTFORM_THEME", "general"))
 
 FFMPEG_EXE = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 if not os.path.exists(FFMPEG_EXE):
@@ -292,6 +308,116 @@ def burn_subtitles(input_video, ass_path, output_video):
     ], "Subtitle burn-in")
 
 
+def load_clip_metadata_index():
+    index = {}
+
+    if not METADATA_PATH or not os.path.isdir(METADATA_PATH):
+        return index
+
+    for filename in os.listdir(METADATA_PATH):
+        if not filename.endswith("_clip_review.json"):
+            continue
+
+        metadata_file = os.path.join(METADATA_PATH, filename)
+
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+
+        for clip in payload.get("selected", []):
+            output_file = clip.get("output_file", "")
+
+            if not output_file:
+                continue
+
+            index[os.path.basename(output_file)] = clip
+
+    return index
+
+
+def build_social_package(clip_path, output_path, words, clip_metadata):
+    basename = os.path.splitext(os.path.basename(output_path))[0]
+    transcript = " ".join(word["word"] for word in words)
+    title = clip_metadata.get("suggested_title") or basename.replace("_upload", "").replace("_", " ")
+    caption = clip_metadata.get("suggested_caption") or title
+    hashtags = clip_metadata.get("hashtags") or ["#podcast", "#shorts"]
+    plain_tags = [
+        tag.lstrip("#")
+        for tag in hashtags
+        if tag.strip("#")
+    ]
+
+    package = {
+        "theme": CURRENT_THEME,
+        "video_file": os.path.abspath(output_path),
+        "source_clip_file": os.path.abspath(clip_path),
+        "title": title[:95],
+        "caption": caption,
+        "hashtags": hashtags,
+        "tags": plain_tags,
+        "description": f"{caption}\n\n{' '.join(hashtags)}",
+        "transcript_excerpt": transcript[:500],
+        "hook_reason": clip_metadata.get("hook_reason", ""),
+        "score": clip_metadata.get("score"),
+        "platforms": {
+            "youtube_shorts": {
+                "title": title[:95],
+                "description": f"{caption}\n\n{' '.join(hashtags)}",
+                "tags": plain_tags,
+                "privacy_status": "private",
+            },
+            "tiktok": {
+                "caption": f"{caption} {' '.join(hashtags)}"[:2200],
+            },
+            "instagram_reels": {
+                "caption": f"{caption}\n\n{' '.join(hashtags)}",
+            },
+            "facebook_reels": {
+                "caption": f"{caption}\n\n{' '.join(hashtags)}",
+            },
+        },
+        "posting_status": {
+            "youtube_shorts": "ready",
+            "tiktok": "ready",
+            "instagram_reels": "ready",
+            "facebook_reels": "ready",
+        },
+    }
+
+    return package
+
+
+def write_social_package(output_path, package):
+    sidecar_path = os.path.splitext(output_path)[0] + ".json"
+
+    with open(sidecar_path, "w", encoding="utf-8") as f:
+        json.dump(package, f, indent=4)
+
+    manifest_path = os.path.join(UPLOAD_PATH, "_upload_manifest.json")
+    manifest = []
+
+    if os.path.exists(manifest_path) and os.path.getsize(manifest_path) > 0:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception:
+            manifest = []
+
+    manifest = [
+        item
+        for item in manifest
+        if item.get("video_file") != package["video_file"]
+    ]
+    manifest.append(package)
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=4)
+
+    return sidecar_path, manifest_path
+
+
 def process_clip(model, clip_path):
     start_time = time.time()
     basename = os.path.splitext(os.path.basename(clip_path))[0]
@@ -316,22 +442,47 @@ def process_clip(model, clip_path):
 
     event_count = build_ass_subtitles(words, ass_path)
     burn_subtitles(clip_path, ass_path, output_path)
+    metadata_index = load_clip_metadata_index()
+    package = build_social_package(
+        clip_path=clip_path,
+        output_path=output_path,
+        words=words,
+        clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
+    )
+    sidecar_path, manifest_path = write_social_package(output_path, package)
 
     print(
         f" -> Created {output_filename} with {event_count} subtitle events "
         f"in {time.time() - start_time:.2f} seconds"
     )
+    print(f" -> Social package: {sidecar_path}")
+    print(f" -> Upload manifest: {manifest_path}")
 
     return output_path
 
 
-def run_subtitle_generation(limit=None):
+def run_subtitle_generation(limit=None, theme=None):
+    if theme:
+        return run_subtitle_generation_for_theme(limit=limit, theme=theme)
+
+    requested_theme = os.getenv("SHORTFORM_THEME")
+
+    if requested_theme:
+        return run_subtitle_generation_for_theme(limit=limit, theme=requested_theme)
+
+    for theme_name in discover_themes():
+        run_subtitle_generation_for_theme(limit=limit, theme=theme_name)
+
+
+def run_subtitle_generation_for_theme(limit=None, theme="general"):
+    configure_theme(theme)
     run_start = time.time()
     clip_files = get_video_files()
 
     if limit is not None:
         clip_files = clip_files[:limit]
 
+    print(f"=== Generating subtitles for theme: {CURRENT_THEME} ===")
     print(f"Clips found: {len(clip_files)}")
     print(f"Upload folder: {UPLOAD_PATH}\n")
 
@@ -347,7 +498,7 @@ def run_subtitle_generation(limit=None):
         except Exception as error:
             print(f" -> Failed to subtitle {clip_path}: {error}")
 
-    print(f"\nSubtitle generation finished in {time.time() - run_start:.2f} seconds")
+    print(f"\nSubtitle generation for '{CURRENT_THEME}' finished in {time.time() - run_start:.2f} seconds\n")
 
 
 if __name__ == "__main__":
