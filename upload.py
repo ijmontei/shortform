@@ -12,6 +12,7 @@ YOUTUBE_API_VERSION = "v3"
 CURRENT_THEME = None
 UPLOAD_PATH = None
 METADATA_PATH = None
+FINAL_METADATA_FILE = None
 MISSING_CLIENT_SECRETS_MESSAGE = """
 WARNING: Please configure OAuth 2.0
 To make this script work, you need to populate the client_secrets.json file.
@@ -19,16 +20,14 @@ To make this script work, you need to populate the client_secrets.json file.
 
 
 def configure_theme(theme_name):
-    global CURRENT_THEME, UPLOAD_PATH, METADATA_PATH
+    global CURRENT_THEME, UPLOAD_PATH, METADATA_PATH, FINAL_METADATA_FILE
 
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
     UPLOAD_PATH = theme_paths["upload_path"]
     METADATA_PATH = theme_paths["metadata_path"]
+    FINAL_METADATA_FILE = theme_paths["final_metadata_file"]
     return theme_paths
-
-
-configure_theme(os.getenv("SHORTFORM_THEME", DEFAULT_THEME))
 
 
 def get_authenticated_service():
@@ -88,14 +87,14 @@ def upload_video(youtube, video_path, title, description, privacy_status, tags=N
 
 
 def load_upload_manifest():
-    manifest_path = os.path.join(METADATA_PATH, "_upload_manifest.json")
+    manifest_path = FINAL_METADATA_FILE
 
     if not os.path.exists(manifest_path) or os.path.getsize(manifest_path) == 0:
         return []
 
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return json.load(f).get("content", [])
     except Exception as error:
         print(f"Could not read upload manifest: {error}")
         return []

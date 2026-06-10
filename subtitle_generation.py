@@ -27,10 +27,11 @@ CLIPS_PATH = None
 UPLOAD_PATH = None
 SUBTITLE_TEMP_PATH = None
 METADATA_PATH = None
+FINAL_METADATA_FILE = None
 
 
 def configure_theme(theme_name):
-    global CURRENT_THEME, CLIPS_PATH, UPLOAD_PATH, SUBTITLE_TEMP_PATH, METADATA_PATH
+    global CURRENT_THEME, CLIPS_PATH, UPLOAD_PATH, SUBTITLE_TEMP_PATH, METADATA_PATH, FINAL_METADATA_FILE
 
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
@@ -38,10 +39,9 @@ def configure_theme(theme_name):
     UPLOAD_PATH = theme_paths["upload_path"]
     SUBTITLE_TEMP_PATH = theme_paths["subtitle_temp_path"]
     METADATA_PATH = theme_paths["metadata_path"]
+    FINAL_METADATA_FILE = theme_paths["final_metadata_file"]
     return theme_paths
 
-
-configure_theme(os.getenv("SHORTFORM_THEME", DEFAULT_THEME))
 
 FFMPEG_EXE = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 if not os.path.exists(FFMPEG_EXE):
@@ -401,35 +401,35 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
 
 
 def write_social_package(output_path, package):
-    sidecar_path = os.path.join(
-        METADATA_PATH,
-        os.path.splitext(os.path.basename(output_path))[0] + ".json",
-    )
+    metadata = {
+        "theme": CURRENT_THEME,
+        "content": [],
+    }
 
-    with open(sidecar_path, "w", encoding="utf-8") as f:
-        json.dump(package, f, indent=4)
-
-    manifest_path = os.path.join(METADATA_PATH, "_upload_manifest.json")
-    manifest = []
-
-    if os.path.exists(manifest_path) and os.path.getsize(manifest_path) > 0:
+    if os.path.exists(FINAL_METADATA_FILE) and os.path.getsize(FINAL_METADATA_FILE) > 0:
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
+            with open(FINAL_METADATA_FILE, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
         except Exception:
-            manifest = []
+            metadata = {
+                "theme": CURRENT_THEME,
+                "content": [],
+            }
 
-    manifest = [
+    content = metadata.get("content", [])
+    content = [
         item
-        for item in manifest
+        for item in content
         if item.get("video_file") != package["video_file"]
     ]
-    manifest.append(package)
+    content.append(package)
+    metadata["theme"] = CURRENT_THEME
+    metadata["content"] = content
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=4)
+    with open(FINAL_METADATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=4)
 
-    return sidecar_path, manifest_path
+    return FINAL_METADATA_FILE
 
 
 def mark_video_completed(package):
@@ -447,16 +447,12 @@ def mark_video_completed(package):
     final_video_files = existing.get("final_video_files", [])
     metadata_files = existing.get("metadata_files", [])
     final_video_file = package.get("video_file", "")
-    metadata_file = os.path.join(
-        METADATA_PATH,
-        os.path.splitext(os.path.basename(package.get("video_file", "")))[0] + ".json",
-    )
 
     if final_video_file and final_video_file not in final_video_files:
         final_video_files.append(final_video_file)
 
-    if metadata_file and metadata_file not in metadata_files:
-        metadata_files.append(metadata_file)
+    if FINAL_METADATA_FILE not in metadata_files:
+        metadata_files.append(FINAL_METADATA_FILE)
 
     executed[source_state_key] = {
         "theme": package.get("theme", CURRENT_THEME),
@@ -500,15 +496,14 @@ def process_clip(model, clip_path):
         words=words,
         clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
     )
-    sidecar_path, manifest_path = write_social_package(output_path, package)
+    metadata_file = write_social_package(output_path, package)
     mark_video_completed(package)
 
     print(
         f" -> Created {output_filename} with {event_count} subtitle events "
         f"in {time.time() - start_time:.2f} seconds"
     )
-    print(f" -> Social package: {sidecar_path}")
-    print(f" -> Upload manifest: {manifest_path}")
+    print(f" -> Theme metadata: {metadata_file}")
 
     return output_path
 
@@ -536,7 +531,8 @@ def run_subtitle_generation_for_theme(limit=None, theme=DEFAULT_THEME):
 
     print(f"=== Generating subtitles for theme: {CURRENT_THEME} ===")
     print(f"Clips found: {len(clip_files)}")
-    print(f"Upload folder: {UPLOAD_PATH}\n")
+    print(f"Content folder: {UPLOAD_PATH}")
+    print(f"Metadata file: {FINAL_METADATA_FILE}\n")
 
     if not clip_files:
         print("No clips available for subtitle generation.")

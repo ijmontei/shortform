@@ -57,8 +57,6 @@ def configure_theme(theme_name):
     return theme_paths
 
 
-configure_theme(os.getenv("SHORTFORM_THEME", DEFAULT_THEME))
-
 # Keep this True while tuning reframing so older choppy clips are replaced.
 REGENERATE_EXISTING_CLIPS = True
 

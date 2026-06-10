@@ -9,7 +9,8 @@ THEMES_SRC_PATH = os.path.join(SRC_PATH, "themes")
 PULLED_FILE = os.path.join(SRC_PATH, "pulled.json")
 EXECUTED_FILE = os.path.join(SRC_PATH, "executed_id.json")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
-WORK_PATH = os.path.join(OUTPUT_PATH, "_work")
+TEMP_PATH = os.path.join(OUTPUT_PATH, "temp")
+THEMES_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "themes")
 DEFAULT_THEME = "self_improvement"
 
 
@@ -109,8 +110,8 @@ def discover_themes():
 
 def get_theme_paths(theme_name=DEFAULT_THEME, create=False):
     theme = clean_theme_name(theme_name)
-    theme_output_path = os.path.join(OUTPUT_PATH, theme)
-    theme_work_path = os.path.join(WORK_PATH, theme)
+    theme_output_path = os.path.join(THEMES_OUTPUT_PATH, theme)
+    theme_temp_path = os.path.join(TEMP_PATH, theme)
 
     paths = {
         "theme": theme,
@@ -118,27 +119,28 @@ def get_theme_paths(theme_name=DEFAULT_THEME, create=False):
         "pulled_file": PULLED_FILE,
         "executed_file": EXECUTED_FILE,
         "output_path": theme_output_path,
-        "final_videos_path": os.path.join(theme_output_path, "videos"),
-        "final_metadata_path": os.path.join(theme_output_path, "metadata"),
-        "work_path": theme_work_path,
-        "videos_path": os.path.join(theme_work_path, "downloads", "videos"),
-        "audio_path": os.path.join(theme_work_path, "downloads", "audio"),
-        "transcriptions_path": os.path.join(theme_work_path, "transcripts"),
-        "subtitle_temp_path": os.path.join(theme_work_path, "subtitles"),
-        "clips_path": os.path.join(theme_work_path, "clips"),
-        "upload_path": os.path.join(theme_output_path, "videos"),
-        "metadata_path": os.path.join(theme_output_path, "metadata"),
+        "final_videos_path": os.path.join(theme_output_path, "content"),
+        "final_metadata_file": os.path.join(theme_output_path, "metadata.json"),
+        "temp_path": theme_temp_path,
+        "videos_path": os.path.join(theme_temp_path, "downloads", "videos"),
+        "audio_path": os.path.join(theme_temp_path, "downloads", "audio"),
+        "transcriptions_path": os.path.join(theme_temp_path, "transcripts"),
+        "subtitle_temp_path": os.path.join(theme_temp_path, "subtitles"),
+        "clips_path": os.path.join(theme_temp_path, "clips"),
+        "clip_metadata_path": os.path.join(theme_temp_path, "metadata"),
+        "upload_path": os.path.join(theme_output_path, "content"),
+        "metadata_path": os.path.join(theme_temp_path, "metadata"),
     }
 
     if create:
         for key in [
             "final_videos_path",
-            "final_metadata_path",
             "videos_path",
             "audio_path",
             "transcriptions_path",
             "subtitle_temp_path",
             "clips_path",
+            "clip_metadata_path",
         ]:
             os.makedirs(paths[key], exist_ok=True)
 
