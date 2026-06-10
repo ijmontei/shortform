@@ -195,30 +195,26 @@ def split_caption_lines(words):
     return lines
 
 
-def style_word_for_ass(word, duration_cs, rel_start_cs, rel_end_cs):
+def style_word_for_ass(word, rel_start_ms, rel_end_ms):
     cleaned = escape_ass_text(word)
 
     if not cleaned:
         return ""
 
     plain = re.sub(r"[^a-zA-Z0-9]", "", cleaned).lower()
-    duration_cs = max(8, int(duration_cs))
-    rel_start_cs = max(0, int(rel_start_cs))
-    rel_end_cs = max(rel_start_cs + 1, int(rel_end_cs))
-    pulse_mid_cs = rel_start_cs + max(1, int((rel_end_cs - rel_start_cs) * 0.45))
-    pulse = (
-        f"\\t({rel_start_cs},{pulse_mid_cs},\\fscx105\\fscy105)"
-        f"\\t({pulse_mid_cs},{rel_end_cs},\\fscx100\\fscy100)"
+    rel_start_ms = max(0, int(rel_start_ms))
+    rel_end_ms = max(rel_start_ms + 70, int(rel_end_ms))
+    active_mid_ms = rel_start_ms + max(35, int((rel_end_ms - rel_start_ms) * 0.45))
+    highlight_color = "&H0038D8FF" if plain in IMPACT_WORDS or re.search(r"\d", cleaned) else "&H004EEBFF"
+    active_style = (
+        f"\\t({rel_start_ms},{active_mid_ms},"
+        f"\\c{highlight_color}\\fscx104\\fscy104\\bord5.8\\shad2.5)"
+        f"\\t({active_mid_ms},{rel_end_ms},"
+        "\\fscx100\\fscy100\\bord5.2\\shad2.0)"
+        f"\\t({rel_end_ms},{rel_end_ms + 80},\\c&H00FFFFFF)"
     )
 
-    if plain in IMPACT_WORDS or re.search(r"\d", cleaned):
-        return (
-            f"{{\\kf{duration_cs}\\bord5.8\\shad2.4{pulse}}}"
-            f"{cleaned.upper()}"
-            f"{{\\fscx100\\fscy100\\bord5.2\\shad2}}"
-        )
-
-    return f"{{\\kf{duration_cs}{pulse}}}{cleaned.upper()}{{\\fscx100\\fscy100}}"
+    return f"{{\\c&H00FFFFFF\\fscx100\\fscy100\\bord5.2\\shad2.0{active_style}}}{cleaned.upper()}"
 
 
 def build_ass_subtitles(words, ass_path):
@@ -246,14 +242,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         line_parts = []
 
         for word in line:
-            duration_cs = round((word["end"] - word["start"]) * 100)
-            rel_start_cs = round((word["start"] - line_start) * 100)
-            rel_end_cs = round((word["end"] - line_start) * 100)
+            rel_start_ms = round((word["start"] - line_start) * 1000)
+            rel_end_ms = round((word["end"] - line_start) * 1000)
             line_parts.append(style_word_for_ass(
                 word["word"],
-                duration_cs,
-                rel_start_cs,
-                rel_end_cs,
+                rel_start_ms,
+                rel_end_ms,
             ))
 
         text = " ".join(part for part in line_parts if part)
