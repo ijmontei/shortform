@@ -15,7 +15,16 @@ import cv2
 import numpy as np
 from faster_whisper import WhisperModel
 from ultralytics import YOLO
-from theme_config import BASE_DIR, discover_themes, ensure_theme
+from theme_config import (
+    BASE_DIR,
+    DEFAULT_THEME,
+    EXECUTED_FILE,
+    PULLED_FILE,
+    discover_themes,
+    ensure_theme,
+    load_json_file,
+    write_json_file,
+)
 
 
 # =========================
@@ -25,8 +34,6 @@ from theme_config import BASE_DIR, discover_themes, ensure_theme
 base_dir = BASE_DIR
 
 CURRENT_THEME = None
-json_filename = None
-executed_json_filename = None
 
 videos_path = None
 audio_path = None
@@ -37,13 +44,10 @@ metadata_path = None
 
 def configure_theme(theme_name):
     global CURRENT_THEME
-    global json_filename, executed_json_filename
     global videos_path, audio_path, transcriptions_path, clips_path, metadata_path
 
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
-    json_filename = theme_paths["id_file"]
-    executed_json_filename = theme_paths["executed_id_file"]
     videos_path = theme_paths["videos_path"]
     audio_path = theme_paths["audio_path"]
     transcriptions_path = theme_paths["transcriptions_path"]
@@ -53,7 +57,7 @@ def configure_theme(theme_name):
     return theme_paths
 
 
-configure_theme(os.getenv("SHORTFORM_THEME", "general"))
+configure_theme(os.getenv("SHORTFORM_THEME", DEFAULT_THEME))
 
 # Keep this True while tuning reframing so older choppy clips are replaced.
 REGENERATE_EXISTING_CLIPS = True
@@ -786,6 +790,9 @@ class CandidateClip:
     hashtags: list = field(default_factory=list)
     render_qc: dict = field(default_factory=dict)
     output_file: str = ""
+    source_state_key: str = ""
+    source_video_url: str = ""
+    source_title: str = ""
 
 
 VIRAL_KEYWORD_WEIGHTS = {
@@ -1905,7 +1912,7 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en"):
 # Process clips
 # =========================
 
-def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en"):
+def process_clips(video_filename, audio_filename, cleaned_title, source_record, source_state_key, lang_code="en"):
     audio_filename = os.path.abspath(audio_filename)
     video_filename = os.path.abspath(video_filename)
 
@@ -1922,6 +1929,13 @@ def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en")
     if not clips:
         print("No clips found for this video.\n")
         return
+
+    for clip in clips:
+        clip.source_state_key = source_state_key
+        clip.source_video_url = source_record.get("video_url", "")
+        clip.source_title = source_record.get("title", "")
+
+    write_clip_review_exports(cleaned_title, clips)
 
     print("Loading YOLO model...")
     model = YOLO("yolov9c.pt")
@@ -2078,16 +2092,17 @@ def process_clips(video_filename, audio_filename, cleaned_title, lang_code="en")
 # Process one video
 # =========================
 
-def process_video(video_url, executed_data):
+def process_video(video_record):
     try:
         start_video_total = time.time()
+        video_url = video_record["video_url"]
 
         with yt_dlp.YoutubeDL(build_ytdl_opts()) as ydl:
             info = ydl.extract_info(video_url, download=False)
 
             if info is None:
                 print(f"Skipping unreadable/throttled video: {video_url}")
-                return executed_data
+                return False
 
             video_title = info.get("title", "Unknown_Video")
 
@@ -2102,17 +2117,17 @@ def process_video(video_url, executed_data):
             video_filename=video_filename,
             audio_filename=audio_filename,
             cleaned_title=cleaned_title,
+            source_record=video_record,
+            source_state_key=video_record["state_key"],
             lang_code="en",
         )
 
-        executed_data.append(video_url)
-
         print(f"=== Total workflow duration for video: {time.time() - start_video_total:.2f} seconds ===\n")
+        return True
 
     except Exception as e:
-        print(f"Failed to process video: {video_url}\n{e}\n")
-
-    return executed_data
+        print(f"Failed to process video: {video_record.get('video_url')}\n{e}\n")
+        return False
 
 
 # =========================
@@ -2135,37 +2150,39 @@ def run_clip_generation(theme=None):
 def run_clip_generation_for_theme(theme_name):
     configure_theme(theme_name)
     run_start = time.time()
+    pulled_data = load_json_file(PULLED_FILE, {})
+    executed_data = load_json_file(EXECUTED_FILE, {})
 
-    existing_data = []
-    executed_data = []
+    if not isinstance(pulled_data, dict):
+        pulled_data = {}
 
-    if os.path.exists(json_filename) and os.path.getsize(json_filename) > 0:
-        with open(json_filename, "r", encoding="utf-8") as json_file:
-            data = json.load(json_file)
+    if not isinstance(executed_data, dict):
+        executed_data = {}
 
-            for video_info in data.values():
-                video_url = video_info.get("video_url")
-                if video_url:
-                    existing_data.append(video_url)
-
-    if os.path.exists(executed_json_filename) and os.path.getsize(executed_json_filename) > 0:
-        with open(executed_json_filename, "r", encoding="utf-8") as executed_json_file:
-            executed_data = json.load(executed_json_file)
-
-    videos_to_process = [v for v in existing_data if v not in executed_data]
+    theme_records = [
+        (state_key, record)
+        for state_key, record in pulled_data.items()
+        if record.get("theme") == CURRENT_THEME and record.get("video_url")
+    ]
+    videos_to_process = [
+        (state_key, record)
+        for state_key, record in theme_records
+        if state_key not in executed_data and not record.get("clips_generated_at")
+    ]
 
     print(f"=== Generating clips for theme: {CURRENT_THEME} ===")
-    print(f"Videos found: {len(existing_data)}")
-    print(f"Already executed: {len(executed_data)}")
+    print(f"Videos found: {len(theme_records)}")
+    print(f"Already completed: {sum(1 for key in executed_data if key.startswith(CURRENT_THEME + '|'))}")
+    print(f"Clips already generated: {sum(1 for _, record in theme_records if record.get('clips_generated_at'))}")
     print(f"Videos left to process: {len(videos_to_process)}\n")
 
-    for video_url in videos_to_process:
-        executed_data = process_video(video_url, executed_data)
+    for state_key, record in videos_to_process:
+        record["state_key"] = state_key
+        if process_video(record):
+            pulled_data[state_key]["clips_generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            write_json_file(PULLED_FILE, pulled_data)
 
-    with open(executed_json_filename, "w", encoding="utf-8") as executed_json_file:
-        json.dump(executed_data, executed_json_file, indent=4)
-
-    print("Updated executed_id.json")
+    print(f"Updated pulled registry: {PULLED_FILE}")
     print(f"Theme '{CURRENT_THEME}' finished. Total run time: {time.time() - run_start:.2f} seconds\n")
 
 

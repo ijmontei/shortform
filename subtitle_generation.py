@@ -5,7 +5,15 @@ import subprocess
 import time
 
 from faster_whisper import WhisperModel
-from theme_config import BASE_DIR, discover_themes, ensure_theme
+from theme_config import (
+    BASE_DIR,
+    DEFAULT_THEME,
+    EXECUTED_FILE,
+    discover_themes,
+    ensure_theme,
+    load_json_file,
+    write_json_file,
+)
 
 
 FFMPEG_BIN = r"C:\ffmpeg\bin"
@@ -33,7 +41,7 @@ def configure_theme(theme_name):
     return theme_paths
 
 
-configure_theme(os.getenv("SHORTFORM_THEME", "general"))
+configure_theme(os.getenv("SHORTFORM_THEME", DEFAULT_THEME))
 
 FFMPEG_EXE = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 if not os.path.exists(FFMPEG_EXE):
@@ -353,6 +361,9 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
         "theme": CURRENT_THEME,
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(clip_path),
+        "source_state_key": clip_metadata.get("source_state_key", ""),
+        "source_video_url": clip_metadata.get("source_video_url", ""),
+        "source_title": clip_metadata.get("source_title", ""),
         "title": title[:95],
         "caption": caption,
         "hashtags": hashtags,
@@ -390,12 +401,15 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
 
 
 def write_social_package(output_path, package):
-    sidecar_path = os.path.splitext(output_path)[0] + ".json"
+    sidecar_path = os.path.join(
+        METADATA_PATH,
+        os.path.splitext(os.path.basename(output_path))[0] + ".json",
+    )
 
     with open(sidecar_path, "w", encoding="utf-8") as f:
         json.dump(package, f, indent=4)
 
-    manifest_path = os.path.join(UPLOAD_PATH, "_upload_manifest.json")
+    manifest_path = os.path.join(METADATA_PATH, "_upload_manifest.json")
     manifest = []
 
     if os.path.exists(manifest_path) and os.path.getsize(manifest_path) > 0:
@@ -416,6 +430,43 @@ def write_social_package(output_path, package):
         json.dump(manifest, f, indent=4)
 
     return sidecar_path, manifest_path
+
+
+def mark_video_completed(package):
+    source_state_key = package.get("source_state_key")
+
+    if not source_state_key:
+        return
+
+    executed = load_json_file(EXECUTED_FILE, {})
+
+    if not isinstance(executed, dict):
+        executed = {}
+
+    existing = executed.get(source_state_key, {})
+    final_video_files = existing.get("final_video_files", [])
+    metadata_files = existing.get("metadata_files", [])
+    final_video_file = package.get("video_file", "")
+    metadata_file = os.path.join(
+        METADATA_PATH,
+        os.path.splitext(os.path.basename(package.get("video_file", "")))[0] + ".json",
+    )
+
+    if final_video_file and final_video_file not in final_video_files:
+        final_video_files.append(final_video_file)
+
+    if metadata_file and metadata_file not in metadata_files:
+        metadata_files.append(metadata_file)
+
+    executed[source_state_key] = {
+        "theme": package.get("theme", CURRENT_THEME),
+        "video_url": package.get("source_video_url", ""),
+        "title": package.get("source_title", ""),
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "final_video_files": final_video_files,
+        "metadata_files": metadata_files,
+    }
+    write_json_file(EXECUTED_FILE, executed)
 
 
 def process_clip(model, clip_path):
@@ -450,6 +501,7 @@ def process_clip(model, clip_path):
         clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
     )
     sidecar_path, manifest_path = write_social_package(output_path, package)
+    mark_video_completed(package)
 
     print(
         f" -> Created {output_filename} with {event_count} subtitle events "
@@ -474,7 +526,7 @@ def run_subtitle_generation(limit=None, theme=None):
         run_subtitle_generation_for_theme(limit=limit, theme=theme_name)
 
 
-def run_subtitle_generation_for_theme(limit=None, theme="general"):
+def run_subtitle_generation_for_theme(limit=None, theme=DEFAULT_THEME):
     configure_theme(theme)
     run_start = time.time()
     clip_files = get_video_files()

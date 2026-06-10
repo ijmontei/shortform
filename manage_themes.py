@@ -1,57 +1,48 @@
 import argparse
-import os
 
-from theme_config import discover_themes, ensure_theme
-
-
-def read_channels(channels_file):
-    if not os.path.exists(channels_file):
-        return []
-
-    with open(channels_file, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f.readlines() if line.strip()]
+from theme_config import discover_themes, ensure_theme, load_theme_config, write_theme_config
 
 
-def write_channels(channels_file, channels):
-    with open(channels_file, "w", encoding="utf-8") as f:
-        f.write("\n".join(channels))
-        f.write("\n")
-
-
-def create_theme(theme):
-    paths = ensure_theme(theme)
-
-    if not os.path.exists(paths["channels_file"]):
-        write_channels(paths["channels_file"], [])
+def create_theme(theme, channels=None):
+    paths = ensure_theme(theme, channels=channels or [])
+    config = load_theme_config(paths["theme"])
 
     print(f"Theme ready: {paths['theme']}")
-    print(f"Channels file: {paths['channels_file']}")
-    print(f"Output folder: {paths['output_path']}")
+    print(f"Theme config: {paths['theme_config_file']}")
+    print(f"Final videos: {paths['final_videos_path']}")
+    print(f"Metadata: {paths['final_metadata_path']}")
+    print(f"Channels: {len(config['channels'])}")
 
 
 def add_channel(theme, channel_url):
     paths = ensure_theme(theme)
-    channels = read_channels(paths["channels_file"])
+    config = load_theme_config(paths["theme"])
+    channels = config["channels"]
 
     if channel_url not in channels:
         channels.append(channel_url)
-        write_channels(paths["channels_file"], channels)
+        write_theme_config(paths["theme"], channels)
 
     print(f"Added channel to theme '{paths['theme']}': {channel_url}")
 
 
 def list_themes():
-    for theme in discover_themes():
-        paths = ensure_theme(theme)
-        channels = read_channels(paths["channels_file"])
-        print(f"{paths['theme']}: {len(channels)} channels")
+    themes = discover_themes()
+
+    if not themes:
+        print("No themes configured.")
+        return
+
+    for theme in themes:
+        config = load_theme_config(theme)
+        print(f"{theme}: {len(config['channels'])} channels")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Manage shortform channel themes.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    create_parser = subparsers.add_parser("create", help="Create a theme folder.")
+    create_parser = subparsers.add_parser("create", help="Create a theme JSON file.")
     create_parser.add_argument("theme")
 
     add_parser = subparsers.add_parser("add-channel", help="Add a YouTube channel URL to a theme.")

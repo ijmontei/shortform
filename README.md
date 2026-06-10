@@ -4,18 +4,32 @@ Version 1.1 short-form clip generation pipeline.
 
 ## Pipeline
 
-1. `video_fetch.py` collects the latest videos for each configured theme.
-2. `clip_generation.py` downloads/reuses media, scores non-overlapping clip candidates, and renders vertical clips.
-3. `subtitle_generation.py` burns upload-ready subtitles into clips and writes finished videos plus social packages.
-4. `upload.py` can upload finished videos when YouTube API credentials and dependencies are configured.
+1. `video_fetch.py` reads theme JSON files from `src/themes` and records the latest videos in `src/pulled.json`.
+2. `clip_generation.py` downloads/reuses media, scores non-overlapping clip candidates, and renders vertical working clips.
+3. `subtitle_generation.py` burns upload-ready subtitles, saves finished videos, writes social metadata, and marks completed source videos in `src/executed_id.json`.
+
+`run.py` runs fetch, clip generation, and subtitle generation. Actual social uploading is intentionally not part of the default run yet.
 
 ## Themes
 
-Themes live in `src/themes/<theme>/channels.txt`.
+Theme files live in `src/themes`.
 
-Current default theme:
+Current themes:
 
-- `src/themes/general/channels.txt`
+- `src/themes/self_improvement.json`
+- `src/themes/sports.json`
+- `src/themes/finance.json`
+
+Each theme JSON contains:
+
+```json
+{
+    "theme": "sports",
+    "channels": [
+        "https://www.youtube.com/@newheightshow/videos"
+    ]
+}
+```
 
 Useful commands:
 
@@ -28,30 +42,42 @@ Useful commands:
 Run all themes:
 
 ```powershell
+Remove-Item Env:SHORTFORM_THEME -ErrorAction SilentlyContinue
 .\venv_313\Scripts\python.exe run.py
 ```
 
 Run one theme:
 
 ```powershell
-$env:SHORTFORM_THEME="religion"
+$env:SHORTFORM_THEME="sports"
 .\venv_313\Scripts\python.exe run.py
 ```
 
-Per-theme output is written to `output/themes/<theme>/`.
+## Output
 
-## V1 Quality Features
+Finished outputs are organized by theme:
 
-- Face-first interview framing with YOLO fallback.
-- Audio + transcript scoring for high-interest clips.
-- Comment-potential scoring for polarizing or debate-worthy moments.
-- Segment-boundary clip starts/ends to avoid mid-thought cuts.
-- Natural boundary repair when a candidate starts with weak context words.
-- Duplicate-topic avoidance so a batch of clips covers more distinct moments.
-- Render QC for duration, resolution, audio presence, black frames, and framing stability.
-- Review exports in `output/metadata` with score breakdowns, hook reasons, suggested titles, captions, hashtags, and QC flags.
-- Montserrat captions bundled in `assets/fonts`.
-- High-contrast word-timed subtitles with subtle active-word scaling.
-- Upload-ready sidecar JSON for each finished clip with title, caption, tags, hashtags, platform copy, source clip, score, and hook reason.
+```text
+output/
+  self_improvement/
+    videos/
+    metadata/
+  sports/
+    videos/
+    metadata/
+  finance/
+    videos/
+    metadata/
+  _work/
+    <theme>/
+      downloads/
+      transcripts/
+      clips/
+      subtitles/
+```
 
-Generated media, transcripts, models, credentials, and runtime output are ignored by Git.
+Final subtitled clips are saved in `output/<theme>/videos`.
+
+Titles, captions, tags, hashtags, platform copy, hook reasons, score details, and upload manifests are saved in `output/<theme>/metadata`.
+
+Generated media, runtime registries, transcripts, models, credentials, and runtime output are ignored by Git.

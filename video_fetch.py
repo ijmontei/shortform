@@ -1,23 +1,25 @@
 import os
-import json
 import time
 from datetime import datetime
+
 import yt_dlp
-from theme_config import BASE_DIR, discover_themes, ensure_theme
 
-
-def read_channels(channels_file):
-    if not os.path.exists(channels_file):
-        return []
-
-    with open(channels_file, "r", encoding="utf-8") as file:
-        return [channel.strip() for channel in file.readlines() if channel.strip()]
+from theme_config import (
+    BASE_DIR,
+    PULLED_FILE,
+    discover_themes,
+    ensure_theme,
+    load_json_file,
+    load_theme_config,
+    video_state_key,
+    write_json_file,
+)
 
 
 def build_ytdl_opts(extra_opts=None):
     opts = {
-        'quiet': True,
-        'no_warnings': True,
+        "quiet": True,
+        "no_warnings": True,
     }
 
     cookies_file = os.getenv(
@@ -36,107 +38,103 @@ def build_ytdl_opts(extra_opts=None):
 
     return opts
 
-def run_video_fetch_for_theme(theme_name):
-    # Start time for performance measurement
-    start = time.time()
-    theme_paths = ensure_theme(theme_name)
-    channels_file = theme_paths["channels_file"]
-    json_filename = theme_paths["id_file"]
-    theme = theme_paths["theme"]
 
-    # Function to get latest video URL for a given channel using yt-dlp
-    def get_latest_video(channel_url):
-        # yt-dlp options to simulate extraction without downloading
-        ydl_opts = build_ytdl_opts({
-            'extract_flat': False, # Ensure we get full metadata (like views)
-            'playlist_items': '1', # Grab only the most recent video
-            'simulate': True       # Do not download the video
-        })
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(channel_url, download=False)
-                
-                # yt-dlp returns a dictionary; if it's a channel/playlist, videos are in 'entries'
-                if 'entries' in info and info['entries']:
-                    video = info['entries'][0]
-                else:
-                    video = info
-                
-                # Format the view count to include commas and the word 'views' (e.g., "1,234 views")
-                views_int = video.get('view_count', 0)
-                views_str = f"{views_int:,} views" if views_int else "N/A"
+def latest_video_for_channel(channel_url):
+    ydl_opts = build_ytdl_opts({
+        "extract_flat": False,
+        "playlist_items": "1",
+        "simulate": True,
+    })
 
-                # Format the date from YYYYMMDD to a readable format (e.g., "Oct 24, 2023")
-                raw_date = video.get('upload_date')
-                if raw_date:
-                    date_str = datetime.strptime(raw_date, '%Y%m%d').strftime('%b %d, %Y')
-                else:
-                    date_str = "N/A"
-                    
-                latest_video = {
-                    'title': video.get('title', 'Unknown Title'),
-                    'video_url': video.get('webpage_url') or f"https://www.youtube.com/watch?v={video.get('id')}",
-                    'views': views_str,
-                    'date_time': date_str
-                }
-                
-                return latest_video
-                
-        except Exception as e:
-            print(f"Error collecting video data for {channel_url}: {e}")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+
+        if not info:
             return None
 
+        if "entries" in info and info["entries"]:
+            video = info["entries"][0]
+        else:
+            video = info
+
+        views_int = video.get("view_count", 0)
+        views_str = f"{views_int:,} views" if views_int else "N/A"
+        raw_date = video.get("upload_date")
+        date_str = (
+            datetime.strptime(raw_date, "%Y%m%d").strftime("%b %d, %Y")
+            if raw_date
+            else "N/A"
+        )
+        video_url = video.get("webpage_url") or f"https://www.youtube.com/watch?v={video.get('id')}"
+
+        return {
+            "title": video.get("title", "Unknown Title"),
+            "video_url": video_url,
+            "views": views_str,
+            "date_time": date_str,
+            "channel_url": channel_url,
+        }
+
+    except Exception as error:
+        print(f"Error collecting video data for {channel_url}: {error}")
+        return None
+
+
+def run_video_fetch_for_theme(theme_name):
+    start = time.time()
+    paths = ensure_theme(theme_name)
+    theme = paths["theme"]
+    config = load_theme_config(theme)
+    channels = config["channels"]
+
     print(f"=== Fetching latest videos for theme: {theme} ===")
-    channels = read_channels(channels_file)
 
     if not channels:
-        print(f"No channels found for theme '{theme}'. Add URLs to {channels_file}")
+        print(f"No channels found for theme '{theme}'. Add URLs to {paths['theme_config_file']}")
         return
 
-    # Load existing JSON data
-    existing_videos = {}
-    if os.path.exists(json_filename) and os.path.getsize(json_filename) > 0:
-        try:
-            with open(json_filename, 'r') as json_file:
-                existing_videos = json.load(json_file)
-        except json.decoder.JSONDecodeError:
-            print(f"Error: Unable to load JSON data from {json_filename}. File may be empty or corrupted.")
+    pulled = load_json_file(PULLED_FILE, {})
+    if not isinstance(pulled, dict):
+        pulled = {}
 
-    # Dictionary to store latest videos for each channel
-    latest_videos = {}
+    new_count = 0
+    refreshed_count = 0
 
-    # Iterate through channels to get latest videos
     for channel in channels:
-        latest_video = get_latest_video(channel)
-        if latest_video:
-            # Check if the latest video already exists in the existing videos
-            existing_urls = [v['video_url'] for v in existing_videos.values()]
-            if latest_video['video_url'] not in existing_urls:
-                latest_videos[channel] = latest_video
+        latest_video = latest_video_for_channel(channel)
 
-    # Merge latest videos with existing videos
-    existing_videos.update(latest_videos)
+        if not latest_video:
+            continue
 
-    # Write the merged dictionary to the JSON file
-    with open(json_filename, 'w') as json_file:
-        json.dump(existing_videos, json_file, indent=4)
+        latest_video["theme"] = theme
+        latest_video["pulled_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        state_key = video_state_key(theme, latest_video["video_url"])
 
-    print(f"Latest {theme} videos have been saved to {json_filename}")
+        if state_key in pulled:
+            refreshed_count += 1
+        else:
+            new_count += 1
 
-    # End time for performance measurement
-    end = time.time()
-    # Calculate execution time
-    length = end - start
-    print(f"It took {round(length / 60, 2)} minutes!\n")
+        pulled[state_key] = latest_video
+
+    write_json_file(PULLED_FILE, pulled)
+
+    print(f"Saved pulled registry: {PULLED_FILE}")
+    print(f"New videos: {new_count}; refreshed existing: {refreshed_count}")
+    print(f"It took {round((time.time() - start) / 60, 2)} minutes!\n")
 
 
 def run_video_fetch(theme=None):
     themes = [theme] if theme else discover_themes()
 
+    if not themes:
+        print("No themes configured. Add JSON files in src/themes.")
+        return
+
     for theme_name in themes:
         run_video_fetch_for_theme(theme_name)
 
-# Optional block so you can run this script directly
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_video_fetch()
