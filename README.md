@@ -10,7 +10,7 @@ Version 1.1 short-form clip generation pipeline.
 2. `clip_generation.py` downloads/reuses media, scores clips, and renders vertical working clips.
 3. `subtitle_generation.py` burns subtitles, saves finished clips, writes theme metadata, and marks completed videos in `src/executed_id.json`.
 
-Actual social uploading is intentionally separate for now.
+YouTube uploading is optional and must be explicitly enabled with `--upload-youtube`.
 
 ## Quality And Speed Controls
 
@@ -89,6 +89,48 @@ Run one theme:
 ```powershell
 .\venv_313\Scripts\python.exe run.py --theme sports
 ```
+
+Run one theme and upload the finished clips to YouTube as private drafts:
+
+```powershell
+.\venv_313\Scripts\python.exe run.py --theme sports --upload-youtube
+```
+
+Upload only existing finished clips without rerunning fetch/clip/subtitle work:
+
+```powershell
+.\venv_313\Scripts\python.exe upload.py --theme sports
+```
+
+Limit a first upload test to one clip:
+
+```powershell
+.\venv_313\Scripts\python.exe upload.py --theme sports --limit 1
+```
+
+## YouTube OAuth
+
+Install the upload dependencies once:
+
+```powershell
+.\venv_313\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+The uploader uses this OAuth client ID by default:
+
+```text
+690163065093-voe56q26ls3orenmr3e8s9ec0s4fjtv5.apps.googleusercontent.com
+```
+
+The most reliable setup is to download the OAuth client JSON from Google Cloud and save it as:
+
+```text
+client_secrets.json
+```
+
+That file and the generated `youtube_token.json` are ignored by Git. On the first upload, a browser OAuth window will open and the token will be saved locally for future runs.
+
+YouTube uploads are created with `privacyStatus=private`, which makes them draft-like: they are uploaded with title, description, tags, and metadata, but are not public until you publish them in YouTube Studio.
 
 ## Output
 

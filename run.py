@@ -12,6 +12,16 @@ def parse_args():
         "--theme",
         help="Optional theme to run. Omit this to run every configured theme.",
     )
+    parser.add_argument(
+        "--upload-youtube",
+        action="store_true",
+        help="After subtitle generation, upload ready clips to YouTube as private drafts.",
+    )
+    parser.add_argument(
+        "--youtube-upload-limit",
+        type=int,
+        help="Optional max number of YouTube uploads per theme for this run.",
+    )
     return parser.parse_args()
 
 
@@ -37,7 +47,15 @@ def main():
     print("starting subtitle generation")
     run_subtitle_generation(theme=theme)
     print("subtitle generation complete")
-    print("upload-ready videos and metadata are prepared")
+
+    if args.upload_youtube:
+        print("starting YouTube private draft upload")
+        from upload import upload_youtube
+
+        upload_youtube(theme=theme, limit=args.youtube_upload_limit)
+        print("YouTube upload complete")
+    else:
+        print("upload-ready videos and metadata are prepared")
 
 
 if __name__ == "__main__":
