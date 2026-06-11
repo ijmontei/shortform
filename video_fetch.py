@@ -21,6 +21,9 @@ def build_ytdl_opts(extra_opts=None):
     opts = {
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": int(os.getenv("SHORTFORM_YTDLP_SOCKET_TIMEOUT", "18")),
+        "extractor_retries": int(os.getenv("SHORTFORM_YTDLP_EXTRACTOR_RETRIES", "2")),
+        "retries": int(os.getenv("SHORTFORM_YTDLP_RETRIES", "4")),
     }
 
     cookies_file = os.getenv(
@@ -34,6 +37,9 @@ def build_ytdl_opts(extra_opts=None):
     elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
         opts["cookiesfrombrowser"] = (cookies_browser,)
 
+    if os.getenv("SHORTFORM_FORCE_IPV4", "1") == "1":
+        opts["source_address"] = "0.0.0.0"
+
     if extra_opts:
         opts.update(extra_opts)
 
@@ -42,9 +48,11 @@ def build_ytdl_opts(extra_opts=None):
 
 def latest_video_for_channel(channel_url):
     ydl_opts = build_ytdl_opts({
-        "extract_flat": False,
+        "extract_flat": True,
         "playlist_items": "1",
+        "playlistend": 1,
         "simulate": True,
+        "skip_download": True,
     })
 
     try:
@@ -78,7 +86,11 @@ def latest_video_for_channel(channel_url):
             if raw_date
             else "N/A"
         )
-        video_url = video.get("webpage_url") or f"https://www.youtube.com/watch?v={video.get('id')}"
+        video_id = video.get("id") or video.get("url")
+        video_url = video.get("webpage_url") or video.get("url") or f"https://www.youtube.com/watch?v={video_id}"
+
+        if video_id and not str(video_url).startswith("http"):
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
 
         return {
             "title": video.get("title", "Unknown Title"),

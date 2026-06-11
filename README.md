@@ -43,6 +43,17 @@ $env:SHORTFORM_REGENERATE_UPLOAD_CLIPS="1"
 - `src/pulled.json` and `src/executed_id.json` include stage timestamps for fetched videos, clip generation, and completed upload-ready clips.
 - A source video is added to `src/executed_id.json` only after all rendered clips for that source have upload-ready outputs. Once complete, matching temp downloads, audio, transcripts, working clips, subtitle scratch files, and clip review files are deleted from `output/temp/<theme>`.
 - If a source video is already listed in `src/executed_id.json`, later runs skip it and clean any leftover matching temp files.
+- Downloads default to 720p source files for speed and use shorter network timeouts, retries, resume support, chunking, and IPv4 by default. To force heavier source quality:
+
+```powershell
+$env:SHORTFORM_SOURCE_MAX_HEIGHT="1080"
+```
+
+- If YouTube/DNS starts failing repeatedly, clip generation stops the current theme after two consecutive network failures instead of slowly trying every remaining video. Override with:
+
+```powershell
+$env:SHORTFORM_MAX_NETWORK_FAILURES="4"
+```
 
 ## Themes
 

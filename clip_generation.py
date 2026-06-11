@@ -101,7 +101,20 @@ YTDL_COMMON_OPTS = {
     "js_runtimes": {"node": {}},
     "allow_remote_features": True,
     "ignoreerrors": True,
+    "continuedl": True,
+    "retries": int(os.getenv("SHORTFORM_YTDLP_RETRIES", "6")),
+    "fragment_retries": int(os.getenv("SHORTFORM_YTDLP_FRAGMENT_RETRIES", "6")),
+    "extractor_retries": int(os.getenv("SHORTFORM_YTDLP_EXTRACTOR_RETRIES", "2")),
+    "file_access_retries": int(os.getenv("SHORTFORM_YTDLP_FILE_RETRIES", "2")),
+    "socket_timeout": int(os.getenv("SHORTFORM_YTDLP_SOCKET_TIMEOUT", "18")),
+    "concurrent_fragment_downloads": int(os.getenv("SHORTFORM_YTDLP_FRAGMENTS", "8")),
+    "throttledratelimit": int(os.getenv("SHORTFORM_YTDLP_THROTTLED_RATE", str(80 * 1024))),
+    "http_chunk_size": int(os.getenv("SHORTFORM_YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))),
+    "noplaylist": True,
 }
+
+SOURCE_MAX_HEIGHT = int(os.getenv("SHORTFORM_SOURCE_MAX_HEIGHT", "720"))
+MAX_CONSECUTIVE_NETWORK_FAILURES = int(os.getenv("SHORTFORM_MAX_NETWORK_FAILURES", "2"))
 
 
 def build_ytdl_opts(extra_opts=None):
@@ -117,6 +130,9 @@ def build_ytdl_opts(extra_opts=None):
         opts["cookiefile"] = cookies_file
     elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
         opts["cookiesfrombrowser"] = (cookies_browser,)
+
+    if os.getenv("SHORTFORM_FORCE_IPV4", "1") == "1":
+        opts["source_address"] = "0.0.0.0"
 
     if extra_opts:
         opts.update(extra_opts)
@@ -188,6 +204,25 @@ def assert_file_exists(filepath, label):
         raise FileNotFoundError(f"{label} was not created or is empty: {filepath}")
 
 
+def is_network_download_error(error):
+    message = str(error).lower()
+    network_markers = [
+        "connectionreseterror",
+        "connection broken",
+        "read timed out",
+        "timed out",
+        "failed to resolve",
+        "getaddrinfo failed",
+        "temporary failure in name resolution",
+        "httpsconnectionpool",
+        "unable to download api page",
+        "remote host",
+        "network is unreachable",
+        "download failed",
+    ]
+    return any(marker in message for marker in network_markers)
+
+
 # =========================
 # Download media
 # =========================
@@ -198,8 +233,8 @@ def download_media(video_url, cleaned_title):
 
     ydl_opts_combined = build_ytdl_opts({
         "format": (
-            "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
-            "best[height<=1080][ext=mp4]/"
+            f"bestvideo[height<={SOURCE_MAX_HEIGHT}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"best[height<={SOURCE_MAX_HEIGHT}][ext=mp4]/"
             "best[ext=mp4]/best"
         ),
         "merge_output_format": "mp4",
@@ -215,6 +250,12 @@ def download_media(video_url, cleaned_title):
 
         with yt_dlp.YoutubeDL(ydl_opts_combined) as ydl:
             ydl.download([video_url])
+
+        if os.path.exists(video_filename) and os.path.getsize(video_filename) == 0:
+            os.remove(video_filename)
+
+        if not os.path.exists(video_filename) or os.path.getsize(video_filename) <= 0:
+            raise RuntimeError(f"download failed: media file was not created for {video_url}")
 
     assert_file_exists(video_filename, "Downloaded video")
 
@@ -2603,15 +2644,18 @@ def process_video(video_record):
     try:
         start_video_total = time.time()
         video_url = video_record["video_url"]
+        video_record["_last_error_type"] = ""
+        video_title = video_record.get("title") or ""
 
-        with yt_dlp.YoutubeDL(build_ytdl_opts()) as ydl:
-            info = ydl.extract_info(video_url, download=False)
+        if not video_title:
+            with yt_dlp.YoutubeDL(build_ytdl_opts()) as ydl:
+                info = ydl.extract_info(video_url, download=False)
 
-            if info is None:
-                print(f"Skipping unreadable/throttled video: {video_url}")
-                return False
+                if info is None:
+                    print(f"Skipping unreadable/throttled video: {video_url}")
+                    return False
 
-            video_title = info.get("title", "Unknown_Video")
+                video_title = info.get("title", "Unknown_Video")
 
         cleaned_title = clean_title_for_filename(video_title)
 
@@ -2633,6 +2677,11 @@ def process_video(video_record):
         return bool(rendered_count)
 
     except Exception as e:
+        if is_network_download_error(e):
+            video_record["_last_error_type"] = "network"
+        else:
+            video_record["_last_error_type"] = "processing"
+
         print(f"Failed to process video: {video_record.get('video_url')}\n{e}\n")
         return False
 
@@ -2690,14 +2739,33 @@ def run_clip_generation_for_theme(theme_name):
     )
     print(f"Videos left to process: {len(videos_to_process)}\n")
 
+    consecutive_network_failures = 0
+
     for state_key, record in videos_to_process:
         record["state_key"] = state_key
-        if process_video(record):
+        processed = process_video(record)
+
+        if processed:
+            consecutive_network_failures = 0
             mark_stage(pulled_data[state_key], "clips_generated")
             write_json_file(PULLED_FILE, pulled_data)
         else:
+            if record.get("_last_error_type") == "network":
+                consecutive_network_failures += 1
+            else:
+                consecutive_network_failures = 0
+
             pulled_data[state_key]["last_clip_generation_attempt_at"] = utc_timestamp()
+            pulled_data[state_key]["last_clip_generation_error_type"] = record.get("_last_error_type", "processing")
             write_json_file(PULLED_FILE, pulled_data)
+
+            if consecutive_network_failures >= MAX_CONSECUTIVE_NETWORK_FAILURES:
+                print(
+                    "Stopping this theme after "
+                    f"{consecutive_network_failures} consecutive network/download failures. "
+                    "Check the internet/DNS connection and rerun; completed videos will be skipped."
+                )
+                break
 
     print(f"Updated pulled registry: {PULLED_FILE}")
     print(f"Theme '{CURRENT_THEME}' finished. Total run time: {time.time() - run_start:.2f} seconds\n")
