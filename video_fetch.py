@@ -11,6 +11,7 @@ from theme_config import (
     ensure_theme,
     load_json_file,
     load_theme_config,
+    mark_stage,
     video_state_key,
     write_json_file,
 )
@@ -118,16 +119,24 @@ def run_video_fetch_for_theme(theme_name):
         if not latest_video:
             continue
 
+        pulled_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
         latest_video["theme"] = theme
-        latest_video["pulled_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        latest_video["pulled_at"] = pulled_at
         state_key = video_state_key(theme, latest_video["video_url"])
 
         if state_key in pulled:
             refreshed_count += 1
+            existing_record = pulled.get(state_key, {})
         else:
             new_count += 1
+            existing_record = {}
 
-        pulled[state_key] = latest_video
+        merged_record = {
+            **existing_record,
+            **latest_video,
+        }
+        mark_stage(merged_record, "fetched", pulled_at)
+        pulled[state_key] = merged_record
 
     write_json_file(PULLED_FILE, pulled)
 

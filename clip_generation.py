@@ -21,6 +21,8 @@ from theme_config import (
     discover_themes,
     ensure_theme,
     load_json_file,
+    mark_stage,
+    utc_timestamp,
     write_json_file,
 )
 
@@ -390,7 +392,7 @@ def clamp_center_x(center_x, resized_w, output_width):
     return resized_w / 2
 
 
-def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
+def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=None):
     """
     Converts a horizontal clip into 1080x1920 vertical format with a restrained
     face-first virtual camera. Interview footage should stay centered around
@@ -441,7 +443,7 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
     previous_detection_gray = None
     camera_positions = []
 
-    face_cascades = load_face_cascades()
+    face_cascades = face_cascades or load_face_cascades()
 
     detection_interval_seconds = 0.35
     skip_frames = max(1, int(round(fps * detection_interval_seconds)))
@@ -868,6 +870,83 @@ def build_render_qc(video_path, crop_stats, expected_duration):
     }
 
 
+def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
+    cap = cv2.VideoCapture(temp_subclip)
+    result = {
+        "sampled_frames": 0,
+        "face_frames": 0,
+        "black_frame_ratio": 1.0,
+        "face_presence_rate": 0.0,
+        "passed": False,
+        "flags": [],
+    }
+
+    if not cap.isOpened():
+        result["flags"].append("could not open preflight clip")
+        return result
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    if frame_count <= 0:
+        cap.release()
+        result["flags"].append("no frames for preflight")
+        return result
+
+    black_frames = 0
+
+    for frame_index in np.linspace(0, max(0, frame_count - 1), num=min(max_samples, frame_count), dtype=int):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+        ret, frame = cap.read()
+
+        if not ret or frame is None:
+            continue
+
+        result["sampled_frames"] += 1
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        if float(np.mean(gray)) < 8.0:
+            black_frames += 1
+            continue
+
+        h, w = frame.shape[:2]
+        scale = min(1.0, 640 / max(1, h))
+        detection_frame = cv2.resize(
+            frame,
+            (max(1, int(w * scale)), max(1, int(h * scale))),
+            interpolation=cv2.INTER_AREA,
+        ) if scale < 1.0 else frame
+        faces = [
+            face
+            for face in detect_faces(detection_frame, face_cascades)
+            if is_plausible_interview_face(
+                face,
+                frame_width=detection_frame.shape[1],
+                frame_height=detection_frame.shape[0],
+            )
+        ]
+
+        if faces:
+            result["face_frames"] += 1
+
+    cap.release()
+
+    if result["sampled_frames"] <= 0:
+        result["flags"].append("no readable preflight frames")
+        return result
+
+    result["black_frame_ratio"] = black_frames / result["sampled_frames"]
+    result["face_presence_rate"] = result["face_frames"] / result["sampled_frames"]
+
+    if result["black_frame_ratio"] > 0.10:
+        result["flags"].append("preflight black frames")
+
+    if result["face_presence_rate"] < 0.20:
+        result["flags"].append("low preflight face presence")
+
+    result["passed"] = not result["flags"]
+    return result
+
+
 # =========================
 # Viral clip scoring
 # =========================
@@ -891,6 +970,7 @@ class CandidateClip:
     topic_fingerprint: list = field(default_factory=list)
     suggested_title: str = ""
     suggested_caption: str = ""
+    suggested_description: str = ""
     hashtags: list = field(default_factory=list)
     render_qc: dict = field(default_factory=dict)
     output_file: str = ""
@@ -1105,6 +1185,163 @@ HASHTAG_KEYWORDS = {
     "jobs": "#career",
 }
 
+THEME_SCORING_PROFILES = {
+    "finance": {
+        "keywords": {
+            "cash flow": 2.1,
+            "investing": 1.9,
+            "portfolio": 1.7,
+            "valuation": 2.0,
+            "startup": 1.8,
+            "founder": 1.6,
+            "market": 1.5,
+            "recession": 2.2,
+            "inflation": 2.0,
+            "interest rates": 2.0,
+            "net worth": 2.1,
+        },
+        "hashtags": ["#finance", "#money", "#investing", "#business", "#shorts"],
+        "topic_tags": {
+            "investing": "#investing",
+            "startup": "#startups",
+            "founder": "#founders",
+            "market": "#markets",
+            "inflation": "#inflation",
+            "valuation": "#business",
+        },
+    },
+    "sports": {
+        "keywords": {
+            "championship": 2.2,
+            "playoffs": 2.0,
+            "draft": 1.9,
+            "trade": 1.8,
+            "locker room": 2.0,
+            "coach": 1.5,
+            "quarterback": 1.8,
+            "nba": 1.8,
+            "nfl": 1.8,
+            "legacy": 1.7,
+            "rivalry": 2.0,
+        },
+        "hashtags": ["#sports", "#nfl", "#nba", "#podcast", "#shorts"],
+        "topic_tags": {
+            "nfl": "#nfl",
+            "nba": "#nba",
+            "draft": "#draft",
+            "playoffs": "#playoffs",
+            "quarterback": "#football",
+            "trade": "#sportsnews",
+        },
+    },
+    "religion": {
+        "keywords": {
+            "faith": 1.8,
+            "god": 1.8,
+            "church": 1.5,
+            "bible": 1.8,
+            "prayer": 1.7,
+            "sin": 2.0,
+            "truth": 1.8,
+            "meaning": 1.6,
+            "christian": 1.8,
+            "spiritual": 1.5,
+        },
+        "hashtags": ["#faith", "#religion", "#christian", "#podcast", "#shorts"],
+        "topic_tags": {
+            "faith": "#faith",
+            "god": "#god",
+            "bible": "#bible",
+            "church": "#church",
+            "prayer": "#prayer",
+            "christian": "#christian",
+        },
+    },
+    "politics": {
+        "keywords": {
+            "election": 2.2,
+            "policy": 1.8,
+            "border": 2.0,
+            "congress": 1.8,
+            "senate": 1.7,
+            "president": 1.8,
+            "media": 1.7,
+            "corruption": 2.4,
+            "democrat": 1.7,
+            "republican": 1.7,
+        },
+        "hashtags": ["#politics", "#news", "#government", "#podcast", "#shorts"],
+        "topic_tags": {
+            "election": "#election",
+            "policy": "#policy",
+            "border": "#border",
+            "congress": "#congress",
+            "media": "#media",
+            "corruption": "#politics",
+        },
+    },
+    "self_improvement": {
+        "keywords": {
+            "discipline": 2.0,
+            "habits": 1.9,
+            "mindset": 1.8,
+            "confidence": 1.6,
+            "purpose": 1.7,
+            "anxiety": 1.8,
+            "focus": 1.6,
+            "motivation": 1.4,
+            "health": 1.5,
+            "sleep": 1.6,
+            "dopamine": 1.7,
+        },
+        "hashtags": ["#selfimprovement", "#mindset", "#motivation", "#growth", "#shorts"],
+        "topic_tags": {
+            "discipline": "#discipline",
+            "habits": "#habits",
+            "mindset": "#mindset",
+            "confidence": "#confidence",
+            "anxiety": "#mentalhealth",
+            "sleep": "#health",
+            "focus": "#productivity",
+        },
+    },
+}
+
+CLAIM_PATTERNS = [
+    r"\bmost people (are|think|get|miss|don'?t)\b",
+    r"\bthe reason (is|why)\b",
+    r"\bthis is why\b",
+    r"\bthat'?s why\b",
+    r"\bthe truth is\b",
+    r"\bthe problem is\b",
+    r"\byou should never\b",
+    r"\byou have to\b",
+    r"\bwhat people don'?t understand\b",
+    r"\bno one talks about\b",
+    r"\bnobody talks about\b",
+]
+
+PAYOFF_PATTERNS = [
+    r"\bbecause\b",
+    r"\bthat means\b",
+    r"\bwhich means\b",
+    r"\bas a result\b",
+    r"\bso the answer\b",
+    r"\bthe answer is\b",
+    r"\bwhat happens is\b",
+    r"\bthat'?s the point\b",
+]
+
+HOOK_TYPE_PATTERNS = [
+    ("disagreement", r"\b(i disagree|you'?re wrong|that'?s wrong|not true|push back)\b"),
+    ("confession", r"\b(i realized|i learned|i regret|i was wrong|honestly)\b"),
+    ("prediction", r"\b(will happen|going to happen|in the future|next decade|prediction)\b"),
+    ("warning", r"\b(be careful|danger|risk|warning|terrifying|scary|trap)\b"),
+    ("money_or_numbers", r"\$\s?\d+|\b\d+[\d,.]*%?\b|\bmillion\b|\bbillion\b"),
+    ("belief_vs_truth", r"\b(everyone thinks|most people think|the truth is|actual reality)\b"),
+    ("question", r"\?"),
+]
+
 
 def normalize_array(values):
     values = np.asarray(values, dtype=np.float32)
@@ -1126,6 +1363,49 @@ def saturating_score(value, scale):
         return 0.0
 
     return float(1 - np.exp(-value / scale))
+
+
+def get_theme_profile(theme_name=None):
+    return THEME_SCORING_PROFILES.get(theme_name or CURRENT_THEME, {})
+
+
+def combined_keyword_weights(theme_name=None):
+    profile = get_theme_profile(theme_name)
+    return {
+        **VIRAL_KEYWORD_WEIGHTS,
+        **profile.get("keywords", {}),
+    }
+
+
+def theme_topic_tags(theme_name=None):
+    profile = get_theme_profile(theme_name)
+    return {
+        **HASHTAG_KEYWORDS,
+        **profile.get("topic_tags", {}),
+    }
+
+
+def clean_transcript_text(text):
+    text = re.sub(r"\s+", " ", text).strip()
+    tokens = text.split()
+    cleaned_tokens = []
+
+    for token in tokens:
+        normalized = re.sub(r"[^a-zA-Z0-9']", "", token).lower()
+        previous = ""
+
+        if cleaned_tokens:
+            previous = re.sub(r"[^a-zA-Z0-9']", "", cleaned_tokens[-1]).lower()
+
+        if normalized and normalized == previous:
+            continue
+
+        cleaned_tokens.append(token)
+
+    text = " ".join(cleaned_tokens)
+    text = re.sub(r"\b(i'?m)\s+\1\b", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(you know|i mean|sort of|kind of)\b(?:,?\s+\1\b)+", r"\1", text, flags=re.IGNORECASE)
+    return text.strip()
 
 
 def words_from_text(text):
@@ -1150,6 +1430,7 @@ def compact_text(text, max_chars=90):
 def extract_topic_fingerprint(text, max_terms=10):
     words = words_from_text(text)
     weighted_terms = {}
+    keyword_weights = combined_keyword_weights()
 
     for word in words:
         if word in STOPWORDS or len(word) < 3:
@@ -1166,7 +1447,7 @@ def extract_topic_fingerprint(text, max_terms=10):
 
         weighted_terms[word] = weighted_terms.get(word, 0.0) + weight
 
-    for phrase, weight in VIRAL_KEYWORD_WEIGHTS.items():
+    for phrase, weight in keyword_weights.items():
         if " " in phrase and phrase in text.lower():
             weighted_terms[phrase.replace(" ", "_")] = weighted_terms.get(phrase.replace(" ", "_"), 0.0) + weight
 
@@ -1186,8 +1467,36 @@ def topic_similarity(left_terms, right_terms):
     return len(left & right) / len(left | right)
 
 
+def load_existing_theme_topic_fingerprints():
+    fingerprints = []
+
+    if not metadata_path or not os.path.isdir(metadata_path):
+        return fingerprints
+
+    for filename in os.listdir(metadata_path):
+        if not filename.endswith("_clip_review.json"):
+            continue
+
+        try:
+            with open(os.path.join(metadata_path, filename), "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+
+        for clip in payload.get("selected", []):
+            terms = clip.get("topic_fingerprint", [])
+
+            if terms:
+                fingerprints.append(terms)
+
+    return fingerprints
+
+
 def explain_hook(text, text_details, opening_score, audio_score):
     normalized_text = text.lower()
+
+    if text_details.get("hook_type"):
+        return f"{text_details['hook_type']} hook"
 
     for pattern in HOOK_PATTERNS:
         match = re.search(pattern, normalized_text)
@@ -1216,6 +1525,16 @@ def explain_hook(text, text_details, opening_score, audio_score):
         return "high audio energy"
 
     return "balanced interest signals"
+
+
+def detect_hook_type(text):
+    normalized_text = text.lower()
+
+    for hook_type, pattern in HOOK_TYPE_PATTERNS:
+        if re.search(pattern, normalized_text):
+            return hook_type
+
+    return ""
 
 
 def score_boundary_quality(matching_segments, clip_start, clip_end):
@@ -1315,10 +1634,39 @@ def naturalize_clip_window(segments, provisional_start, duration, total_duration
             if segment["end"] <= clip_end + 0.05
         ]
 
+    while matching_segments:
+        closing_text = matching_segments[-1]["text"].strip()
+
+        if closing_text and closing_text[-1] in ".?!":
+            break
+
+        next_segment = next(
+            (
+                segment
+                for segment in segments
+                if segment["start"] >= matching_segments[-1]["end"]
+            ),
+            None,
+        )
+
+        if not next_segment:
+            break
+
+        gap = float(next_segment["start"]) - float(matching_segments[-1]["end"])
+        proposed_end = float(next_segment["end"]) + 0.18
+
+        if gap > 1.4 or proposed_end - clip_start > MAX_CLIP_DURATION:
+            break
+
+        matching_segments.append(next_segment)
+        clip_end = min(total_duration, proposed_end)
+
     return clip_start, clip_end, matching_segments
 
 
-def build_suggested_copy(text, hook_reason, topic_terms):
+def build_suggested_copy(text, hook_reason, topic_terms, text_details=None):
+    text = clean_transcript_text(text)
+    text_details = text_details or {}
     sentences = [
         compact_text(sentence, 78)
         for sentence in re.split(r"(?<=[.?!])\s+", text)
@@ -1341,13 +1689,23 @@ def build_suggested_copy(text, hook_reason, topic_terms):
     if title and title[-1] not in ".?!":
         title = title.rstrip(",;:")
 
-    hook_label = hook_reason.replace("hook phrase: ", "").replace("mainstream topic: ", "")
-    caption = compact_text(f"{title} ({hook_label})", 120)
+    hook_type = text_details.get("hook_type", "")
+    hook_label = (
+        hook_type.replace("_", " ")
+        or hook_reason.replace("hook phrase: ", "").replace("mainstream topic: ", "")
+    )
+    caption = compact_text(f"{title} | {hook_label}", 140)
+    description = compact_text(
+        f"{title} {compact_text(text, 180)}",
+        260,
+    )
 
     hashtags = []
+    tag_lookup = theme_topic_tags()
+
     for term in topic_terms:
         normalized = term.replace("_", " ")
-        tag = HASHTAG_KEYWORDS.get(normalized) or HASHTAG_KEYWORDS.get(normalized.split(" ")[0])
+        tag = tag_lookup.get(normalized) or tag_lookup.get(normalized.split(" ")[0])
 
         if tag and tag not in hashtags:
             hashtags.append(tag)
@@ -1355,11 +1713,11 @@ def build_suggested_copy(text, hook_reason, topic_terms):
         if len(hashtags) >= 4:
             break
 
-    for fallback in ["#podcast", "#shorts"]:
+    for fallback in get_theme_profile().get("hashtags", ["#podcast", "#shorts"]):
         if fallback not in hashtags:
             hashtags.append(fallback)
 
-    return title, caption, hashtags[:5]
+    return title, caption, hashtags[:7], description
 
 
 def candidate_to_dict(candidate):
@@ -1410,6 +1768,7 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
         "topic_fingerprint",
         "suggested_title",
         "suggested_caption",
+        "suggested_description",
         "hashtags",
         "output_file",
         "qc_passed",
@@ -1441,6 +1800,7 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
                 "topic_fingerprint": ", ".join(clip.topic_fingerprint),
                 "suggested_title": clip.suggested_title,
                 "suggested_caption": clip.suggested_caption,
+                "suggested_description": clip.suggested_description,
                 "hashtags": " ".join(clip.hashtags),
                 "output_file": clip.output_file,
                 "qc_passed": clip.render_qc.get("passed", "") if clip.render_qc else "",
@@ -1635,13 +1995,15 @@ def analyze_audio_features(audio_filename, cleaned_title):
 
 
 def score_text_window(text):
+    text = clean_transcript_text(text)
     normalized_text = text.lower()
     words = re.findall(r"[a-zA-Z][a-zA-Z']+", normalized_text)
     word_count = max(1, len(words))
+    keyword_weights = combined_keyword_weights()
 
     weighted_keyword_total = 0.0
 
-    for phrase, weight in VIRAL_KEYWORD_WEIGHTS.items():
+    for phrase, weight in keyword_weights.items():
         if " " in phrase:
             weighted_keyword_total += normalized_text.count(phrase) * weight
         else:
@@ -1669,6 +2031,9 @@ def score_text_window(text):
         normalized_text,
     ))
     contrast_hits = len(re.findall(r"\b(but|however|instead|actually|the problem is|the truth is)\b", normalized_text))
+    claim_hits = sum(1 for pattern in CLAIM_PATTERNS if re.search(pattern, normalized_text))
+    explicit_payoff_hits = sum(1 for pattern in PAYOFF_PATTERNS if re.search(pattern, normalized_text))
+    hook_type = detect_hook_type(text)
 
     density_base = max(35, word_count)
     keyword_density = weighted_keyword_total * 100 / density_base
@@ -1691,20 +2056,24 @@ def score_text_window(text):
     conflict_score = saturating_score(conflict_density, 4.3)
     specificity_score = saturating_score(specificity_hits, 3.2)
     payoff_score = saturating_score(payoff_hits + contrast_hits * 0.65, 3.0)
+    claim_score = saturating_score(claim_hits + (1 if hook_type else 0), 2.4)
+    resolution_score = saturating_score(explicit_payoff_hits + payoff_hits, 2.2)
 
     filler_ratio = filler_hits / word_count
     filler_penalty = min(0.35, max(0.0, filler_ratio - 0.22) * 1.8)
     clarity_score = max(0.0, 1.0 - filler_penalty)
 
     text_score = (
-        0.20 * hook_score
-        + 0.16 * keyword_score
-        + 0.15 * conflict_score
-        + 0.14 * emotion_score
-        + 0.13 * topic_score
-        + 0.11 * specificity_score
-        + 0.07 * payoff_score
-        + 0.04 * clarity_score
+        0.17 * hook_score
+        + 0.14 * keyword_score
+        + 0.12 * conflict_score
+        + 0.11 * emotion_score
+        + 0.11 * topic_score
+        + 0.10 * specificity_score
+        + 0.10 * payoff_score
+        + 0.09 * claim_score
+        + 0.04 * resolution_score
+        + 0.02 * clarity_score
     )
 
     text_score = max(0.0, min(0.98, text_score * clarity_score))
@@ -1718,9 +2087,12 @@ def score_text_window(text):
         "topic_score": float(topic_score),
         "specificity_score": float(specificity_score),
         "payoff_score": float(payoff_score),
+        "claim_score": float(claim_score),
+        "resolution_score": float(resolution_score),
         "clarity_score": float(clarity_score),
         "filler_ratio": float(filler_ratio),
         "word_count": int(word_count),
+        "hook_type": hook_type,
     }
 
 
@@ -1827,7 +2199,7 @@ def build_candidate_clips(transcript_payload, audio_payload):
             if actual_duration < MIN_CLIP_DURATION or not matching_segments:
                 continue
 
-            text = " ".join(segment["text"] for segment in matching_segments)
+            text = clean_transcript_text(" ".join(segment["text"] for segment in matching_segments))
             words = re.findall(r"[a-zA-Z][a-zA-Z']+", text)
 
             if len(words) < MIN_WORDS_PER_CANDIDATE:
@@ -1838,7 +2210,7 @@ def build_candidate_clips(transcript_payload, audio_payload):
                 for segment in matching_segments
                 if segment["start"] < clip_start + 12
             ]
-            opening_text = " ".join(segment["text"] for segment in opening_segments)
+            opening_text = clean_transcript_text(" ".join(segment["text"] for segment in opening_segments))
 
             start_index = max(0, int(clip_start))
             end_index = min(total_duration, max(start_index + 1, int(np.ceil(clip_end))))
@@ -1887,10 +2259,11 @@ def build_candidate_clips(transcript_payload, audio_payload):
                 opening_score=opening_score,
                 audio_score=audio_score,
             )
-            suggested_title, suggested_caption, hashtags = build_suggested_copy(
+            suggested_title, suggested_caption, hashtags, suggested_description = build_suggested_copy(
                 text=text,
                 hook_reason=hook_reason,
                 topic_terms=topic_terms,
+                text_details=text_details,
             )
 
             score = (
@@ -1924,14 +2297,16 @@ def build_candidate_clips(transcript_payload, audio_payload):
                 topic_fingerprint=topic_terms,
                 suggested_title=suggested_title,
                 suggested_caption=suggested_caption,
+                suggested_description=suggested_description,
                 hashtags=hashtags,
             ))
 
     return candidates
 
 
-def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO):
+def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO, existing_fingerprints=None):
     selected = []
+    existing_fingerprints = existing_fingerprints or []
 
     for candidate in sorted(candidates, key=lambda item: item.score, reverse=True):
         if candidate.score < MIN_SELECTED_CLIP_SCORE:
@@ -1953,9 +2328,17 @@ def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO):
             ),
             default=0.0,
         )
-        candidate.diversity_score = float(1.0 - max_topic_overlap)
+        max_existing_overlap = max(
+            (
+                topic_similarity(candidate.topic_fingerprint, fingerprint)
+                for fingerprint in existing_fingerprints
+            ),
+            default=0.0,
+        )
+        max_total_overlap = max(max_topic_overlap, max_existing_overlap)
+        candidate.diversity_score = float(1.0 - max_total_overlap)
 
-        if max_topic_overlap > MAX_TOPIC_SIMILARITY:
+        if max_total_overlap > MAX_TOPIC_SIMILARITY:
             continue
 
         selected.append(candidate)
@@ -1972,7 +2355,8 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en"):
     transcript_payload = transcribe_audio_segments(audio_filename, cleaned_title, lang_code)
     audio_payload = analyze_audio_features(audio_filename, cleaned_title)
     candidates = build_candidate_clips(transcript_payload, audio_payload)
-    clips = select_non_overlapping_clips(candidates)
+    existing_fingerprints = load_existing_theme_topic_fingerprints()
+    clips = select_non_overlapping_clips(candidates, existing_fingerprints=existing_fingerprints)
 
     scoring_filepath = os.path.join(
         transcriptions_path,
@@ -2052,6 +2436,8 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
     else:
         print("YOLO person fallback disabled; framing will lock only to plausible faces.")
 
+    face_cascades = load_face_cascades()
+    allow_low_face_preflight = os.getenv("SHORTFORM_ALLOW_LOW_FACE_PREFLIGHT") == "1"
     clip_number = 1
     rendered_count = 0
 
@@ -2116,6 +2502,21 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
 
             print(f" -> Step 1 (FFmpeg Cutting) took: {time.time() - start_step1:.2f} seconds")
 
+            preflight_qc = preflight_clip_visual_qc(temp_subclip, face_cascades)
+
+            if not preflight_qc.get("passed"):
+                flags = preflight_qc.get("flags", [])
+                print(f" -> Preflight visual QC warnings: {', '.join(flags)}")
+
+                if not allow_low_face_preflight:
+                    clip.render_qc = {
+                        "passed": False,
+                        "flags": flags,
+                        "preflight": preflight_qc,
+                    }
+                    print(" -> Skipping render because the clip does not have a reliable face target.")
+                    continue
+
             # STEP 2: Smart crop / reframe with OpenCV + YOLO
             start_step2 = time.time()
 
@@ -2123,6 +2524,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
                 temp_subclip=temp_subclip,
                 temp_tracked_avi=temp_tracked_avi,
                 model=model,
+                face_cascades=face_cascades,
             )
 
             print(f" -> Step 2 (OpenCV Smart Cropping) took: {time.time() - start_step2:.2f} seconds")
@@ -2156,6 +2558,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
                 crop_stats=crop_stats,
                 expected_duration=duration,
             )
+            clip.render_qc["preflight"] = preflight_qc
 
             print(f" -> Step 3 (FFmpeg Audio Muxing) took: {time.time() - start_step3:.2f} seconds")
 
@@ -2271,19 +2674,29 @@ def run_clip_generation_for_theme(theme_name):
     videos_to_process = [
         (state_key, record)
         for state_key, record in theme_records
-        if state_key not in executed_data and not record.get("clips_generated_at")
+        if (
+            state_key not in executed_data
+            and not record.get("clips_generated_at")
+            and not record.get("stages", {}).get("clips_generated")
+        )
     ]
 
     print(f"=== Generating clips for theme: {CURRENT_THEME} ===")
     print(f"Videos found: {len(theme_records)}")
     print(f"Already completed: {sum(1 for key in executed_data if key.startswith(CURRENT_THEME + '|'))}")
-    print(f"Clips already generated: {sum(1 for _, record in theme_records if record.get('clips_generated_at'))}")
+    print(
+        "Clips already generated: "
+        f"{sum(1 for _, record in theme_records if record.get('clips_generated_at') or record.get('stages', {}).get('clips_generated'))}"
+    )
     print(f"Videos left to process: {len(videos_to_process)}\n")
 
     for state_key, record in videos_to_process:
         record["state_key"] = state_key
         if process_video(record):
-            pulled_data[state_key]["clips_generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            mark_stage(pulled_data[state_key], "clips_generated")
+            write_json_file(PULLED_FILE, pulled_data)
+        else:
+            pulled_data[state_key]["last_clip_generation_attempt_at"] = utc_timestamp()
             write_json_file(PULLED_FILE, pulled_data)
 
     print(f"Updated pulled registry: {PULLED_FILE}")

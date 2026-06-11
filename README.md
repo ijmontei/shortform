@@ -15,6 +15,12 @@ Actual social uploading is intentionally separate for now.
 ## Quality And Speed Controls
 
 - Face framing ignores low-frame hand/notebook false positives and locks only to plausible interview faces.
+- Raw clips now run a pre-render visual QC pass. Clips with too many black frames or too little reliable face presence are skipped before the slower crop/mux/subtitle work. To force rendering while reviewing an edge case:
+
+```powershell
+$env:SHORTFORM_ALLOW_LOW_FACE_PREFLIGHT="1"
+```
+
 - YOLO person fallback is disabled by default for speed and to avoid body/hand-driven framing. Enable it only when needed:
 
 ```powershell
@@ -27,6 +33,14 @@ $env:SHORTFORM_ENABLE_PERSON_FALLBACK="1"
 $env:SHORTFORM_SUBTITLE_BEAM_SIZE="5"
 $env:SHORTFORM_SUBTITLE_BEST_OF="5"
 ```
+
+- Finished upload clips are skipped on reruns by default. To regenerate subtitle burn-ins:
+
+```powershell
+$env:SHORTFORM_REGENERATE_UPLOAD_CLIPS="1"
+```
+
+- `src/pulled.json` and `src/executed_id.json` include stage timestamps for fetched videos, clip generation, and completed upload-ready clips.
 
 ## Themes
 
@@ -88,7 +102,7 @@ Final subtitled clips live in:
 output/themes/<theme>/content
 ```
 
-Titles, captions, tags, hashtags, platform copy, hook reasons, and score details live in:
+Titles, descriptions, captions, tags, hashtags, platform copy, review fields, metrics placeholders, hook reasons, and score details live in:
 
 ```text
 output/themes/<theme>/metadata.json

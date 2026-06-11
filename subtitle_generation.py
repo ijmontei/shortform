@@ -11,6 +11,7 @@ from theme_config import (
     discover_themes,
     ensure_theme,
     load_json_file,
+    mark_stage,
     write_json_file,
 )
 
@@ -49,7 +50,7 @@ if not os.path.exists(FFMPEG_EXE):
 SUBTITLE_MODEL_SIZE = os.getenv("SHORTFORM_SUBTITLE_MODEL", "base")
 SUBTITLE_BEAM_SIZE = int(os.getenv("SHORTFORM_SUBTITLE_BEAM_SIZE", "1"))
 SUBTITLE_BEST_OF = int(os.getenv("SHORTFORM_SUBTITLE_BEST_OF", str(SUBTITLE_BEAM_SIZE)))
-REGENERATE_UPLOAD_CLIPS = True
+REGENERATE_UPLOAD_CLIPS = os.getenv("SHORTFORM_REGENERATE_UPLOAD_CLIPS", "0") == "1"
 CAPTION_FONT_FAMILY = "Montserrat"
 
 MAX_WORDS_PER_CAPTION = 4
@@ -353,11 +354,21 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
     title = clip_metadata.get("suggested_title") or basename.replace("_upload", "").replace("_", " ")
     caption = clip_metadata.get("suggested_caption") or title
     hashtags = clip_metadata.get("hashtags") or ["#podcast", "#shorts"]
+    description = (
+        clip_metadata.get("suggested_description")
+        or f"{caption}\n\n{' '.join(hashtags)}"
+    )
     plain_tags = [
         tag.lstrip("#")
         for tag in hashtags
         if tag.strip("#")
     ]
+    high_level_tags = [
+        tag
+        for tag in ["shorts", "podcast", "interview", "viral", CURRENT_THEME.replace("_", " ")]
+        if tag and tag not in plain_tags
+    ]
+    all_tags = (plain_tags + high_level_tags)[:15]
 
     package = {
         "theme": CURRENT_THEME,
@@ -369,16 +380,22 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
         "title": title[:95],
         "caption": caption,
         "hashtags": hashtags,
-        "tags": plain_tags,
-        "description": f"{caption}\n\n{' '.join(hashtags)}",
+        "tags": all_tags,
+        "description": description,
         "transcript_excerpt": transcript[:500],
         "hook_reason": clip_metadata.get("hook_reason", ""),
         "score": clip_metadata.get("score"),
+        "review": {
+            "quality_rating": "",
+            "approved": False,
+            "rejection_reason": "",
+            "notes": "",
+        },
         "platforms": {
             "youtube_shorts": {
                 "title": title[:95],
-                "description": f"{caption}\n\n{' '.join(hashtags)}",
-                "tags": plain_tags,
+                "description": description,
+                "tags": all_tags,
                 "privacy_status": "private",
             },
             "tiktok": {
@@ -396,6 +413,12 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
             "tiktok": "ready",
             "instagram_reels": "ready",
             "facebook_reels": "ready",
+        },
+        "platform_metrics": {
+            "youtube_shorts": {"posted": False, "views": 0, "likes": 0, "comments": 0, "shares": 0},
+            "tiktok": {"posted": False, "views": 0, "likes": 0, "comments": 0, "shares": 0},
+            "instagram_reels": {"posted": False, "views": 0, "likes": 0, "comments": 0, "shares": 0},
+            "facebook_reels": {"posted": False, "views": 0, "likes": 0, "comments": 0, "shares": 0},
         },
     }
 
@@ -456,14 +479,16 @@ def mark_video_completed(package):
     if FINAL_METADATA_FILE not in metadata_files:
         metadata_files.append(FINAL_METADATA_FILE)
 
-    executed[source_state_key] = {
+    completed_record = {
+        **existing,
         "theme": package.get("theme", CURRENT_THEME),
         "video_url": package.get("source_video_url", ""),
         "title": package.get("source_title", ""),
-        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "final_video_files": final_video_files,
         "metadata_files": metadata_files,
     }
+    mark_stage(completed_record, "completed")
+    executed[source_state_key] = completed_record
     write_json_file(EXECUTED_FILE, executed)
 
 
@@ -479,6 +504,15 @@ def process_clip(model, clip_path):
         and os.path.getsize(output_path) > 0
     ):
         print(f"Skipping existing upload clip: {output_filename}")
+        metadata_index = load_clip_metadata_index()
+        package = build_social_package(
+            clip_path=clip_path,
+            output_path=output_path,
+            words=[],
+            clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
+        )
+        write_social_package(output_path, package)
+        mark_video_completed(package)
         return output_path
 
     ass_path = os.path.join(SUBTITLE_TEMP_PATH, f"{clean_filename(basename)}.ass")

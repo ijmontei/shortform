@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +41,18 @@ def write_json_file(path, payload):
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
+
+
+def utc_timestamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def mark_stage(record, stage_name, timestamp=None):
+    timestamp = timestamp or utc_timestamp()
+    stages = record.setdefault("stages", {})
+    stages[stage_name] = timestamp
+    record[f"{stage_name}_at"] = timestamp
+    return timestamp
 
 
 def theme_config_path(theme_name):
