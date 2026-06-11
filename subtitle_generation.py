@@ -25,18 +25,25 @@ FONTS_PATH = os.path.join(BASE_DIR, "assets", "fonts")
 CURRENT_THEME = None
 CLIPS_PATH = None
 UPLOAD_PATH = None
+VIDEOS_PATH = None
+AUDIO_PATH = None
+TRANSCRIPTIONS_PATH = None
 SUBTITLE_TEMP_PATH = None
 METADATA_PATH = None
 FINAL_METADATA_FILE = None
 
 
 def configure_theme(theme_name):
-    global CURRENT_THEME, CLIPS_PATH, UPLOAD_PATH, SUBTITLE_TEMP_PATH, METADATA_PATH, FINAL_METADATA_FILE
+    global CURRENT_THEME, CLIPS_PATH, UPLOAD_PATH, VIDEOS_PATH, AUDIO_PATH
+    global TRANSCRIPTIONS_PATH, SUBTITLE_TEMP_PATH, METADATA_PATH, FINAL_METADATA_FILE
 
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
     CLIPS_PATH = theme_paths["clips_path"]
     UPLOAD_PATH = theme_paths["upload_path"]
+    VIDEOS_PATH = theme_paths["videos_path"]
+    AUDIO_PATH = theme_paths["audio_path"]
+    TRANSCRIPTIONS_PATH = theme_paths["transcriptions_path"]
     SUBTITLE_TEMP_PATH = theme_paths["subtitle_temp_path"]
     METADATA_PATH = theme_paths["metadata_path"]
     FINAL_METADATA_FILE = theme_paths["final_metadata_file"]
@@ -348,6 +355,135 @@ def load_clip_metadata_index():
     return index
 
 
+def source_prefix_from_clip_path(clip_path):
+    basename = os.path.splitext(os.path.basename(clip_path))[0]
+    return re.sub(r"_\d+$", "", basename)
+
+
+def output_path_for_source_clip(source_clip_file):
+    basename = os.path.splitext(os.path.basename(source_clip_file))[0]
+    output_filename = clean_filename(f"{basename}_upload.mp4")
+    return os.path.join(UPLOAD_PATH, output_filename)
+
+
+def load_source_clip_metadata(prefix):
+    review_file = os.path.join(METADATA_PATH, f"{prefix}_clip_review.json")
+
+    if not os.path.exists(review_file) or os.path.getsize(review_file) == 0:
+        return []
+
+    try:
+        with open(review_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return []
+
+    return payload.get("selected", [])
+
+
+def source_uploads_complete(prefix):
+    selected_clips = load_source_clip_metadata(prefix)
+
+    if not selected_clips:
+        return False
+
+    rendered_source_clips = [
+        clip
+        for clip in selected_clips
+        if clip.get("output_file")
+    ]
+
+    if not rendered_source_clips:
+        return False
+
+    for clip in rendered_source_clips:
+        output_path = output_path_for_source_clip(clip["output_file"])
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+            return False
+
+    return True
+
+
+def safe_delete_file(path, allowed_roots):
+    if not path:
+        return False
+
+    absolute_path = os.path.abspath(path)
+    normalized_path = os.path.normcase(absolute_path)
+    normalized_roots = [
+        os.path.normcase(os.path.abspath(root))
+        for root in allowed_roots
+        if root
+    ]
+
+    if not any(
+        normalized_path == root or normalized_path.startswith(root + os.sep)
+        for root in normalized_roots
+    ):
+        return False
+
+    if not os.path.isfile(absolute_path):
+        return False
+
+    try:
+        os.remove(absolute_path)
+        return True
+    except OSError:
+        return False
+
+
+def delete_matching_files(folder, prefix, allowed_roots):
+    deleted = 0
+
+    if not folder or not os.path.isdir(folder):
+        return deleted
+
+    for filename in os.listdir(folder):
+        if filename == prefix or filename.startswith(f"{prefix}_") or filename.startswith(f"{prefix}."):
+            if safe_delete_file(os.path.join(folder, filename), allowed_roots):
+                deleted += 1
+
+    return deleted
+
+
+def cleanup_completed_source_temp(prefix):
+    if not prefix:
+        return 0
+
+    allowed_roots = [
+        CLIPS_PATH,
+        VIDEOS_PATH,
+        AUDIO_PATH,
+        TRANSCRIPTIONS_PATH,
+        SUBTITLE_TEMP_PATH,
+        METADATA_PATH,
+    ]
+    deleted = 0
+
+    for folder in allowed_roots:
+        deleted += delete_matching_files(folder, prefix, allowed_roots)
+
+    if deleted:
+        print(f" -> Cleaned {deleted} temp files for completed source: {prefix}")
+
+    return deleted
+
+
+def get_source_state_key_for_clip(clip_path, metadata_index=None):
+    metadata_index = metadata_index or load_clip_metadata_index()
+    clip_metadata = metadata_index.get(os.path.basename(clip_path), {})
+    return clip_metadata.get("source_state_key", "")
+
+
+def source_is_executed(source_state_key):
+    if not source_state_key:
+        return False
+
+    executed = load_json_file(EXECUTED_FILE, {})
+    return isinstance(executed, dict) and source_state_key in executed
+
+
 def build_social_package(clip_path, output_path, words, clip_metadata):
     basename = os.path.splitext(os.path.basename(output_path))[0]
     transcript = " ".join(word["word"] for word in words)
@@ -476,6 +612,19 @@ def mark_video_completed(package):
     if final_video_file and final_video_file not in final_video_files:
         final_video_files.append(final_video_file)
 
+    source_prefix = source_prefix_from_clip_path(package.get("source_clip_file", ""))
+
+    for clip in load_source_clip_metadata(source_prefix):
+        source_output_file = clip.get("output_file", "")
+
+        if not source_output_file:
+            continue
+
+        upload_file = os.path.abspath(output_path_for_source_clip(source_output_file))
+
+        if os.path.exists(upload_file) and upload_file not in final_video_files:
+            final_video_files.append(upload_file)
+
     if FINAL_METADATA_FILE not in metadata_files:
         metadata_files.append(FINAL_METADATA_FILE)
 
@@ -492,9 +641,21 @@ def mark_video_completed(package):
     write_json_file(EXECUTED_FILE, executed)
 
 
+def finalize_source_if_complete(prefix, package):
+    safe_delete_file(package.get("source_clip_file", ""), [CLIPS_PATH])
+
+    if not source_uploads_complete(prefix):
+        return False
+
+    mark_video_completed(package)
+    cleanup_completed_source_temp(prefix)
+    return True
+
+
 def process_clip(model, clip_path):
     start_time = time.time()
     basename = os.path.splitext(os.path.basename(clip_path))[0]
+    source_prefix = source_prefix_from_clip_path(clip_path)
     output_filename = clean_filename(f"{basename}_upload.mp4")
     output_path = os.path.join(UPLOAD_PATH, output_filename)
 
@@ -512,7 +673,7 @@ def process_clip(model, clip_path):
             clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
         )
         write_social_package(output_path, package)
-        mark_video_completed(package)
+        finalize_source_if_complete(source_prefix, package)
         return output_path
 
     ass_path = os.path.join(SUBTITLE_TEMP_PATH, f"{clean_filename(basename)}.ass")
@@ -533,7 +694,7 @@ def process_clip(model, clip_path):
         clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
     )
     metadata_file = write_social_package(output_path, package)
-    mark_video_completed(package)
+    finalize_source_if_complete(source_prefix, package)
 
     print(
         f" -> Created {output_filename} with {event_count} subtitle events "
@@ -574,9 +735,30 @@ def run_subtitle_generation_for_theme(limit=None, theme=DEFAULT_THEME):
         print("No clips available for subtitle generation.")
         return
 
-    model = create_transcriber()
+    metadata_index = load_clip_metadata_index()
+    pending_clip_files = []
 
     for clip_path in clip_files:
+        if not os.path.exists(clip_path):
+            continue
+
+        source_state_key = get_source_state_key_for_clip(clip_path, metadata_index)
+
+        if source_is_executed(source_state_key):
+            source_prefix = source_prefix_from_clip_path(clip_path)
+            print(f"Skipping already executed source: {source_state_key}")
+            cleanup_completed_source_temp(source_prefix)
+            continue
+
+        pending_clip_files.append(clip_path)
+
+    if not pending_clip_files:
+        print("No unexecuted clips need subtitle generation.")
+        return
+
+    model = create_transcriber()
+
+    for clip_path in pending_clip_files:
         try:
             process_clip(model, clip_path)
         except Exception as error:

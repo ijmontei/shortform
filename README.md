@@ -41,6 +41,8 @@ $env:SHORTFORM_REGENERATE_UPLOAD_CLIPS="1"
 ```
 
 - `src/pulled.json` and `src/executed_id.json` include stage timestamps for fetched videos, clip generation, and completed upload-ready clips.
+- A source video is added to `src/executed_id.json` only after all rendered clips for that source have upload-ready outputs. Once complete, matching temp downloads, audio, transcripts, working clips, subtitle scratch files, and clip review files are deleted from `output/temp/<theme>`.
+- If a source video is already listed in `src/executed_id.json`, later runs skip it and clean any leftover matching temp files.
 
 ## Themes
 
