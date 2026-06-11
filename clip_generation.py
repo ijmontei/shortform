@@ -13,8 +13,6 @@ from dataclasses import asdict, dataclass, field
 import yt_dlp
 import cv2
 import numpy as np
-from faster_whisper import WhisperModel
-from ultralytics import YOLO
 from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
@@ -75,6 +73,7 @@ MIN_WORDS_PER_CANDIDATE = 22
 MIN_CLIP_SPACING_SECONDS = 2
 MAX_TOPIC_SIMILARITY = 0.58
 SCORING_MODEL_VERSION = "2026-06-10-v5"
+ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
 
 
 # =========================
@@ -340,6 +339,28 @@ def detect_faces(frame, face_cascades):
     return deduped_faces
 
 
+def is_plausible_interview_face(face, frame_width, frame_height):
+    aspect_ratio = face["w"] / max(1.0, face["h"])
+    center_y = face["y"] + face["h"] / 2
+    relative_height = face["h"] / max(1.0, frame_height)
+
+    if aspect_ratio < 0.62 or aspect_ratio > 1.55:
+        return False
+
+    if relative_height < 0.055 or relative_height > 0.42:
+        return False
+
+    # Hands/notebooks often false-positive lower in the frame. Interview faces
+    # should usually live in the upper/middle portion after the 1920px resize.
+    if center_y > frame_height * 0.70:
+        return False
+
+    if face["center_x"] < frame_width * 0.04 or face["center_x"] > frame_width * 0.96:
+        return False
+
+    return True
+
+
 def score_face_motion(current_gray, previous_gray, face):
     if previous_gray is None or current_gray is None:
         return 0.0
@@ -481,7 +502,15 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
                     detection_frame = frame_resized
 
                 detection_gray = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2GRAY)
-                faces = detect_faces(detection_frame, face_cascades)
+                faces = [
+                    face
+                    for face in detect_faces(detection_frame, face_cascades)
+                    if is_plausible_interview_face(
+                        face,
+                        frame_width=detection_w,
+                        frame_height=detection_frame.shape[0],
+                    )
+                ]
 
                 if faces:
                     face_detection_hits += 1
@@ -582,7 +611,7 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model):
 
                     previous_detection_gray = detection_gray
 
-                elif locked_speaker_center_x is None:
+                elif ENABLE_PERSON_FALLBACK and locked_speaker_center_x is None and model is not None:
                     results = model.predict(
                         detection_frame,
                         verbose=False,
@@ -1435,6 +1464,7 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en"):
             return json.load(f)
 
     import torch
+    from faster_whisper import WhisperModel
 
     if torch.cuda.is_available():
         print("Initializing faster-whisper (Model: tiny | GPU Accelerated)...")
@@ -2012,8 +2042,15 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
 
     write_clip_review_exports(cleaned_title, clips)
 
-    print("Loading YOLO model...")
-    model = YOLO("yolov9c.pt")
+    model = None
+
+    if ENABLE_PERSON_FALLBACK:
+        print("Loading YOLO model for opt-in person fallback...")
+        from ultralytics import YOLO
+
+        model = YOLO("yolov9c.pt")
+    else:
+        print("YOLO person fallback disabled; framing will lock only to plausible faces.")
 
     clip_number = 1
     rendered_count = 0

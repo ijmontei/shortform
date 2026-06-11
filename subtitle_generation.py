@@ -1,10 +1,9 @@
-import os
 import json
+import os
 import re
 import subprocess
 import time
 
-from faster_whisper import WhisperModel
 from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
@@ -48,6 +47,8 @@ if not os.path.exists(FFMPEG_EXE):
     FFMPEG_EXE = "ffmpeg"
 
 SUBTITLE_MODEL_SIZE = os.getenv("SHORTFORM_SUBTITLE_MODEL", "base")
+SUBTITLE_BEAM_SIZE = int(os.getenv("SHORTFORM_SUBTITLE_BEAM_SIZE", "1"))
+SUBTITLE_BEST_OF = int(os.getenv("SHORTFORM_SUBTITLE_BEST_OF", str(SUBTITLE_BEAM_SIZE)))
 REGENERATE_UPLOAD_CLIPS = True
 CAPTION_FONT_FAMILY = "Montserrat"
 
@@ -141,6 +142,7 @@ def get_video_files():
 
 def create_transcriber():
     import torch
+    from faster_whisper import WhisperModel
 
     if torch.cuda.is_available():
         print(f"Initializing subtitle transcriber ({SUBTITLE_MODEL_SIZE} | GPU)...")
@@ -162,8 +164,8 @@ def transcribe_words(model, video_path):
     segments_iter, _ = model.transcribe(
         video_path,
         language="en",
-        beam_size=5,
-        best_of=5,
+        beam_size=SUBTITLE_BEAM_SIZE,
+        best_of=SUBTITLE_BEST_OF,
         vad_filter=False,
         word_timestamps=True,
         condition_on_previous_text=False,

@@ -12,6 +12,22 @@ Version 1.1 short-form clip generation pipeline.
 
 Actual social uploading is intentionally separate for now.
 
+## Quality And Speed Controls
+
+- Face framing ignores low-frame hand/notebook false positives and locks only to plausible interview faces.
+- YOLO person fallback is disabled by default for speed and to avoid body/hand-driven framing. Enable it only when needed:
+
+```powershell
+$env:SHORTFORM_ENABLE_PERSON_FALLBACK="1"
+```
+
+- Subtitle transcription uses `faster-whisper` with word timestamps. The default subtitle beam is `1` for speed. Increase it only if subtitle accuracy needs it:
+
+```powershell
+$env:SHORTFORM_SUBTITLE_BEAM_SIZE="5"
+$env:SHORTFORM_SUBTITLE_BEST_OF="5"
+```
+
 ## Themes
 
 Themes are JSON files in `src/themes`.
