@@ -26,6 +26,11 @@ from theme_config import (
     write_json_file,
 )
 
+try:
+    cv2.ocl.setUseOpenCL(False)
+except Exception:
+    pass
+
 
 # =========================
 # Base directories and paths
@@ -1998,7 +2003,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
 
     if not clips:
         print("No clips found for this video.\n")
-        return
+        return 0
 
     for clip in clips:
         clip.source_state_key = source_state_key
@@ -2011,6 +2016,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
     model = YOLO("yolov9c.pt")
 
     clip_number = 1
+    rendered_count = 0
 
     for clip in clips:
         duration = clip.end_time - clip.start_time
@@ -2043,6 +2049,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
             and os.path.getsize(final_filename) > 0
         ):
             print(f" -> Final clip already exists, skipping: {final_filename}\n")
+            rendered_count += 1
             clip_number += 1
             continue
 
@@ -2050,7 +2057,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
             # STEP 1: Extract raw subclip using FFmpeg
             start_step1 = time.time()
 
-            cut_result = try_subprocess([
+            run_subprocess([
                 FFMPEG_EXE,
                 "-y",
                 "-ss", str(clip.start_time),
@@ -2058,28 +2065,15 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
                 "-t", str(duration),
                 "-map", "0:v:0",
                 "-map", "0:a?",
-                "-c", "copy",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "18",
+                "-c:a", "aac",
+                "-b:a", "192k",
                 "-avoid_negative_ts", "make_zero",
+                "-movflags", "+faststart",
                 temp_subclip,
-            ], "FFmpeg stream-copy cutting")
-
-            if cut_result.returncode != 0:
-                run_subprocess([
-                    FFMPEG_EXE,
-                    "-y",
-                    "-ss", str(clip.start_time),
-                    "-i", video_filename,
-                    "-t", str(duration),
-                    "-map", "0:v:0",
-                    "-map", "0:a?",
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-crf", "20",
-                    "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-movflags", "+faststart",
-                    temp_subclip,
-                ], "FFmpeg cutting")
+            ], "FFmpeg accurate cutting")
 
             assert_file_exists(temp_subclip, "Temporary subclip")
 
@@ -2118,6 +2112,7 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
             ], "FFmpeg audio muxing")
 
             assert_file_exists(final_filename, "Final clip")
+            rendered_count += 1
             clip.output_file = os.path.abspath(final_filename)
             clip.render_qc = build_render_qc(
                 video_path=final_filename,
@@ -2157,6 +2152,8 @@ def process_clips(video_filename, audio_filename, cleaned_title, source_record, 
 
         clip_number += 1
 
+    return rendered_count
+
 
 # =========================
 # Process one video
@@ -2183,7 +2180,7 @@ def process_video(video_record):
         assert_file_exists(video_filename, "Downloaded video")
         assert_file_exists(audio_filename, "Extracted audio")
 
-        process_clips(
+        rendered_count = process_clips(
             video_filename=video_filename,
             audio_filename=audio_filename,
             cleaned_title=cleaned_title,
@@ -2193,7 +2190,7 @@ def process_video(video_record):
         )
 
         print(f"=== Total workflow duration for video: {time.time() - start_video_total:.2f} seconds ===\n")
-        return True
+        return bool(rendered_count)
 
     except Exception as e:
         print(f"Failed to process video: {video_record.get('video_url')}\n{e}\n")
