@@ -63,6 +63,7 @@ Current themes:
 
 - `src/themes/self_improvement.json`
 - `src/themes/sports.json`
+- `src/themes/comedy.json`
 - `src/themes/finance.json`
 
 Example:
@@ -108,6 +109,18 @@ Limit a first upload test to one clip:
 .\venv_313\Scripts\python.exe upload.py --theme sports --limit 1
 ```
 
+Upload the comedy theme to the @TheJokeArchive channel:
+
+```powershell
+.\venv_313\Scripts\python.exe upload.py --theme comedy --limit 1
+```
+
+Upload every discovered theme intentionally:
+
+```powershell
+.\venv_313\Scripts\python.exe upload.py --all
+```
+
 ## YouTube OAuth
 
 Install the upload dependencies once:
@@ -119,7 +132,7 @@ Install the upload dependencies once:
 The uploader uses this OAuth client ID by default:
 
 ```text
-690163065093-voe56q26ls3orenmr3e8s9ec0s4fjtv5.apps.googleusercontent.com
+690163065093-9l55nu1kn2te6k1eqltn69bnpj872lke.apps.googleusercontent.com
 ```
 
 The most reliable setup is to download the OAuth client JSON from Google Cloud and save it as:
@@ -128,7 +141,13 @@ The most reliable setup is to download the OAuth client JSON from Google Cloud a
 client_secrets.json
 ```
 
-That file and the generated `youtube_token.json` are ignored by Git. On the first upload, a browser OAuth window will open and the token will be saved locally for future runs.
+That file and the generated `youtube_token*.json` files are ignored by Git. On the first upload, a browser OAuth window will open and the token will be saved locally for future runs.
+
+If you do not use `client_secrets.json`, set both `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` in your environment. Google Desktop app OAuth clients still require the client secret during token exchange.
+
+The comedy theme uses `youtube_token_comedy.json`, so it can stay authorized to the @TheJokeArchive channel separately from other themes. The uploader checks the authenticated channel before uploading comedy clips.
+
+The finance theme uses `youtube_token_finance.json`, so it can stay authorized to the @TheEconomistArchive channel separately from other themes. The uploader checks the authenticated channel before uploading finance clips.
 
 YouTube uploads are created with `privacyStatus=private`, which makes them draft-like: they are uploaded with title, description, tags, and metadata, but are not public until you publish them in YouTube Studio.
 

@@ -2,23 +2,38 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 
 from theme_config import BASE_DIR, DEFAULT_THEME, discover_themes, ensure_theme, write_json_file
 
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_SCOPES = [YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-DEFAULT_YOUTUBE_CLIENT_ID = "690163065093-voe56q26ls3orenmr3e8s9ec0s4fjtv5.apps.googleusercontent.com"
+DEFAULT_YOUTUBE_CLIENT_ID = "690163065093-9l55nu1kn2te6k1eqltn69bnpj872lke.apps.googleusercontent.com"
 CLIENT_SECRETS_FILE = os.path.join(BASE_DIR, "client_secrets.json")
 TOKEN_FILE = os.path.join(BASE_DIR, "youtube_token.json")
+THEME_TOKEN_FILES = {
+    "comedy": os.path.join(BASE_DIR, "youtube_token_comedy.json"),
+    "finance": os.path.join(BASE_DIR, "youtube_token_finance.json"),
+}
+THEME_CHANNEL_HANDLES = {
+    "comedy": "@TheJokeArchive",
+    "finance": "@TheEconomistArchive",
+}
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
 
 CURRENT_THEME = None
 UPLOAD_PATH = None
 FINAL_METADATA_FILE = None
+
+
+class YouTubeUploadHalted(RuntimeError):
+    pass
 
 
 def configure_theme(theme_name):
@@ -63,6 +78,12 @@ def get_oauth_client_config():
             "Missing YouTube OAuth client ID. Set YOUTUBE_CLIENT_ID or create client_secrets.json."
         )
 
+    if not client_secret:
+        raise RuntimeError(
+            "Missing YouTube OAuth client secret. Download the Desktop app OAuth JSON from "
+            "Google Cloud and save it as client_secrets.json, or set YOUTUBE_CLIENT_SECRET."
+        )
+
     return {
         "installed": {
             "client_id": client_id,
@@ -72,6 +93,10 @@ def get_oauth_client_config():
             "redirect_uris": ["http://localhost"],
         }
     }
+
+
+def get_token_file():
+    return THEME_TOKEN_FILES.get(CURRENT_THEME, TOKEN_FILE)
 
 
 def get_authenticated_service():
@@ -87,9 +112,14 @@ def get_authenticated_service():
         ) from error
 
     credentials = None
+    token_file = get_token_file()
 
-    if os.path.exists(TOKEN_FILE):
-        credentials = Credentials.from_authorized_user_file(TOKEN_FILE, [YOUTUBE_UPLOAD_SCOPE])
+    if os.path.exists(token_file):
+        credentials = Credentials.from_authorized_user_file(token_file, YOUTUBE_SCOPES)
+
+        if not credentials.has_scopes(YOUTUBE_SCOPES):
+            print(f"Saved token is missing required YouTube scopes; reauthorizing {CURRENT_THEME}.")
+            credentials = None
 
     if credentials and credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
@@ -98,16 +128,60 @@ def get_authenticated_service():
         client_config = get_oauth_client_config()
 
         if client_config is None:
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, [YOUTUBE_UPLOAD_SCOPE])
+            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
         else:
-            flow = InstalledAppFlow.from_client_config(client_config, [YOUTUBE_UPLOAD_SCOPE])
+            flow = InstalledAppFlow.from_client_config(client_config, YOUTUBE_SCOPES)
 
         credentials = flow.run_local_server(port=0, prompt="consent")
 
-    with open(TOKEN_FILE, "w", encoding="utf-8") as token_file:
-        token_file.write(credentials.to_json())
+    with open(token_file, "w", encoding="utf-8") as token_handle:
+        token_handle.write(credentials.to_json())
 
     return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
+
+
+def channel_label(channel):
+    snippet = channel.get("snippet", {})
+    return snippet.get("customUrl") or snippet.get("title") or channel.get("id") or "unknown channel"
+
+
+def get_channel_by_handle(youtube, handle):
+    response = youtube.channels().list(part="snippet", forHandle=handle, maxResults=1).execute()
+    channels = response.get("items", [])
+    return channels[0] if channels else None
+
+
+def validate_authenticated_channel(youtube):
+    expected_handle = THEME_CHANNEL_HANDLES.get(CURRENT_THEME)
+
+    if not expected_handle:
+        return
+
+    response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
+    channels = response.get("items", [])
+
+    if not channels:
+        raise YouTubeUploadHalted(
+            f"No YouTube channel is available for the authenticated {CURRENT_THEME} account. "
+            f"Open YouTube Studio, make sure {expected_handle} is active, delete {os.path.basename(get_token_file())}, "
+            "and authorize again."
+        )
+
+    authenticated_channel = channels[0]
+    expected_channel = get_channel_by_handle(youtube, expected_handle)
+
+    if not expected_channel:
+        raise YouTubeUploadHalted(
+            f"Could not find expected YouTube channel {expected_handle}. Check the handle in upload.py."
+        )
+
+    if authenticated_channel.get("id") != expected_channel.get("id"):
+        raise YouTubeUploadHalted(
+            f"{CURRENT_THEME} is expected to upload to {expected_handle}, but the saved token is for "
+            f"{channel_label(authenticated_channel)}. Delete {os.path.basename(get_token_file())} and authorize the correct channel."
+        )
+
+    print(f"Authenticated YouTube channel for '{CURRENT_THEME}': {channel_label(authenticated_channel)}")
 
 
 def clip_already_uploaded(package):
@@ -180,6 +254,75 @@ def upload_video(youtube, video_path, package):
     return response
 
 
+def get_http_error_status(error):
+    response = getattr(error, "resp", None)
+    return getattr(response, "status", None)
+
+
+def get_http_error_text(error):
+    content = getattr(error, "content", b"")
+
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace")
+
+    return str(content or error)
+
+
+def get_http_error_reasons(error):
+    error_text = get_http_error_text(error)
+
+    try:
+        payload = json.loads(error_text)
+    except json.JSONDecodeError:
+        return {reason for reason in FATAL_YOUTUBE_REASON_MESSAGES if reason in str(error)}
+
+    reasons = set()
+
+    for item in payload.get("error", {}).get("errors", []):
+        reason = item.get("reason")
+
+        if reason:
+            reasons.add(reason)
+
+    status = payload.get("error", {}).get("status", "")
+
+    if status:
+        reasons.add(status)
+
+    return reasons
+
+
+FATAL_YOUTUBE_REASON_MESSAGES = {
+    "youtubeSignupRequired": (
+        "The Google account authorized successfully, but it does not have an active YouTube channel. "
+        "Open YouTube Studio with that account, create/activate the channel, delete the theme token file, "
+        "then run the uploader again."
+    ),
+    "rateLimitExceeded": (
+        "YouTube rejected the upload because the project hit the video upload rate limit. "
+        "Wait a few minutes, then rerun with --limit 1 or another small limit."
+    ),
+    "quotaExceeded": (
+        "YouTube rejected the upload because the project quota is exhausted. "
+        "Wait for quota to reset or request more quota in Google Cloud, then rerun with a small --limit."
+    ),
+}
+
+
+def get_fatal_youtube_error_message(error):
+    status = get_http_error_status(error)
+    reasons = get_http_error_reasons(error)
+
+    for reason, message in FATAL_YOUTUBE_REASON_MESSAGES.items():
+        if reason in reasons:
+            return message
+
+    if status == 429:
+        return FATAL_YOUTUBE_REASON_MESSAGES["rateLimitExceeded"]
+
+    return None
+
+
 def mark_youtube_uploaded(package, response):
     video_id = response["id"]
     package.setdefault("posting_status", {})["youtube_shorts"] = "uploaded"
@@ -211,6 +354,7 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         return 0
 
     youtube = get_authenticated_service()
+    validate_authenticated_channel(youtube)
     uploaded_count = 0
 
     for package in content:
@@ -239,6 +383,11 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
             save_metadata(metadata)
             print(f" -> YouTube upload failed: {error}")
 
+            halt_message = get_fatal_youtube_error_message(error)
+
+            if halt_message:
+                raise YouTubeUploadHalted(halt_message) from error
+
         if limit is not None and uploaded_count >= limit:
             break
 
@@ -246,7 +395,7 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     return uploaded_count
 
 
-def upload_youtube(theme=None, limit=None, force=False):
+def upload_youtube(theme=None, limit=None, force=False, all_themes=False):
     if theme:
         return upload_youtube_for_theme(theme_name=theme, limit=limit, force=force)
 
@@ -254,6 +403,10 @@ def upload_youtube(theme=None, limit=None, force=False):
 
     if requested_theme:
         return upload_youtube_for_theme(theme_name=requested_theme, limit=limit, force=force)
+
+    if not all_themes:
+        print("No theme specified. Use --theme THEME for a targeted upload, or --all to upload every theme.")
+        return 0
 
     total_uploaded = 0
 
@@ -265,7 +418,8 @@ def upload_youtube(theme=None, limit=None, force=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Upload shortform clips to YouTube as private drafts.")
-    parser.add_argument("--theme", help="Optional theme to upload. Omit this to upload every theme.")
+    parser.add_argument("--theme", help="Optional theme to upload.")
+    parser.add_argument("--all", action="store_true", help="Upload every discovered theme.")
     parser.add_argument("--limit", type=int, help="Optional max number of clips to upload per theme.")
     parser.add_argument("--force", action="store_true", help="Re-upload clips even if metadata has a YouTube video ID.")
     return parser.parse_args()
@@ -273,7 +427,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    upload_youtube(theme=args.theme, limit=args.limit, force=args.force)
+
+    try:
+        upload_youtube(theme=args.theme, limit=args.limit, force=args.force, all_themes=args.all)
+    except YouTubeUploadHalted as error:
+        print(f"YouTube uploads halted: {error}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

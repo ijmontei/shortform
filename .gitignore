@@ -20,6 +20,7 @@ src/executed_id.json
 client_secrets.json
 oauth2.json
 youtube_token.json
+youtube_token_*.json
 cookies.txt
 youtube_cookies.txt
 .env

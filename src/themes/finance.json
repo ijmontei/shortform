@@ -1,11 +1,8 @@
 {
     "theme": "finance",
     "channels": [
-        "https://www.youtube.com/@TheRamseyShowEpisodes/videos",
-        "https://www.youtube.com/@allin/videos",
-        "https://www.youtube.com/@startups/videos",
-        "https://www.youtube.com/@Bg2Pod/videos",
-        "https://www.youtube.com/@TheInvestorsPodcastShow/videos"
-
+        "https://www.youtube.com/@BryceCrawfordPodcast/videos",
+        "https://www.youtube.com/@GirlsGoneBible/videos",
+        "https://www.youtube.com/@becomingsomethingpod/videos"
     ]
 }

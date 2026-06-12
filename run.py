@@ -52,7 +52,7 @@ def main():
         print("starting YouTube private draft upload")
         from upload import upload_youtube
 
-        upload_youtube(theme=theme, limit=args.youtube_upload_limit)
+        upload_youtube(theme=theme, limit=args.youtube_upload_limit, all_themes=theme is None)
         print("YouTube upload complete")
     else:
         print("upload-ready videos and metadata are prepared")
