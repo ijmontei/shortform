@@ -1,8 +1,17 @@
 {
     "theme": "finance",
     "channels": [
-        "https://www.youtube.com/@BryceCrawfordPodcast/videos",
-        "https://www.youtube.com/@GirlsGoneBible/videos",
-        "https://www.youtube.com/@becomingsomethingpod/videos"
+        "https://www.youtube.com/@TheDiaryOfACEO/videos",
+        "https://www.youtube.com/@PBDPodcast/videos",
+        "https://www.youtube.com/@VALUETAINMENT/videos",
+        "https://www.youtube.com/@TheIcedCoffeeHour/videos",
+        "https://www.youtube.com/@TheIcedCoffeeHourClips/videos",
+        "https://www.youtube.com/@allin/videos",
+        "https://www.youtube.com/@MyFirstMillionPod/videos",
+        "https://www.youtube.com/c/biggerpockets/videos",
+        "https://www.youtube.com/@TheProfGPod/videos",
+        "https://www.youtube.com/bloombergpodcasts/videos",
+        "https://www.youtube.com/@TheCompoundNews/videos",
+        "https://www.youtube.com/@ForwardGuidanceBW/videos"
     ]
 }

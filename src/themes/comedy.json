@@ -1,10 +1,15 @@
 {
     "theme": "comedy",
     "channels": [
-        "https://www.youtube.com/@TheRamseyShowEpisodes/videos",
-        "https://www.youtube.com/@allin/videos",
-        "https://www.youtube.com/@startups/videos",
-        "https://www.youtube.com/@Bg2Pod/videos",
-        "https://www.youtube.com/@TheInvestorsPodcastShow/videos"
+        "https://www.youtube.com/@joerogan/videos",
+        "https://www.youtube.com/theovon/videos",
+        "https://www.youtube.com/channel/UCwzCMiicL-hBUzyjWiJaseg/videos",
+        "https://www.youtube.com/@BadFriends/videos",
+        "https://www.youtube.com/@YMHStudios/videos",
+        "https://www.youtube.com/@OfficialFlagrant/videos",
+        "https://www.youtube.com/tigerbelly/videos",
+        "https://www.youtube.com/@AndrewSantinoWhiskeyGinger/videos",
+        "https://www.youtube.com/@stavvysworld/videos",
+        "https://www.youtube.com/@AreYouGarbage/videos"
     ]
 }
