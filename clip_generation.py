@@ -113,8 +113,16 @@ YTDL_COMMON_OPTS = {
     "noplaylist": True,
 }
 
-SOURCE_MAX_HEIGHT = int(os.getenv("SHORTFORM_SOURCE_MAX_HEIGHT", "720"))
+SOURCE_MAX_HEIGHT = int(os.getenv("SHORTFORM_SOURCE_MAX_HEIGHT", "1080"))
 MAX_CONSECUTIVE_NETWORK_FAILURES = int(os.getenv("SHORTFORM_MAX_NETWORK_FAILURES", "2"))
+
+
+def get_cookie_browser_candidates():
+    if os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") == "1":
+        return []
+
+    requested = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome,edge,firefox")
+    return [browser.strip() for browser in requested.split(",") if browser.strip()]
 
 
 def build_ytdl_opts(extra_opts=None):
@@ -124,12 +132,12 @@ def build_ytdl_opts(extra_opts=None):
         "SHORTFORM_YTDLP_COOKIES",
         os.path.join(base_dir, "cookies.txt"),
     )
-    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "")
+    cookie_browsers = get_cookie_browser_candidates()
 
     if os.path.exists(cookies_file):
         opts["cookiefile"] = cookies_file
-    elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+    elif cookie_browsers:
+        opts["cookiesfrombrowser"] = (cookie_browsers[0],)
 
     if os.getenv("SHORTFORM_FORCE_IPV4", "1") == "1":
         opts["source_address"] = "0.0.0.0"
@@ -138,6 +146,53 @@ def build_ytdl_opts(extra_opts=None):
         opts.update(extra_opts)
 
     return opts
+
+
+def is_cookie_load_error(error):
+    message = str(error).lower()
+    cookie_markers = [
+        "could not copy chrome cookie database",
+        "could not copy edge cookie database",
+        "could not find firefox cookies database",
+        "failed to decrypt with dpapi",
+        "failed to load cookies",
+        "permission denied",
+    ]
+    return any(marker in message for marker in cookie_markers)
+
+
+def run_ytdlp_with_cookie_fallback(ydl_opts, operation):
+    attempted = []
+    last_cookie_error = None
+    browsers = get_cookie_browser_candidates()
+
+    if not ydl_opts.get("cookiesfrombrowser") or not browsers:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return operation(ydl)
+
+    for browser in browsers:
+        attempted.append(browser)
+        opts = dict(ydl_opts)
+        opts["cookiesfrombrowser"] = (browser,)
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return operation(ydl)
+        except Exception as error:
+            if not is_cookie_load_error(error):
+                raise
+
+            last_cookie_error = error
+
+            if browser == browsers[-1]:
+                break
+
+            print(f" -> {browser} cookie access failed; trying next browser.")
+
+    raise RuntimeError(
+        "Unable to load browser cookies from "
+        f"{', '.join(attempted)}. Close Chrome/Edge/Firefox and retry, or export YouTube cookies to cookies.txt."
+    ) from last_cookie_error
 
 
 # =========================
@@ -204,6 +259,26 @@ def assert_file_exists(filepath, label):
         raise FileNotFoundError(f"{label} was not created or is empty: {filepath}")
 
 
+class SkippableVideoError(RuntimeError):
+    pass
+
+
+def is_skippable_video_error_message(message):
+    lowered = str(message).lower()
+    blocked_markers = [
+        "sign in to confirm your age",
+        "sign in to confirm",
+        "this video may be inappropriate",
+        "private video",
+        "members-only",
+        "this video is unavailable",
+        "video unavailable",
+        "copyright claim",
+        "has been removed",
+    ]
+    return any(marker in lowered for marker in blocked_markers)
+
+
 def is_network_download_error(error):
     message = str(error).lower()
     network_markers = [
@@ -239,6 +314,7 @@ def download_media(video_url, cleaned_title):
         ),
         "merge_output_format": "mp4",
         "outtmpl": video_filename,
+        "ignoreerrors": False,
     })
 
     start_download = time.time()
@@ -248,8 +324,16 @@ def download_media(video_url, cleaned_title):
     else:
         print(f"Downloading media package: {cleaned_title}.mp4")
 
-        with yt_dlp.YoutubeDL(ydl_opts_combined) as ydl:
-            ydl.download([video_url])
+        try:
+            run_ytdlp_with_cookie_fallback(
+                ydl_opts_combined,
+                lambda ydl: ydl.download([video_url]),
+            )
+        except Exception as error:
+            if is_skippable_video_error_message(error):
+                raise SkippableVideoError(f"video requires sign-in or is unavailable: {video_url}") from error
+
+            raise
 
         if os.path.exists(video_filename) and os.path.getsize(video_filename) == 0:
             os.remove(video_filename)
@@ -2648,14 +2732,16 @@ def process_video(video_record):
         video_title = video_record.get("title") or ""
 
         if not video_title:
-            with yt_dlp.YoutubeDL(build_ytdl_opts()) as ydl:
-                info = ydl.extract_info(video_url, download=False)
+            info = run_ytdlp_with_cookie_fallback(
+                build_ytdl_opts(),
+                lambda ydl: ydl.extract_info(video_url, download=False),
+            )
 
-                if info is None:
-                    print(f"Skipping unreadable/throttled video: {video_url}")
-                    return False
+            if info is None:
+                print(f"Skipping unreadable/throttled video: {video_url}")
+                return False
 
-                video_title = info.get("title", "Unknown_Video")
+            video_title = info.get("title", "Unknown_Video")
 
         cleaned_title = clean_title_for_filename(video_title)
 
@@ -2673,11 +2759,15 @@ def process_video(video_record):
             lang_code="en",
         )
 
+        video_record["_rendered_count"] = int(rendered_count)
+        video_record["_last_cleaned_title"] = cleaned_title
         print(f"=== Total workflow duration for video: {time.time() - start_video_total:.2f} seconds ===\n")
         return bool(rendered_count)
 
     except Exception as e:
-        if is_network_download_error(e):
+        if isinstance(e, SkippableVideoError) or is_skippable_video_error_message(e):
+            video_record["_last_error_type"] = "blocked"
+        elif is_network_download_error(e):
             video_record["_last_error_type"] = "network"
         else:
             video_record["_last_error_type"] = "processing"
@@ -2748,6 +2838,10 @@ def run_clip_generation_for_theme(theme_name):
         if processed:
             consecutive_network_failures = 0
             mark_stage(pulled_data[state_key], "clips_generated")
+            pulled_data[state_key]["funnel_status"] = "clips_generated"
+            pulled_data[state_key]["clips_generated_count"] = int(record.get("_rendered_count") or 0)
+            pulled_data[state_key]["clip_prefix"] = record.get("_last_cleaned_title", "")
+            pulled_data[state_key].pop("last_clip_generation_error_type", None)
             write_json_file(PULLED_FILE, pulled_data)
         else:
             if record.get("_last_error_type") == "network":

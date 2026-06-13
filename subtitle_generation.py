@@ -73,6 +73,81 @@ IMPACT_WORDS = {
     "percent", "porsche", "audi", "electric", "wealth", "income",
 }
 
+THEME_ALGORITHM_TAGS = {
+    "comedy": [
+        "comedy", "funny", "stand up comedy", "jokes", "comedian", "humor",
+        "funny shorts", "comedy shorts", "viral comedy", "podcast clips",
+    ],
+    "finance": [
+        "finance", "money", "investing", "business", "economics", "markets",
+        "personal finance", "financial education", "wealth", "finance shorts",
+    ],
+}
+
+THEME_HASHTAGS = {
+    "comedy": ["#comedy", "#funny", "#jokes", "#standup", "#shorts"],
+    "finance": ["#finance", "#money", "#investing", "#business", "#shorts"],
+}
+
+STOP_TAG_WORDS = {
+    "about", "after", "again", "because", "before", "being", "could", "every",
+    "from", "have", "just", "like", "really", "right", "that", "their", "there",
+    "they", "this", "those", "what", "when", "where", "which", "with", "would",
+    "your", "youre", "yeah", "thing", "things", "people", "going", "think",
+}
+
+
+def compact_text(text, max_length):
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+
+    if len(text) <= max_length:
+        return text
+
+    return text[: max(0, max_length - 1)].rstrip(" ,.;:-") + "..."
+
+
+def words_from_text(text):
+    return re.findall(r"[a-zA-Z][a-zA-Z0-9']{2,}", str(text or "").lower())
+
+
+def extract_keyword_tags(text, limit=6):
+    counts = {}
+
+    for word in words_from_text(text):
+        normalized = word.strip("'").replace("'", "")
+
+        if len(normalized) < 4 or normalized in STOP_TAG_WORDS:
+            continue
+
+        counts[normalized] = counts.get(normalized, 0) + 1
+
+    ranked = sorted(counts, key=lambda item: (-counts[item], item))
+    return ranked[:limit]
+
+
+def unique_sequence(values):
+    seen = set()
+    result = []
+
+    for value in values:
+        cleaned = str(value or "").strip()
+        key = cleaned.lower()
+
+        if not cleaned or key in seen:
+            continue
+
+        seen.add(key)
+        result.append(cleaned)
+
+    return result
+
+
+def build_platform_caption(title, caption, description, hashtags):
+    summary = description or caption or title
+    summary = compact_text(summary, 220)
+    hashtag_text = " ".join(unique_sequence(hashtags)[:5])
+    return f"{summary}\n\n{hashtag_text}".strip()
+
 
 def run_subprocess(cmd, label):
     result = subprocess.run(
@@ -488,23 +563,30 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
     basename = os.path.splitext(os.path.basename(output_path))[0]
     transcript = " ".join(word["word"] for word in words)
     title = clip_metadata.get("suggested_title") or basename.replace("_upload", "").replace("_", " ")
+    title = compact_text(title, 95)
     caption = clip_metadata.get("suggested_caption") or title
-    hashtags = clip_metadata.get("hashtags") or ["#podcast", "#shorts"]
+    caption = compact_text(caption, 160)
+    theme_hashtags = THEME_HASHTAGS.get(CURRENT_THEME, ["#podcast", "#shorts"])
+    hashtags = unique_sequence((clip_metadata.get("hashtags") or []) + theme_hashtags)[:8]
     description = (
         clip_metadata.get("suggested_description")
-        or f"{caption}\n\n{' '.join(hashtags)}"
+        or caption
     )
-    plain_tags = [
-        tag.lstrip("#")
-        for tag in hashtags
-        if tag.strip("#")
-    ]
-    high_level_tags = [
-        tag
-        for tag in ["shorts", "podcast", "interview", "viral", CURRENT_THEME.replace("_", " ")]
-        if tag and tag not in plain_tags
-    ]
-    all_tags = (plain_tags + high_level_tags)[:15]
+    description = compact_text(description, 280)
+    plain_hashtag_tags = [tag.lstrip("#") for tag in hashtags if tag.strip("#")]
+    algorithm_tags = THEME_ALGORITHM_TAGS.get(CURRENT_THEME, [])
+    transcript_tags = extract_keyword_tags(
+        " ".join([
+            transcript,
+            clip_metadata.get("transcript_excerpt", ""),
+            clip_metadata.get("source_title", ""),
+            title,
+        ]),
+        limit=8,
+    )
+    high_level_tags = ["shorts", "podcast", "interview", "viral", CURRENT_THEME.replace("_", " ")]
+    all_tags = unique_sequence(algorithm_tags + plain_hashtag_tags + transcript_tags + high_level_tags)[:20]
+    platform_caption = build_platform_caption(title, caption, description, hashtags)
 
     package = {
         "theme": CURRENT_THEME,
@@ -513,7 +595,7 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
         "source_state_key": clip_metadata.get("source_state_key", ""),
         "source_video_url": clip_metadata.get("source_video_url", ""),
         "source_title": clip_metadata.get("source_title", ""),
-        "title": title[:95],
+        "title": title,
         "caption": caption,
         "hashtags": hashtags,
         "tags": all_tags,
@@ -529,19 +611,19 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
         },
         "platforms": {
             "youtube_shorts": {
-                "title": title[:95],
-                "description": description,
+                "title": title,
+                "description": f"{description}\n\n{' '.join(hashtags)}",
                 "tags": all_tags,
                 "privacy_status": "private",
             },
             "tiktok": {
-                "caption": f"{caption} {' '.join(hashtags)}"[:2200],
+                "caption": platform_caption[:2200],
             },
             "instagram_reels": {
-                "caption": f"{caption}\n\n{' '.join(hashtags)}",
+                "caption": platform_caption,
             },
             "facebook_reels": {
-                "caption": f"{caption}\n\n{' '.join(hashtags)}",
+                "caption": platform_caption,
             },
         },
         "posting_status": {
@@ -633,9 +715,14 @@ def mark_video_completed(package):
         "theme": package.get("theme", CURRENT_THEME),
         "video_url": package.get("source_video_url", ""),
         "title": package.get("source_title", ""),
+        "funnel_status": "subtitled",
+        "subtitle_status": "complete",
+        "upload_status": existing.get("upload_status", "pending"),
+        "final_video_count": len(final_video_files),
         "final_video_files": final_video_files,
         "metadata_files": metadata_files,
     }
+    mark_stage(completed_record, "subtitled")
     mark_stage(completed_record, "completed")
     executed[source_state_key] = completed_record
     write_json_file(EXECUTED_FILE, executed)

@@ -30,12 +30,12 @@ def build_ytdl_opts(extra_opts=None):
         "SHORTFORM_YTDLP_COOKIES",
         os.path.join(BASE_DIR, "cookies.txt"),
     )
-    cookies_browser = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "")
+    cookie_browsers = get_cookie_browser_candidates()
 
     if os.path.exists(cookies_file):
         opts["cookiefile"] = cookies_file
-    elif cookies_browser and os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") != "1":
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+    elif cookie_browsers:
+        opts["cookiesfrombrowser"] = (cookie_browsers[0],)
 
     if os.getenv("SHORTFORM_FORCE_IPV4", "1") == "1":
         opts["source_address"] = "0.0.0.0"
@@ -44,6 +44,61 @@ def build_ytdl_opts(extra_opts=None):
         opts.update(extra_opts)
 
     return opts
+
+
+def get_cookie_browser_candidates():
+    if os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") == "1":
+        return []
+
+    requested = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome,edge,firefox")
+    return [browser.strip() for browser in requested.split(",") if browser.strip()]
+
+
+def is_cookie_load_error(error):
+    message = str(error).lower()
+    cookie_markers = [
+        "could not copy chrome cookie database",
+        "could not copy edge cookie database",
+        "could not find firefox cookies database",
+        "failed to decrypt with dpapi",
+        "failed to load cookies",
+        "permission denied",
+    ]
+    return any(marker in message for marker in cookie_markers)
+
+
+def run_ytdlp_with_cookie_fallback(ydl_opts, operation):
+    browsers = get_cookie_browser_candidates()
+    attempted = []
+    last_cookie_error = None
+
+    if not ydl_opts.get("cookiesfrombrowser") or not browsers:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return operation(ydl)
+
+    for browser in browsers:
+        attempted.append(browser)
+        opts = dict(ydl_opts)
+        opts["cookiesfrombrowser"] = (browser,)
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return operation(ydl)
+        except Exception as error:
+            if not is_cookie_load_error(error):
+                raise
+
+            last_cookie_error = error
+
+            if browser == browsers[-1]:
+                break
+
+            print(f" -> {browser} cookie access failed; trying next browser.")
+
+    raise RuntimeError(
+        "Unable to load browser cookies from "
+        f"{', '.join(attempted)}. Close Chrome/Edge/Firefox and retry, or export YouTube cookies to cookies.txt."
+    ) from last_cookie_error
 
 
 def latest_video_for_channel(channel_url):
@@ -56,19 +111,10 @@ def latest_video_for_channel(channel_url):
     })
 
     try:
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(channel_url, download=False)
-        except Exception as error:
-            if "Could not copy Chrome cookie database" not in str(error):
-                raise
-
-            print(" -> Chrome cookie access failed; retrying without browser cookies.")
-            retry_opts = dict(ydl_opts)
-            retry_opts.pop("cookiesfrombrowser", None)
-
-            with yt_dlp.YoutubeDL(retry_opts) as ydl:
-                info = ydl.extract_info(channel_url, download=False)
+        info = run_ytdlp_with_cookie_fallback(
+            ydl_opts,
+            lambda ydl: ydl.extract_info(channel_url, download=False),
+        )
 
         if not info:
             return None

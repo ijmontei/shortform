@@ -1,9 +1,41 @@
 import argparse
+import sys
 
 from clip_generation import run_clip_generation
 from subtitle_generation import run_subtitle_generation
 from theme_config import clean_theme_name, discover_themes
 from video_fetch import run_video_fetch
+
+
+def run_pipeline_for_theme(theme, args):
+    print(f"=== Running theme end-to-end: {theme} ===\n")
+
+    run_video_fetch(theme=theme)
+    print(f"video fetch complete for {theme}")
+
+    print(f"starting clip generation for {theme}")
+    run_clip_generation(theme=theme)
+    print(f"clip generation complete for {theme}")
+
+    print(f"starting subtitle generation for {theme}")
+    run_subtitle_generation(theme=theme)
+    print(f"subtitle generation complete for {theme}")
+
+    if args.skip_youtube:
+        print(f"upload-ready videos and metadata are prepared for {theme}; YouTube upload skipped\n")
+        return True
+
+    print(f"starting YouTube private draft upload for {theme}")
+    from upload import YouTubeUploadHalted, upload_youtube
+
+    try:
+        upload_youtube(theme=theme, limit=args.youtube_upload_limit)
+    except YouTubeUploadHalted as error:
+        print(f"YouTube uploads halted for {theme}: {error}\n")
+        return False
+
+    print(f"YouTube upload complete for {theme}\n")
+    return True
 
 
 def parse_args():
@@ -15,7 +47,12 @@ def parse_args():
     parser.add_argument(
         "--upload-youtube",
         action="store_true",
-        help="After subtitle generation, upload ready clips to YouTube as private drafts.",
+        help="Upload ready clips to YouTube after subtitle generation. Uploading is now enabled by default.",
+    )
+    parser.add_argument(
+        "--skip-youtube",
+        action="store_true",
+        help="Skip YouTube upload after subtitle generation.",
     )
     parser.add_argument(
         "--youtube-upload-limit",
@@ -39,23 +76,17 @@ def main():
     else:
         print(f"Running all themes: {', '.join(themes)}\n")
 
-    run_video_fetch(theme=theme)
-    print("video fetch complete")
-    print("starting clip generation")
-    run_clip_generation(theme=theme)
-    print("clip generation complete")
-    print("starting subtitle generation")
-    run_subtitle_generation(theme=theme)
-    print("subtitle generation complete")
+    failed_themes = []
 
-    if args.upload_youtube:
-        print("starting YouTube private draft upload")
-        from upload import upload_youtube
+    for theme_name in themes:
+        if not run_pipeline_for_theme(theme_name, args):
+            failed_themes.append(theme_name)
 
-        upload_youtube(theme=theme, limit=args.youtube_upload_limit, all_themes=theme is None)
-        print("YouTube upload complete")
-    else:
-        print("upload-ready videos and metadata are prepared")
+    if failed_themes:
+        print(f"Pipeline finished with upload failures for: {', '.join(failed_themes)}")
+        sys.exit(1)
+
+    print("Pipeline complete for all requested themes.")
 
 
 if __name__ == "__main__":

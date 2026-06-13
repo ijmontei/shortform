@@ -9,10 +9,20 @@ Version 1.1 short-form clip generation pipeline.
 1. `video_fetch.py` reads theme JSON files from `src/themes` and records latest videos in `src/pulled.json`.
 2. `clip_generation.py` downloads/reuses media, scores clips, and renders vertical working clips.
 3. `subtitle_generation.py` burns subtitles, saves finished clips, writes theme metadata, and marks completed videos in `src/executed_id.json`.
+4. `upload.py` uploads ready clips to the theme's configured YouTube channel as private drafts.
 
-YouTube uploading is optional and must be explicitly enabled with `--upload-youtube`.
+Use `--skip-youtube` when you want to prepare upload-ready clips without uploading.
 
 ## Quality And Speed Controls
+
+- `yt-dlp` uses Chrome cookies by default, then Edge and Firefox if Chrome cookies are locked, so signed-in or age-gated videos can download when your browser is logged into YouTube. Close the browser if Windows locks its cookie database, or use an exported cookie file:
+
+```powershell
+$env:SHORTFORM_YTDLP_COOKIES_BROWSER="chrome,edge,firefox"
+$env:SHORTFORM_YTDLP_COOKIES="C:\Users\Admin\Desktop\shortform\cookies.txt"
+```
+
+Set `SHORTFORM_DISABLE_BROWSER_COOKIES=1` to disable browser cookie access.
 
 - Face framing ignores low-frame hand/notebook false positives and locks only to plausible interview faces.
 - Raw clips now run a pre-render visual QC pass. Clips with too many black frames or too little reliable face presence are skipped before the slower crop/mux/subtitle work. To force rendering while reviewing an edge case:
@@ -79,22 +89,22 @@ Example:
 
 ## Run
 
-Run all themes:
+Run all themes end-to-end. Each theme runs fetch, clip generation, subtitle generation, and upload before the next theme starts:
 
 ```powershell
 .\venv_313\Scripts\python.exe run.py
 ```
 
-Run one theme:
+Run one theme through fetch, clip generation, subtitle generation, and YouTube upload:
 
 ```powershell
-.\venv_313\Scripts\python.exe run.py --theme sports
+.\venv_313\Scripts\python.exe run.py --theme comedy
 ```
 
-Run one theme and upload the finished clips to YouTube as private drafts:
+Run one theme without uploading:
 
 ```powershell
-.\venv_313\Scripts\python.exe run.py --theme sports --upload-youtube
+.\venv_313\Scripts\python.exe run.py --theme comedy --skip-youtube
 ```
 
 Upload only existing finished clips without rerunning fetch/clip/subtitle work:
@@ -148,6 +158,8 @@ If you do not use `client_secrets.json`, set both `YOUTUBE_CLIENT_ID` and `YOUTU
 The comedy theme uses `youtube_token_comedy.json`, so it can stay authorized to the @TheJokeArchive channel separately from other themes. The uploader checks the authenticated channel before uploading comedy clips.
 
 The finance theme uses `youtube_token_finance.json`, so it can stay authorized to the @TheEconomistArchive channel separately from other themes. The uploader checks the authenticated channel before uploading finance clips.
+
+Every uploading theme must be configured in `THEME_CHANNEL_HANDLES` and `THEME_TOKEN_FILES` in `upload.py`; this prevents a theme from accidentally uploading to the wrong channel.
 
 YouTube uploads are created with `privacyStatus=private`, which makes them draft-like: they are uploaded with title, description, tags, and metadata, but are not public until you publish them in YouTube Studio.
 

@@ -5,7 +5,16 @@ import random
 import sys
 import time
 
-from theme_config import BASE_DIR, DEFAULT_THEME, discover_themes, ensure_theme, write_json_file
+from theme_config import (
+    BASE_DIR,
+    DEFAULT_THEME,
+    EXECUTED_FILE,
+    discover_themes,
+    ensure_theme,
+    load_json_file,
+    mark_stage,
+    write_json_file,
+)
 
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -155,7 +164,10 @@ def validate_authenticated_channel(youtube):
     expected_handle = THEME_CHANNEL_HANDLES.get(CURRENT_THEME)
 
     if not expected_handle:
-        return
+        raise YouTubeUploadHalted(
+            f"No YouTube channel is configured for theme '{CURRENT_THEME}'. "
+            "Add it to THEME_CHANNEL_HANDLES and THEME_TOKEN_FILES in upload.py."
+        )
 
     response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
     channels = response.get("items", [])
@@ -203,7 +215,7 @@ def build_youtube_body(package):
         "snippet": {
             "title": title[:100],
             "description": description,
-            "tags": [str(tag)[:500] for tag in tags][:15],
+            "tags": [str(tag)[:500] for tag in tags][:25],
             "categoryId": str(youtube_package.get("category_id", "22")),
         },
         "status": {
@@ -336,6 +348,72 @@ def mark_youtube_uploaded(package, response):
     package["platform_metrics"]["youtube_shorts"]["posted"] = True
 
 
+def mark_executed_uploaded(package, response):
+    source_state_key = package.get("source_state_key", "")
+
+    if not source_state_key:
+        return
+
+    executed = load_json_file(EXECUTED_FILE, {})
+
+    if not isinstance(executed, dict):
+        executed = {}
+
+    existing = executed.get(source_state_key, {})
+    youtube_uploads = existing.get("youtube_uploads", [])
+    video_id = response.get("id", "")
+    video_file = package.get("video_file", "")
+
+    if video_id and not any(item.get("video_id") == video_id for item in youtube_uploads):
+        youtube_uploads.append({
+            "video_id": video_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "title": package.get("title", ""),
+            "deleted_local_file": os.path.abspath(video_file) if video_file else "",
+            "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+
+    final_video_files = [
+        path
+        for path in existing.get("final_video_files", [])
+        if os.path.abspath(path) != os.path.abspath(video_file)
+    ]
+
+    updated = {
+        **existing,
+        "theme": package.get("theme", CURRENT_THEME),
+        "video_url": package.get("source_video_url", existing.get("video_url", "")),
+        "title": package.get("source_title", existing.get("title", "")),
+        "funnel_status": "uploaded",
+        "upload_status": "uploaded",
+        "youtube_uploads": youtube_uploads,
+        "final_video_files": final_video_files,
+    }
+    mark_stage(updated, "youtube_uploaded")
+    executed[source_state_key] = updated
+    write_json_file(EXECUTED_FILE, executed)
+
+
+def delete_uploaded_video_file(package):
+    video_file = package.get("video_file", "")
+
+    if not video_file:
+        return False
+
+    absolute_path = os.path.abspath(video_file)
+    upload_root = os.path.abspath(UPLOAD_PATH)
+
+    if os.path.commonpath([absolute_path, upload_root]) != upload_root:
+        return False
+
+    if not os.path.exists(absolute_path):
+        return False
+
+    os.remove(absolute_path)
+    print(f" -> Deleted uploaded local file: {os.path.basename(absolute_path)}")
+    return True
+
+
 def mark_youtube_failed(package, error):
     package.setdefault("posting_status", {})["youtube_shorts"] = "failed"
     package.setdefault("platform_uploads", {})["youtube_shorts_last_error"] = {
@@ -357,17 +435,23 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     validate_authenticated_channel(youtube)
     uploaded_count = 0
 
-    for package in content:
+    remaining_content = []
+
+    for index, package in enumerate(content):
         video_path = package.get("video_file", "")
 
         if not video_path or not os.path.exists(video_path):
+            if not clip_already_uploaded(package):
+                remaining_content.append(package)
             continue
 
         if clip_already_uploaded(package) and not force:
             print(f"Skipping already uploaded YouTube clip: {os.path.basename(video_path)}")
+            delete_uploaded_video_file(package)
             continue
 
         if package.get("posting_status", {}).get("youtube_shorts") not in {"ready", "failed", "uploaded"}:
+            remaining_content.append(package)
             continue
 
         print(f"Uploading private YouTube draft: {os.path.basename(video_path)}")
@@ -375,11 +459,14 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         try:
             response = upload_video(youtube, video_path, package)
             mark_youtube_uploaded(package, response)
+            mark_executed_uploaded(package, response)
+            delete_uploaded_video_file(package)
             save_metadata(metadata)
             uploaded_count += 1
             print(f" -> Uploaded: https://www.youtube.com/watch?v={response['id']}")
         except Exception as error:
             mark_youtube_failed(package, error)
+            remaining_content.append(package)
             save_metadata(metadata)
             print(f" -> YouTube upload failed: {error}")
 
@@ -389,8 +476,11 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
                 raise YouTubeUploadHalted(halt_message) from error
 
         if limit is not None and uploaded_count >= limit:
+            remaining_content.extend(content[index + 1:])
             break
 
+    metadata["content"] = remaining_content
+    save_metadata(metadata)
     print(f"YouTube uploads complete for '{CURRENT_THEME}'. Uploaded: {uploaded_count}")
     return uploaded_count
 
