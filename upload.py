@@ -45,6 +45,20 @@ class YouTubeUploadHalted(RuntimeError):
     pass
 
 
+def format_duration(seconds):
+    seconds = max(0, float(seconds))
+    minutes, remainder = divmod(seconds, 60)
+    hours, minutes = divmod(int(minutes), 60)
+
+    if hours:
+        return f"{hours}h {minutes}m {remainder:.1f}s"
+
+    if minutes:
+        return f"{minutes}m {remainder:.1f}s"
+
+    return f"{remainder:.1f}s"
+
+
 def configure_theme(theme_name):
     global CURRENT_THEME, UPLOAD_PATH, FINAL_METADATA_FILE
 
@@ -423,6 +437,7 @@ def mark_youtube_failed(package, error):
 
 
 def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
+    upload_start = time.time()
     configure_theme(theme_name)
     metadata = load_metadata()
     content = metadata.get("content", [])
@@ -457,13 +472,17 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         print(f"Uploading private YouTube draft: {os.path.basename(video_path)}")
 
         try:
+            item_start = time.time()
             response = upload_video(youtube, video_path, package)
             mark_youtube_uploaded(package, response)
             mark_executed_uploaded(package, response)
             delete_uploaded_video_file(package)
             save_metadata(metadata)
             uploaded_count += 1
-            print(f" -> Uploaded: https://www.youtube.com/watch?v={response['id']}")
+            print(
+                f" -> Uploaded: https://www.youtube.com/watch?v={response['id']} "
+                f"in {format_duration(time.time() - item_start)}"
+            )
         except Exception as error:
             mark_youtube_failed(package, error)
             remaining_content.append(package)
@@ -481,7 +500,10 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
 
     metadata["content"] = remaining_content
     save_metadata(metadata)
-    print(f"YouTube uploads complete for '{CURRENT_THEME}'. Uploaded: {uploaded_count}")
+    print(
+        f"YouTube uploads complete for '{CURRENT_THEME}'. "
+        f"Uploaded: {uploaded_count}. Took {format_duration(time.time() - upload_start)}"
+    )
     return uploaded_count
 
 

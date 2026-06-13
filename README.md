@@ -95,6 +95,8 @@ Run all themes end-to-end. Each theme runs fetch, clip generation, subtitle gene
 .\venv_313\Scripts\python.exe run.py
 ```
 
+The runner prints per-theme and overall timing summaries for pull, clip, subtitle, upload, and total runtime.
+
 Run one theme through fetch, clip generation, subtitle generation, and YouTube upload:
 
 ```powershell
