@@ -6,9 +6,11 @@ venv_*/
 .venv/
 
 output/
+logs/
 src/id.json
 src/pulled.json
 src/executed_id.json
+src/adjective_rotation.json
 
 *.pt
 *.onnx

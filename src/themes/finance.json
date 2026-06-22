@@ -1,11 +1,14 @@
 {
     "theme": "finance",
+    "youtube": {
+        "channel_handle": "@TheEconomistArchive",
+        "token_file": "youtube_token_finance.json"
+    },
     "channels": [
         "https://www.youtube.com/@TheDiaryOfACEO/videos",
         "https://www.youtube.com/@PBDPodcast/videos",
         "https://www.youtube.com/@VALUETAINMENT/videos",
         "https://www.youtube.com/@TheIcedCoffeeHour/videos",
-        "https://www.youtube.com/@TheIcedCoffeeHourClips/videos",
         "https://www.youtube.com/@allin/videos",
         "https://www.youtube.com/@MyFirstMillionPod/videos",
         "https://www.youtube.com/c/biggerpockets/videos",

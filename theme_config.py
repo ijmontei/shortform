@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+import tempfile
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +14,30 @@ OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 TEMP_PATH = os.path.join(OUTPUT_PATH, "temp")
 THEMES_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "themes")
 DEFAULT_THEME = "self_improvement"
+
+
+def load_env_file():
+    env_path = os.path.join(BASE_DIR, ".env")
+
+    if not os.path.exists(env_path):
+        return
+
+    with open(env_path, "r", encoding="utf-8-sig") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+load_env_file()
 
 
 def clean_theme_name(theme_name):
@@ -39,8 +64,28 @@ def load_json_file(path, default):
 def write_json_file(path, payload):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
+    directory = os.path.dirname(path) or "."
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(path)}.",
+        suffix=".tmp",
+        dir=directory,
+        text=True,
+    )
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 def utc_timestamp():
@@ -63,6 +108,10 @@ def load_theme_config(theme_name):
     theme = clean_theme_name(theme_name)
     payload = load_json_file(theme_config_path(theme), {"theme": theme, "channels": []})
     channels = payload.get("channels", [])
+    youtube = payload.get("youtube", {})
+
+    if not isinstance(youtube, dict):
+        youtube = {}
 
     return {
         "theme": theme,
@@ -71,6 +120,10 @@ def load_theme_config(theme_name):
             for channel in channels
             if isinstance(channel, str) and channel.strip()
         ],
+        "youtube": {
+            "channel_handle": str(youtube.get("channel_handle", "")).strip(),
+            "token_file": str(youtube.get("token_file", "")).strip(),
+        },
     }
 
 

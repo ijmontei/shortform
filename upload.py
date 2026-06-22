@@ -9,9 +9,11 @@ from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
     EXECUTED_FILE,
+    clean_theme_name,
     discover_themes,
     ensure_theme,
     load_json_file,
+    load_theme_config,
     mark_stage,
     write_json_file,
 )
@@ -35,10 +37,12 @@ THEME_CHANNEL_HANDLES = {
 }
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
+DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
 
 CURRENT_THEME = None
 UPLOAD_PATH = None
 FINAL_METADATA_FILE = None
+CURRENT_THEME_CONFIG = {}
 
 
 class YouTubeUploadHalted(RuntimeError):
@@ -60,12 +64,13 @@ def format_duration(seconds):
 
 
 def configure_theme(theme_name):
-    global CURRENT_THEME, UPLOAD_PATH, FINAL_METADATA_FILE
+    global CURRENT_THEME, UPLOAD_PATH, FINAL_METADATA_FILE, CURRENT_THEME_CONFIG
 
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
     UPLOAD_PATH = theme_paths["upload_path"]
     FINAL_METADATA_FILE = theme_paths["final_metadata_file"]
+    CURRENT_THEME_CONFIG = load_theme_config(CURRENT_THEME)
     return theme_paths
 
 
@@ -119,7 +124,25 @@ def get_oauth_client_config():
 
 
 def get_token_file():
-    return THEME_TOKEN_FILES.get(CURRENT_THEME, TOKEN_FILE)
+    youtube_config = CURRENT_THEME_CONFIG.get("youtube", {}) if isinstance(CURRENT_THEME_CONFIG, dict) else {}
+    configured_token_file = str(youtube_config.get("token_file", "")).strip()
+
+    if configured_token_file:
+        if os.path.isabs(configured_token_file):
+            return configured_token_file
+
+        return os.path.join(BASE_DIR, configured_token_file)
+
+    if CURRENT_THEME in THEME_TOKEN_FILES:
+        return THEME_TOKEN_FILES[CURRENT_THEME]
+
+    return os.path.join(BASE_DIR, f"youtube_token_{clean_theme_name(CURRENT_THEME)}.json")
+
+
+def get_expected_channel_handle():
+    youtube_config = CURRENT_THEME_CONFIG.get("youtube", {}) if isinstance(CURRENT_THEME_CONFIG, dict) else {}
+    configured_handle = str(youtube_config.get("channel_handle", "")).strip()
+    return configured_handle or THEME_CHANNEL_HANDLES.get(CURRENT_THEME, "")
 
 
 def get_authenticated_service():
@@ -175,12 +198,12 @@ def get_channel_by_handle(youtube, handle):
 
 
 def validate_authenticated_channel(youtube):
-    expected_handle = THEME_CHANNEL_HANDLES.get(CURRENT_THEME)
+    expected_handle = get_expected_channel_handle()
 
     if not expected_handle:
         raise YouTubeUploadHalted(
             f"No YouTube channel is configured for theme '{CURRENT_THEME}'. "
-            "Add it to THEME_CHANNEL_HANDLES and THEME_TOKEN_FILES in upload.py."
+            f"Add youtube.channel_handle to src/themes/{CURRENT_THEME}.json."
         )
 
     response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
@@ -439,6 +462,11 @@ def mark_youtube_failed(package, error):
 def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     upload_start = time.time()
     configure_theme(theme_name)
+    effective_limit = limit
+
+    if effective_limit is None and DEFAULT_YOUTUBE_UPLOAD_LIMIT > 0:
+        effective_limit = DEFAULT_YOUTUBE_UPLOAD_LIMIT
+
     metadata = load_metadata()
     content = metadata.get("content", [])
 
@@ -449,6 +477,8 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     youtube = get_authenticated_service()
     validate_authenticated_channel(youtube)
     uploaded_count = 0
+
+    print(f"YouTube upload limit for this run/theme: {effective_limit or 'unlimited'}")
 
     remaining_content = []
 
@@ -494,7 +524,7 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
             if halt_message:
                 raise YouTubeUploadHalted(halt_message) from error
 
-        if limit is not None and uploaded_count >= limit:
+        if effective_limit is not None and uploaded_count >= effective_limit:
             remaining_content.extend(content[index + 1:])
             break
 

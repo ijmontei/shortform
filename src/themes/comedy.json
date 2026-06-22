@@ -1,5 +1,9 @@
 {
     "theme": "comedy",
+    "youtube": {
+        "channel_handle": "@TheJokeArchive",
+        "token_file": "youtube_token_comedy.json"
+    },
     "channels": [
         "https://www.youtube.com/@joerogan/videos",
         "https://www.youtube.com/theovon/videos",

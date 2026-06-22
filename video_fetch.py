@@ -1,8 +1,9 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import yt_dlp
+import ytdlp_auth
 
 from theme_config import (
     BASE_DIR,
@@ -17,7 +18,7 @@ from theme_config import (
 )
 
 
-def build_ytdl_opts(extra_opts=None):
+def build_ytdl_opts(extra_opts=None, use_cookies=False):
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -32,10 +33,11 @@ def build_ytdl_opts(extra_opts=None):
     )
     cookie_browsers = get_cookie_browser_candidates()
 
-    if os.path.exists(cookies_file):
-        opts["cookiefile"] = cookies_file
-    elif cookie_browsers:
-        opts["cookiesfrombrowser"] = (cookie_browsers[0],)
+    if use_cookies:
+        if os.path.exists(cookies_file):
+            opts["cookiefile"] = cookies_file
+        elif cookie_browsers:
+            opts["cookiesfrombrowser"] = cookie_browser_to_tuple(cookie_browsers[0])
 
     if os.getenv("SHORTFORM_FORCE_IPV4", "1") == "1":
         opts["source_address"] = "0.0.0.0"
@@ -47,58 +49,24 @@ def build_ytdl_opts(extra_opts=None):
 
 
 def get_cookie_browser_candidates():
-    if os.getenv("SHORTFORM_DISABLE_BROWSER_COOKIES") == "1":
-        return []
+    return ytdlp_auth.get_cookie_browser_candidates()
 
-    requested = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "chrome,edge,firefox")
-    return [browser.strip() for browser in requested.split(",") if browser.strip()]
+
+def cookie_browser_to_tuple(candidate):
+    return ytdlp_auth.cookie_browser_to_tuple(candidate)
 
 
 def is_cookie_load_error(error):
-    message = str(error).lower()
-    cookie_markers = [
-        "could not copy chrome cookie database",
-        "could not copy edge cookie database",
-        "could not find firefox cookies database",
-        "failed to decrypt with dpapi",
-        "failed to load cookies",
-        "permission denied",
-    ]
-    return any(marker in message for marker in cookie_markers)
+    return ytdlp_auth.is_cookie_load_error(error)
 
 
 def run_ytdlp_with_cookie_fallback(ydl_opts, operation):
-    browsers = get_cookie_browser_candidates()
-    attempted = []
-    last_cookie_error = None
-
-    if not ydl_opts.get("cookiesfrombrowser") or not browsers:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return operation(ydl)
-
-    for browser in browsers:
-        attempted.append(browser)
-        opts = dict(ydl_opts)
-        opts["cookiesfrombrowser"] = (browser,)
-
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                return operation(ydl)
-        except Exception as error:
-            if not is_cookie_load_error(error):
-                raise
-
-            last_cookie_error = error
-
-            if browser == browsers[-1]:
-                break
-
-            print(f" -> {browser} cookie access failed; trying next browser.")
-
-    raise RuntimeError(
-        "Unable to load browser cookies from "
-        f"{', '.join(attempted)}. Close Chrome/Edge/Firefox and retry, or export YouTube cookies to cookies.txt."
-    ) from last_cookie_error
+    return ytdlp_auth.run_ytdlp_with_auth_retry(
+        ydl_opts,
+        operation,
+        auth_required=bool(ydl_opts.get("cookiefile") or ydl_opts.get("cookiesfrombrowser")),
+        reason="channel metadata fetch",
+    )
 
 
 def latest_video_for_channel(channel_url):
@@ -108,7 +76,7 @@ def latest_video_for_channel(channel_url):
         "playlistend": 1,
         "simulate": True,
         "skip_download": True,
-    })
+    }, use_cookies=os.getenv("SHORTFORM_USE_COOKIES_FOR_FETCH") == "1")
 
     try:
         info = run_ytdlp_with_cookie_fallback(
@@ -177,7 +145,7 @@ def run_video_fetch_for_theme(theme_name):
         if not latest_video:
             continue
 
-        pulled_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        pulled_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         latest_video["theme"] = theme
         latest_video["pulled_at"] = pulled_at
         state_key = video_state_key(theme, latest_video["video_url"])
