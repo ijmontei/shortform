@@ -133,7 +133,7 @@ if not os.path.exists(FFPROBE_EXE):
 YTDL_COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
-    "js_runtimes": {"node": {}},
+    "js_runtimes": {"deno": {}},
     "allow_remote_features": True,
     "ignoreerrors": True,
     "continuedl": True,

@@ -245,7 +245,7 @@ def verify_youtube_auth(video_url=None):
         "ignoreerrors": False,
         "ignore_no_formats_error": True,
         "format": "bv*+ba/best",
-        "js_runtimes": {"node": {}},
+        "js_runtimes": {"deno": {}},
         "allow_remote_features": True,
     }
 
