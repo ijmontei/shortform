@@ -1,15 +1,293 @@
 {
     "theme": "popculture",
+    "profile": "popculture",
+    "brand": {
+        "channel_name": "Mainstream Archive",
+        "positioning": "Celebrity, entertainment, internet-culture, and media interview moments with strong curiosity hooks.",
+        "audience": "Entertainment viewers who respond to celebrity stories, behind-the-scenes moments, and culture debates.",
+        "viewer_promise": "A clean celebrity/story hook with source context and non-generic packaging.",
+        "voice": "witty culture editor",
+        "risk_tolerance": "medium",
+        "color_palette": [
+            "#160B18",
+            "#FF4D6D",
+            "#6C2BD9",
+            "#00C2FF",
+            "#FFF2CC"
+        ],
+        "creative_personality": "glossy entertainment feed, celebrity, internet culture, bright",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/mainstream_archive/mainstream_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/mainstream_archive/mainstream_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/mainstream_archive/mainstream_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/mainstream_archive/mainstream_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@MainstreamArchive",
+        "token_file": "youtube_token_popculture.json"
+    },
     "channels": [
-        "https://www.youtube.com/@callherdaddy/videos",
         "https://www.youtube.com/@FirstWeFeast/videos",
+        "https://www.youtube.com/@callherdaddy/videos",
         "https://www.youtube.com/@AmeliaDimoldenberg/videos",
+        "https://www.youtube.com/@BreakfastClubPower1051FM/videos",
+        "https://www.youtube.com/@SmartLess/videos",
         "https://www.youtube.com/@Variety/videos",
         "https://www.youtube.com/@VanityFair/videos",
         "https://www.youtube.com/@GQVideos/videos",
         "https://www.youtube.com/@WIRED/videos",
-        "https://www.youtube.com/hollywoodreporter/videos",
         "https://www.youtube.com/@Complex/videos",
+        "https://www.youtube.com/hollywoodreporter/videos",
         "https://www.youtube.com/@Vogue/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Celebrity, entertainment, internet-culture, and media interview moments with strong curiosity hooks.",
+        "source_strategy": "Celebrity and culture interview formats with high Shorts familiarity."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            8,
+            12,
+            18,
+            24,
+            32,
+            45
+        ],
+        "min_clip_duration": 7,
+        "max_clip_duration": 50,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 3,
+        "allow_cold_open": true,
+        "prefer_context": false,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "celebrity_story",
+            "awkward_moment",
+            "behind_the_scenes",
+            "internet_debate",
+            "culture_take"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "celebrity",
+            "movie",
+            "music",
+            "internet",
+            "viral",
+            "behind the scenes",
+            "dating"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "celebrity",
+                "movie",
+                "film",
+                "actor",
+                "actress",
+                "music",
+                "artist",
+                "internet",
+                "viral",
+                "culture",
+                "fans",
+                "trend",
+                "drama",
+                "dating",
+                "hollywood",
+                "behind the scenes",
+                "hot ones",
+                "call her daddy",
+                "breakfast club",
+                "smartless"
+            ],
+            "negative_keywords": [
+                "stock",
+                "market crash",
+                "valuation",
+                "scotus",
+                "election",
+                "congress",
+                "trial",
+                "murder",
+                "physics",
+                "ai model",
+                "software"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 0,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "firstwefeast",
+                "callherdaddy",
+                "ameliadimoldenberg",
+                "breakfastclubpower1051fm",
+                "smartless",
+                "variety",
+                "vanityfair",
+                "gqvideos",
+                "wired",
+                "complex",
+                "hollywoodreporter",
+                "vogue"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "celebrity_story",
+            "awkward_moment",
+            "behind_the_scenes",
+            "internet_debate",
+            "culture_take"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "cold_open",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "cold_open",
+        "max_intro_seconds": 1.8,
+        "caption_style": "culture_reveal",
+        "framing_style": "guest_spotlight",
+        "overlay_style": "culture_spotlight"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "{source} Told The Story Behind {topic}",
+            "This Celebrity Moment Says Everything",
+            "The {archetype} Behind {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#popculture",
+            "#celebrity",
+            "#entertainment",
+            "#shorts"
+        ],
+        "tags": [
+            "pop culture",
+            "celebrity interview",
+            "entertainment",
+            "viral moments"
+        ],
+        "topic_tags": {
+            "celebrity": "#celebrity",
+            "movie": "#movie",
+            "music": "#music",
+            "internet": "#internet",
+            "viral": "#viral",
+            "behind the scenes": "#behindthescenes",
+            "dating": "#dating"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "targeted harassment",
+            "protected-class insults"
+        ],
+        "manual_review_topics": [
+            "edgy identity jokes",
+            "sexual content",
+            "drug stories"
+        ],
+        "minimum_transformation_score": 0.45
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.2,
+        "payoff": 0.24,
+        "standalone_context": 0.1,
+        "theme_signal": 0.22,
+        "public_popularity": 0.08,
+        "captionability": 0.05,
+        "visual_quality": 0.07,
+        "pacing": 0.04,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_label": "entertainment_celebrity_music_culture",
+    "phase_one_order": 7,
+    "priority_channels": [
+        "https://www.youtube.com/@FirstWeFeast/videos",
+        "https://www.youtube.com/@callherdaddy/videos",
+        "https://www.youtube.com/@AmeliaDimoldenberg/videos",
+        "https://www.youtube.com/@BreakfastClubPower1051FM/videos",
+        "https://www.youtube.com/@SmartLess/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@Variety/videos",
+        "https://www.youtube.com/@VanityFair/videos",
+        "https://www.youtube.com/@GQVideos/videos",
+        "https://www.youtube.com/@WIRED/videos",
+        "https://www.youtube.com/@Complex/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "SmartLess",
+            "route_to": [
+                "popculture",
+                "comedy"
+            ],
+            "when": "celebrity story, comedy chemistry, or mainstream reveal"
+        },
+        {
+            "source": "Hot Ones",
+            "route_to": [
+                "popculture",
+                "comedy"
+            ],
+            "when": "guest moment is primarily comedic"
+        }
     ]
 }

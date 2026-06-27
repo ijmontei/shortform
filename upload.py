@@ -2,13 +2,16 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 
+from editorial_gates import evaluate_editorial_gates
 from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
     EXECUTED_FILE,
+    assert_theme_allowed_for_active_run,
     clean_theme_name,
     discover_themes,
     ensure_theme,
@@ -17,6 +20,7 @@ from theme_config import (
     mark_stage,
     write_json_file,
 )
+from theme_profile import get_review_policy
 
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -30,10 +34,22 @@ TOKEN_FILE = os.path.join(BASE_DIR, "youtube_token.json")
 THEME_TOKEN_FILES = {
     "comedy": os.path.join(BASE_DIR, "youtube_token_comedy.json"),
     "finance": os.path.join(BASE_DIR, "youtube_token_finance.json"),
+    "health_fitness": os.path.join(BASE_DIR, "youtube_token_health_fitness.json"),
+    "politics": os.path.join(BASE_DIR, "youtube_token_politics.json"),
+    "popculture": os.path.join(BASE_DIR, "youtube_token_popculture.json"),
+    "sports": os.path.join(BASE_DIR, "youtube_token_sports.json"),
+    "technology_ai": os.path.join(BASE_DIR, "youtube_token_technology_ai.json"),
+    "truecrime": os.path.join(BASE_DIR, "youtube_token_truecrime.json"),
 }
 THEME_CHANNEL_HANDLES = {
     "comedy": "@TheJokeArchive",
     "finance": "@TheEconomistArchive",
+    "health_fitness": "@HealthScienceArchive",
+    "politics": "@CivicsArchive",
+    "popculture": "@MainstreamArchive",
+    "sports": "@SportsAthelticsArchive",
+    "technology_ai": "@TechAIArchive",
+    "truecrime": "@CriminologyArchive",
 }
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
@@ -66,6 +82,7 @@ def format_duration(seconds):
 def configure_theme(theme_name):
     global CURRENT_THEME, UPLOAD_PATH, FINAL_METADATA_FILE, CURRENT_THEME_CONFIG
 
+    theme_name = assert_theme_allowed_for_active_run(theme_name)
     theme_paths = ensure_theme(theme_name)
     CURRENT_THEME = theme_paths["theme"]
     UPLOAD_PATH = theme_paths["upload_path"]
@@ -145,8 +162,20 @@ def get_expected_channel_handle():
     return configured_handle or THEME_CHANNEL_HANDLES.get(CURRENT_THEME, "")
 
 
+def theme_upload_route_label(theme_name):
+    config = load_theme_config(theme_name)
+    youtube = config.get("youtube") or {}
+    configured_handle = str(youtube.get("channel_handle", "")).strip()
+    return configured_handle or THEME_CHANNEL_HANDLES.get(clean_theme_name(theme_name), "")
+
+
+def theme_has_upload_route(theme_name):
+    return bool(theme_upload_route_label(theme_name))
+
+
 def get_authenticated_service():
     try:
+        from google.auth.exceptions import RefreshError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -161,14 +190,32 @@ def get_authenticated_service():
     token_file = get_token_file()
 
     if os.path.exists(token_file):
-        credentials = Credentials.from_authorized_user_file(token_file, YOUTUBE_SCOPES)
+        try:
+            credentials = Credentials.from_authorized_user_file(token_file, YOUTUBE_SCOPES)
+        except (ValueError, RefreshError) as error:
+            backup_token_file = f"{token_file}.invalid.{time.strftime('%Y%m%d_%H%M%S')}.bak"
+            os.replace(token_file, backup_token_file)
+            print(
+                f"Saved token for {CURRENT_THEME} could not be read; "
+                f"moved it to {backup_token_file} and will reauthorize."
+            )
+            credentials = None
 
-        if not credentials.has_scopes(YOUTUBE_SCOPES):
+        if credentials and not credentials.has_scopes(YOUTUBE_SCOPES):
             print(f"Saved token is missing required YouTube scopes; reauthorizing {CURRENT_THEME}.")
             credentials = None
 
     if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError as error:
+            backup_token_file = f"{token_file}.revoked.{time.strftime('%Y%m%d_%H%M%S')}.bak"
+            os.replace(token_file, backup_token_file)
+            print(
+                f"Saved token for {CURRENT_THEME} is expired or revoked; "
+                f"moved it to {backup_token_file} and will reauthorize."
+            )
+            credentials = None
 
     if not credentials or not credentials.valid:
         client_config = get_oauth_client_config()
@@ -239,11 +286,232 @@ def clip_already_uploaded(package):
     return bool(youtube_result.get("video_id")) or youtube_status == "uploaded"
 
 
+def require_review_approval_for_upload():
+    return os.getenv(
+        "SHORTFORM_REQUIRE_REVIEW_APPROVAL_FOR_UPLOAD",
+        os.getenv("SHORTFORM_REQUIRE_REVIEW_APPROVAL_FOR_PRIVATE_UPLOAD", "0"),
+    ) == "1"
+
+
+def require_manual_approval_for_public_upload():
+    return os.getenv("SHORTFORM_REQUIRE_MANUAL_APPROVAL_FOR_PUBLIC_UPLOAD", "0") == "1"
+
+
+def package_privacy_status(package):
+    youtube_package = (package.get("platforms") or {}).get("youtube_shorts") or {}
+    privacy = (
+        os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "")
+        or youtube_package.get("privacy_status")
+        or "public"
+    )
+    privacy = str(privacy or "public").strip().lower()
+
+    if privacy not in {"private", "unlisted", "public"}:
+        return "public"
+
+    return privacy
+
+
+MOJIBAKE_REPLACEMENTS = {
+    "вЂ™": "'",
+    "вЂ": "'",
+    "вЂњ": '"',
+    "вЂќ": '"',
+    "вЂ“": "-",
+    "вЂ”": "-",
+    "вЂ¦": "...",
+    "Â": "",
+}
+
+PUBLIC_THEME_LABELS = {
+    "comedy": "Comedy",
+    "finance": "Finance",
+    "health_fitness": "Health & Fitness",
+    "politics": "Politics",
+    "popculture": "Pop Culture",
+    "sports": "Sports",
+    "technology_ai": "Technology AI",
+    "truecrime": "True Crime",
+}
+
+
+def clean_public_text(value):
+    text = str(value or "")
+
+    for broken, fixed in MOJIBAKE_REPLACEMENTS.items():
+        text = text.replace(broken, fixed)
+
+    text = re.sub(r"\?{2,}\s*s\b", "'s", text)
+    text = text.replace("???", "")
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    text = text.replace("\u2013", "-").replace("\u2014", "-")
+    text = re.sub(r"[\u0400-\u04FF]+", "", text)
+    text = re.sub(r"^\?+\s*", "", text)
+    text = re.sub(r"\s+([:;,.!?])", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def compact_public_text(value, max_length):
+    text = clean_public_text(value)
+
+    if len(text) <= max_length:
+        return text
+
+    return text[: max(0, max_length - 1)].rstrip(" ,.;:-") + "..."
+
+
+def title_looks_machine_generated(title):
+    lower = clean_public_text(title).lower()
+
+    if not lower:
+        return True
+
+    if "в" in lower or "�" in lower:
+        return True
+
+    awkward_patterns = [
+        r"\bbehind\s+happens\b",
+        r"\bbehind\s+(are|is|was|were|has|have|had|does|do|did|this|that|the)\b",
+        r"\bbehind\s+.*\s+is$",
+        r"\bbehind\s+openai\s+mark\s+chen$",
+        r"\bwhy\s+.+\s+matters$",
+    ]
+
+    return any(re.search(pattern, lower) for pattern in awkward_patterns)
+
+
+def fallback_upload_title(package):
+    signal = package.get("content_signal") or {}
+    rank_signals = package.get("rank_signals") or {}
+    topic = (
+        signal.get("topic")
+        or package.get("caption")
+        or package.get("hook_reason")
+        or package.get("source_title")
+        or "Podcast moment"
+    )
+    topic = re.sub(r"^daily\s+.+?\s+theme:\s*", "", str(topic), flags=re.I)
+    topic = compact_public_text(topic, 58).strip(" .:-")
+    theme_key = clean_theme_name(package.get("theme") or CURRENT_THEME or "podcast")
+    theme = PUBLIC_THEME_LABELS.get(theme_key, str(theme_key).replace("_", " ").title())
+    content_format = str(package.get("content_format") or "")
+
+    if content_format.startswith("daily_editorial"):
+        total = int(rank_signals.get("countdown_total") or signal.get("total_count") or 0)
+        slot = int(rank_signals.get("countdown_slot") or signal.get("countdown_slot") or 0)
+        adjective = clean_public_text(rank_signals.get("editorial_adjective") or signal.get("adjective") or "best")
+
+        if total and slot:
+            return compact_public_text(f"#{slot} of {total}: {adjective.title()} {theme} Moment", 96)
+
+        return compact_public_text(f"{adjective.title()} {theme} Moment: {topic}", 96)
+
+    if content_format == "popular_segment_short":
+        source = clean_public_text((signal.get("source") or rank_signals.get("popular_segment_signal_source") or "")).lower()
+        prefix = "Most Replayed" if "heatmap" in source else "Most Popular"
+        return compact_public_text(f"{prefix}: {topic}", 96)
+
+    channel = clean_public_text(package.get("source_channel") or "")
+
+    if channel and channel.lower() not in topic.lower():
+        return compact_public_text(f"{topic} | {channel}", 96)
+
+    return compact_public_text(topic, 96) or "Shortform clip"
+
+
+def sanitize_youtube_metadata(package):
+    package = dict(package or {})
+    platforms = dict(package.get("platforms") or {})
+    youtube_package = dict(platforms.get("youtube_shorts") or {})
+
+    title = clean_public_text(youtube_package.get("title") or package.get("title") or "")
+
+    if title_looks_machine_generated(title):
+        title = fallback_upload_title(package)
+
+    title = compact_public_text(title, 100)
+    description = clean_public_text(youtube_package.get("description") or package.get("description") or "")
+    tags = youtube_package.get("tags") or package.get("tags") or []
+    tags = [compact_public_text(tag, 500) for tag in tags if compact_public_text(tag, 500)]
+
+    package["title"] = title
+    package["description"] = description
+    package["tags"] = tags
+    youtube_package["title"] = title
+    youtube_package["description"] = description
+    youtube_package["tags"] = tags
+    platforms["youtube_shorts"] = youtube_package
+    package["platforms"] = platforms
+    return package
+
+
+def package_with_effective_youtube_metadata(package):
+    return sanitize_youtube_metadata(package)
+
+
+def review_skip_reason(package):
+    review = package.get("review") or {}
+    youtube_status = package.get("posting_status", {}).get("youtube_shorts", "")
+    gate_package = package_with_effective_youtube_metadata(package)
+    editorial_gates = evaluate_editorial_gates(CURRENT_THEME, gate_package)
+    privacy = package_privacy_status(package)
+    review_policy = get_review_policy(CURRENT_THEME)
+
+    if review.get("rejected") or youtube_status == "rejected":
+        reason = review.get("rejection_reason", "")
+        return f"rejected by review{': ' + reason if reason else ''}"
+
+    if package.get("upload_ready_requires_burned_captions", True) and not package.get("content_has_burned_captions"):
+        return "missing burned-in captions"
+
+    if not editorial_gates.get("passed", True):
+        return f"editorial gates failed: {', '.join(editorial_gates.get('flags') or [])}"
+
+    if (
+        privacy == "public"
+        and require_manual_approval_for_public_upload()
+        and review_policy.get("require_manual_approval_before_public", True)
+        and not review.get("approved")
+    ):
+        return f"manual review approval required before {privacy} upload"
+
+    if review.get("needs_revision") or youtube_status == "needs_revision":
+        requests = review.get("requests") or []
+        action = requests[-1].get("action", "revision") if requests else "revision"
+        return f"waiting for requested {action}"
+
+    if require_review_approval_for_upload() and not review.get("approved"):
+        return "waiting for manual review approval"
+
+    return ""
+
+
+def force_can_bypass_review_skip(package, blocked_reason):
+    if not blocked_reason:
+        return True
+
+    privacy = package_privacy_status(package)
+
+    if privacy != "private":
+        return False
+
+    protected_reasons = [
+        "editorial gates failed",
+        "rejected by review",
+        "waiting for requested",
+    ]
+    return not any(str(blocked_reason).startswith(reason) for reason in protected_reasons)
+
+
 def build_youtube_body(package):
+    package = sanitize_youtube_metadata(package)
     youtube_package = package.get("platforms", {}).get("youtube_shorts", {})
     title = youtube_package.get("title") or package.get("title") or "Shortform clip"
     description = youtube_package.get("description") or package.get("description") or ""
     tags = youtube_package.get("tags") or package.get("tags") or []
+    privacy_status = package_privacy_status(package)
 
     if "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts".strip()
@@ -256,7 +524,7 @@ def build_youtube_body(package):
             "categoryId": str(youtube_package.get("category_id", "22")),
         },
         "status": {
-            "privacyStatus": "private",
+            "privacyStatus": privacy_status,
             "selfDeclaredMadeForKids": False,
         },
     }
@@ -374,11 +642,12 @@ def get_fatal_youtube_error_message(error):
 
 def mark_youtube_uploaded(package, response):
     video_id = response["id"]
+    privacy_status = package_privacy_status(package)
     package.setdefault("posting_status", {})["youtube_shorts"] = "uploaded"
     package.setdefault("platform_uploads", {})["youtube_shorts"] = {
         "video_id": video_id,
         "url": f"https://www.youtube.com/watch?v={video_id}",
-        "privacy_status": "private",
+        "privacy_status": privacy_status,
         "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     package.setdefault("platform_metrics", {}).setdefault("youtube_shorts", {})
@@ -467,6 +736,13 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     if effective_limit is None and DEFAULT_YOUTUBE_UPLOAD_LIMIT > 0:
         effective_limit = DEFAULT_YOUTUBE_UPLOAD_LIMIT
 
+    if not get_expected_channel_handle():
+        print(
+            f"Skipping YouTube upload for generation-only theme '{CURRENT_THEME}'. "
+            f"Add youtube.channel_handle to src/themes/{CURRENT_THEME}.json to enable uploads."
+        )
+        return 0
+
     metadata = load_metadata()
     content = metadata.get("content", [])
 
@@ -495,11 +771,19 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
             delete_uploaded_video_file(package)
             continue
 
+        blocked_reason = review_skip_reason(package)
+
+        if blocked_reason and (not force or not force_can_bypass_review_skip(package, blocked_reason)):
+            print(f"Skipping YouTube clip: {os.path.basename(video_path)} ({blocked_reason})")
+            remaining_content.append(package)
+            continue
+
         if package.get("posting_status", {}).get("youtube_shorts") not in {"ready", "failed", "uploaded"}:
             remaining_content.append(package)
             continue
 
-        print(f"Uploading private YouTube draft: {os.path.basename(video_path)}")
+        privacy_status = package_privacy_status(package)
+        print(f"Uploading {privacy_status} YouTube Short: {os.path.basename(video_path)}")
 
         try:
             item_start = time.time()
@@ -537,6 +821,25 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     return uploaded_count
 
 
+def authorize_youtube_for_theme(theme_name=DEFAULT_THEME):
+    configure_theme(theme_name)
+
+    if not get_expected_channel_handle():
+        raise YouTubeUploadHalted(
+            f"No YouTube channel is configured for theme '{CURRENT_THEME}'. "
+            f"Add youtube.channel_handle to src/themes/{CURRENT_THEME}.json to create a token."
+        )
+
+    token_file = get_token_file()
+    print(f"Authorizing YouTube channel for theme '{CURRENT_THEME}'.")
+    print(f"Expected channel: {get_expected_channel_handle()}")
+    print(f"Token file: {token_file}")
+    youtube = get_authenticated_service()
+    validate_authenticated_channel(youtube)
+    print(f"YouTube token ready: {token_file}")
+    return token_file
+
+
 def upload_youtube(theme=None, limit=None, force=False, all_themes=False):
     if theme:
         return upload_youtube_for_theme(theme_name=theme, limit=limit, force=force)
@@ -564,6 +867,11 @@ def parse_args():
     parser.add_argument("--all", action="store_true", help="Upload every discovered theme.")
     parser.add_argument("--limit", type=int, help="Optional max number of clips to upload per theme.")
     parser.add_argument("--force", action="store_true", help="Re-upload clips even if metadata has a YouTube video ID.")
+    parser.add_argument(
+        "--auth-only",
+        action="store_true",
+        help="Create or refresh the OAuth token for a theme, validate the channel, and exit without uploading.",
+    )
     return parser.parse_args()
 
 
@@ -571,6 +879,16 @@ def main():
     args = parse_args()
 
     try:
+        if args.auth_only:
+            if args.all:
+                raise YouTubeUploadHalted("--auth-only must be run with one --theme at a time.")
+
+            if not args.theme and not os.getenv("SHORTFORM_THEME"):
+                raise YouTubeUploadHalted("--auth-only requires --theme THEME.")
+
+            authorize_youtube_for_theme(theme_name=args.theme or os.getenv("SHORTFORM_THEME"))
+            return
+
         upload_youtube(theme=args.theme, limit=args.limit, force=args.force, all_themes=args.all)
     except YouTubeUploadHalted as error:
         print(f"YouTube uploads halted: {error}")

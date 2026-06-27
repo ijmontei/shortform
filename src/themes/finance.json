@@ -1,20 +1,299 @@
 {
     "theme": "finance",
+    "profile": "finance",
+    "brand": {
+        "channel_name": "The Economist Archive",
+        "positioning": "A clear filter for the most important money, markets, business, and economics ideas from long interviews.",
+        "audience": "Finance, markets, and business viewers who want concrete ideas quickly.",
+        "viewer_promise": "Specific claims, numbers, frameworks, and risks with added context.",
+        "voice": "credible analyst",
+        "risk_tolerance": "low",
+        "color_palette": [
+            "#161A1D",
+            "#0B6B53",
+            "#F4EBD0",
+            "#C9A227",
+            "#2C5F8A"
+        ],
+        "creative_personality": "credible research desk, premium, calm, analytical",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/economist_archive/economist_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/economist_archive/economist_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/economist_archive/economist_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/economist_archive/economist_archive_description.md"
+        }
+    },
     "youtube": {
         "channel_handle": "@TheEconomistArchive",
         "token_file": "youtube_token_finance.json"
     },
     "channels": [
         "https://www.youtube.com/@TheDiaryOfACEO/videos",
+        "https://www.youtube.com/@allin/videos",
+        "https://www.youtube.com/@AcquiredFM/videos",
+        "https://www.youtube.com/@ColinandSamir/videos",
+        "https://www.youtube.com/@MyFirstMillionPod/videos",
+        "https://www.youtube.com/@TheIcedCoffeeHour/videos",
+        "https://www.youtube.com/@TheProfGPod/videos",
+        "https://www.youtube.com/bloombergpodcasts/videos",
+        "https://www.youtube.com/@TheCompoundNews/videos",
+        "https://www.youtube.com/@ForwardGuidanceBW/videos",
         "https://www.youtube.com/@PBDPodcast/videos",
         "https://www.youtube.com/@VALUETAINMENT/videos",
-        "https://www.youtube.com/@TheIcedCoffeeHour/videos",
+        "https://www.youtube.com/c/biggerpockets/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "A clear filter for the most important money, markets, business, and economics ideas from long interviews.",
+        "source_strategy": "Business, markets, and economics interview channels with high-context ideas."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            24,
+            35,
+            45,
+            58
+        ],
+        "min_clip_duration": 18,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.7,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "market_warning",
+            "investment_thesis",
+            "business_breakdown",
+            "economic_explainer",
+            "founder_lesson"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "market",
+            "cash flow",
+            "valuation",
+            "interest rates",
+            "inflation",
+            "debt",
+            "founder"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "finance",
+                "money",
+                "market",
+                "markets",
+                "investing",
+                "investor",
+                "cash flow",
+                "valuation",
+                "interest rate",
+                "inflation",
+                "debt",
+                "recession",
+                "crash",
+                "selling",
+                "billionaire",
+                "business",
+                "startup",
+                "founder",
+                "company",
+                "revenue",
+                "profit",
+                "economy",
+                "economic",
+                "creator business"
+            ],
+            "negative_keywords": [
+                "movie",
+                "film",
+                "markiplier",
+                "fitness",
+                "nutrition",
+                "health",
+                "dating",
+                "celebrity",
+                "ronaldo",
+                "nba",
+                "nfl"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "thediaryofaceo",
+                "allin",
+                "acquiredfm",
+                "colinandsamir",
+                "myfirstmillionpod",
+                "theicedcoffeehour",
+                "theprofgpod",
+                "bloombergpodcasts",
+                "thecompoundnews",
+                "forwardguidancebw",
+                "biggerpockets"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "market_warning",
+            "investment_thesis",
+            "business_breakdown",
+            "economic_explainer",
+            "founder_lesson"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.8,
+        "caption_style": "precise_numbers",
+        "framing_style": "speaker_data_card",
+        "overlay_style": "credible_context"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "Why {topic} Matters",
+            "The {archetype} Investors Should Understand",
+            "{topic}: The Part People Miss"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#finance",
+            "#money",
+            "#business",
+            "#shorts"
+        ],
+        "tags": [
+            "finance",
+            "money",
+            "business",
+            "economics",
+            "investing",
+            "markets"
+        ],
+        "topic_tags": {
+            "market": "#market",
+            "cash flow": "#cashflow",
+            "valuation": "#valuation",
+            "interest rates": "#interestrates",
+            "inflation": "#inflation",
+            "debt": "#debt",
+            "founder": "#founder"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": true,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "specific stock recommendation",
+            "get-rich-quick language",
+            "unsupported prediction",
+            "crypto hype"
+        ],
+        "manual_review_topics": [
+            "named investments",
+            "market predictions",
+            "tax/legal advice"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.14,
+        "payoff": 0.12,
+        "standalone_context": 0.18,
+        "theme_signal": 0.18,
+        "public_popularity": 0.08,
+        "captionability": 0.06,
+        "visual_quality": 0.06,
+        "pacing": 0.04,
+        "transformation": 0.14
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_label": "business_money",
+    "phase_one_order": 3,
+    "priority_channels": [
+        "https://www.youtube.com/@TheDiaryOfACEO/videos",
         "https://www.youtube.com/@allin/videos",
+        "https://www.youtube.com/@AcquiredFM/videos",
+        "https://www.youtube.com/@ColinandSamir/videos"
+    ],
+    "secondary_channels": [
         "https://www.youtube.com/@MyFirstMillionPod/videos",
-        "https://www.youtube.com/c/biggerpockets/videos",
+        "https://www.youtube.com/@TheIcedCoffeeHour/videos",
         "https://www.youtube.com/@TheProfGPod/videos",
         "https://www.youtube.com/bloombergpodcasts/videos",
         "https://www.youtube.com/@TheCompoundNews/videos",
         "https://www.youtube.com/@ForwardGuidanceBW/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "The Diary of a CEO",
+            "route_to": [
+                "finance",
+                "health_fitness",
+                "technology_ai"
+            ],
+            "when": "episode topic/guest is founder, wellness, psychology, AI, or builder-led"
+        },
+        {
+            "source": "Colin and Samir",
+            "route_to": [
+                "finance",
+                "popculture"
+            ],
+            "when": "creator-business or celebrity/creator culture overlap"
+        }
     ]
 }

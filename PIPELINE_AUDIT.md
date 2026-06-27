@@ -55,9 +55,11 @@ Last updated: 2026-06-21
 .\venv_313\Scripts\python.exe .\ytdlp_auth.py
 ```
 
-2. New themes need YouTube channel routing before upload.
-   - `gaming`, `lifestyle`, and `sports` have channels to pull from, but no upload destination yet.
-   - Add `youtube.channel_handle` to each theme JSON once those channels exist.
+2. Generation-only phase-one themes need YouTube channel routing before upload.
+   - The active launch slate is `comedy`, `sports`, `finance`, `technology_ai`, `health_fitness`, `politics`, `truecrime`, and `popculture`.
+   - `comedy` and `finance` currently have upload routing configured.
+   - The other six active themes can generate reviewed outputs, but upload is blocked until `youtube.channel_handle` is added.
+   - Agriculture, gaming, lifestyle, travel, religion, education, and similar configs are phase-two only unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is deliberately set.
 
 ## Recommended Next Enhancements
 

@@ -1,15 +1,286 @@
 {
     "theme": "sports",
+    "profile": "sports",
+    "brand": {
+        "channel_name": "SportsAthelticsArchive",
+        "positioning": "The best athlete debates, locker-room stories, rivalries, and legacy arguments clipped with context.",
+        "audience": "Sports fans who react to names, debates, rankings, and behind-the-scenes stories.",
+        "viewer_promise": "Recognizable athletes, teams, rivalry, pressure, and debate without filler.",
+        "voice": "energetic analyst",
+        "risk_tolerance": "medium",
+        "color_palette": [
+            "#081B33",
+            "#10B981",
+            "#F5B942",
+            "#F8FAFC",
+            "#FF6B35"
+        ],
+        "creative_personality": "stadium broadcast, kinetic, competitive, highlight-driven",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/sports_atheltics_archive/sports_atheltics_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/sports_atheltics_archive/sports_atheltics_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/sports_atheltics_archive/sports_atheltics_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/sports_atheltics_archive/sports_atheltics_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@SportsAthelticsArchive",
+        "token_file": "youtube_token_sports.json"
+    },
     "channels": [
         "https://www.youtube.com/@ClubShayShay/videos",
+        "https://www.youtube.com/@newheightshow/videos",
+        "https://www.youtube.com/@PardonMyTake/videos",
         "https://www.youtube.com/@thepivotpodcast/videos",
         "https://www.youtube.com/@AllTheSmokeProductions/videos",
-        "https://www.youtube.com/@newheightshow/videos",
-        "https://www.youtube.com/@IAmAthlete/videos",
         "https://www.youtube.com/@BussinWithTheBoys/videos",
         "https://www.youtube.com/@RichEisenShow/videos",
         "https://www.youtube.com/@ThePatMcAfeeShow/videos",
-        "https://www.youtube.com/channel/UC_MXNS3qkraCAEebdScjAPA/videos",
-        "https://www.youtube.com/channel/UCFof_j6hnC2WaZWwwW41_gA/videos"
+        "https://www.youtube.com/@GilbertArenas/videos",
+        "https://www.youtube.com/@IAmAthlete/videos",
+        "https://www.youtube.com/@TheOverlap/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "The best athlete debates, locker-room stories, rivalries, and legacy arguments clipped with context.",
+        "source_strategy": "Athlete-led podcasts and debate shows with strong identity communities."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            15,
+            24,
+            35,
+            45
+        ],
+        "min_clip_duration": 12,
+        "max_clip_duration": 55,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.66,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": true,
+        "prefer_context": true,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "legacy_debate",
+            "locker_room_story",
+            "rivalry",
+            "hot_take",
+            "player_comparison"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "championship",
+            "playoffs",
+            "draft",
+            "locker room",
+            "legacy",
+            "rivalry",
+            "quarterback"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "sports",
+                "athlete",
+                "championship",
+                "playoffs",
+                "draft",
+                "locker room",
+                "legacy",
+                "rivalry",
+                "quarterback",
+                "nba",
+                "nfl",
+                "mlb",
+                "nhl",
+                "ufc",
+                "soccer",
+                "football",
+                "basketball",
+                "baseball",
+                "coach",
+                "player",
+                "game",
+                "team",
+                "club shay shay",
+                "pardon my take",
+                "the pivot"
+            ],
+            "negative_keywords": [
+                "ai model",
+                "machine learning",
+                "stock market",
+                "fed panic",
+                "rental properties",
+                "scotus",
+                "supreme court",
+                "murder trial",
+                "true crime",
+                "fitness protocol",
+                "nutrition",
+                "dating",
+                "red carpet",
+                "movie premiere"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "clubshayshay",
+                "pardonmytake",
+                "thepivotpodcast",
+                "allthesmokeproductions",
+                "bussinwiththeboys",
+                "richeisenshow",
+                "thepatmcafeeshow",
+                "gilbertarenas",
+                "iamathlete",
+                "theoverlap"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "legacy_debate",
+            "locker_room_story",
+            "rivalry",
+            "hot_take",
+            "player_comparison"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.2,
+        "caption_style": "bold_sports",
+        "framing_style": "debate_reaction",
+        "overlay_style": "scoreboard"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "This {archetype} Got Personal",
+            "{topic} Split The Room",
+            "The {source} Story Fans Never Hear"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#sports",
+            "#nfl",
+            "#nba",
+            "#podcast",
+            "#shorts"
+        ],
+        "tags": [
+            "sports",
+            "athlete interviews",
+            "sports podcast",
+            "nba",
+            "nfl",
+            "sports shorts"
+        ],
+        "topic_tags": {
+            "championship": "#championship",
+            "playoffs": "#playoffs",
+            "draft": "#draft",
+            "locker room": "#lockerroom",
+            "legacy": "#legacy",
+            "rivalry": "#rivalry",
+            "quarterback": "#quarterback"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "rights-protected game footage"
+        ],
+        "manual_review_topics": [
+            "injury claims",
+            "allegations about athletes"
+        ],
+        "minimum_transformation_score": 0.5
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.18,
+        "payoff": 0.18,
+        "standalone_context": 0.12,
+        "theme_signal": 0.22,
+        "public_popularity": 0.1,
+        "captionability": 0.05,
+        "visual_quality": 0.08,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_order": 2,
+    "priority_channels": [
+        "https://www.youtube.com/@ClubShayShay/videos",
+        "https://www.youtube.com/@newheightshow/videos",
+        "https://www.youtube.com/@PardonMyTake/videos",
+        "https://www.youtube.com/@thepivotpodcast/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@AllTheSmokeProductions/videos",
+        "https://www.youtube.com/@BussinWithTheBoys/videos",
+        "https://www.youtube.com/@RichEisenShow/videos",
+        "https://www.youtube.com/@ThePatMcAfeeShow/videos",
+        "https://www.youtube.com/@GilbertArenas/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "New Heights",
+            "route_to": [
+                "sports",
+                "popculture"
+            ],
+            "when": "episode is celebrity/culture-led rather than athlete-led"
+        }
     ]
 }

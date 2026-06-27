@@ -23,6 +23,7 @@ client_secrets.json
 oauth2.json
 youtube_token.json
 youtube_token_*.json
+youtube_token*.bak
 cookies.txt
 youtube_cookies.txt
 .env

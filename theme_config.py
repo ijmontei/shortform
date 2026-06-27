@@ -13,7 +13,92 @@ EXECUTED_FILE = os.path.join(SRC_PATH, "executed_id.json")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 TEMP_PATH = os.path.join(OUTPUT_PATH, "temp")
 THEMES_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "themes")
-DEFAULT_THEME = "self_improvement"
+DEFAULT_THEME = "comedy"
+PHASE_ONE_ACTIVE_THEMES = [
+    "comedy",
+    "sports",
+    "finance",
+    "technology_ai",
+    "health_fitness",
+    "politics",
+    "popculture",
+    "truecrime",
+]
+
+
+def future_themes_allowed():
+    return os.getenv("SHORTFORM_ALLOW_FUTURE_THEMES", "0") == "1"
+
+
+def is_phase_one_theme(theme_name):
+    return clean_theme_name(theme_name) in PHASE_ONE_ACTIVE_THEMES
+
+
+def theme_allowed_for_active_run(theme_name):
+    return is_phase_one_theme(theme_name) or future_themes_allowed()
+
+
+def blocked_future_themes(themes):
+    return [
+        clean_theme_name(theme)
+        for theme in themes or []
+        if clean_theme_name(theme) and not theme_allowed_for_active_run(theme)
+    ]
+
+
+def phase_one_theme_list_text():
+    return ", ".join(PHASE_ONE_ACTIVE_THEMES)
+
+
+def requested_env_theme_names():
+    requested_theme = os.getenv("SHORTFORM_THEME")
+    requested_active_themes = os.getenv("SHORTFORM_ACTIVE_THEMES")
+
+    if requested_theme:
+        return [clean_theme_name(requested_theme)]
+
+    if requested_active_themes:
+        return [
+            clean_theme_name(theme)
+            for theme in requested_active_themes.split(",")
+            if clean_theme_name(theme)
+        ]
+
+    return []
+
+
+def future_theme_guard_message(themes):
+    blocked = blocked_future_themes(themes)
+
+    if not blocked:
+        return ""
+
+    return (
+        "Future/phase-two theme(s) are not active for production: "
+        f"{', '.join(blocked)}. "
+        "Phase-one active themes are: "
+        f"{phase_one_theme_list_text()}. "
+        "Set SHORTFORM_ALLOW_FUTURE_THEMES=1 only when intentionally testing "
+        "or producing future-theme inventory."
+    )
+
+
+def assert_theme_allowed_for_active_run(theme_name):
+    theme = clean_theme_name(theme_name)
+    message = future_theme_guard_message([theme])
+
+    if message:
+        raise SystemExit(message)
+
+    return theme
+
+
+def phase_one_theme_names():
+    return [
+        theme
+        for theme in PHASE_ONE_ACTIVE_THEMES
+        if os.path.exists(theme_config_path(theme))
+    ]
 
 
 def load_env_file():
@@ -55,7 +140,7 @@ def load_json_file(path, default):
         return default
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except json.JSONDecodeError:
         return default
@@ -107,24 +192,46 @@ def theme_config_path(theme_name):
 def load_theme_config(theme_name):
     theme = clean_theme_name(theme_name)
     payload = load_json_file(theme_config_path(theme), {"theme": theme, "channels": []})
+    priority_channels = payload.get("priority_channels", [])
+    secondary_channels = payload.get("secondary_channels", [])
     channels = payload.get("channels", [])
     youtube = payload.get("youtube", {})
 
     if not isinstance(youtube, dict):
         youtube = {}
 
-    return {
-        "theme": theme,
-        "channels": [
-            channel.strip()
-            for channel in channels
-            if isinstance(channel, str) and channel.strip()
-        ],
-        "youtube": {
-            "channel_handle": str(youtube.get("channel_handle", "")).strip(),
-            "token_file": str(youtube.get("token_file", "")).strip(),
-        },
+    config = dict(payload)
+    config["theme"] = theme
+    merged_channels = []
+
+    for channel_group in [priority_channels, secondary_channels, channels]:
+        for channel in channel_group or []:
+            if not isinstance(channel, str):
+                continue
+
+            channel = channel.strip()
+
+            if channel and channel not in merged_channels:
+                merged_channels.append(channel)
+
+    config["priority_channels"] = [
+        channel.strip()
+        for channel in priority_channels
+        if isinstance(channel, str) and channel.strip()
+    ]
+    config["secondary_channels"] = [
+        channel.strip()
+        for channel in secondary_channels
+        if isinstance(channel, str) and channel.strip()
+    ]
+    config["episode_routing_override"] = payload.get("episode_routing_override", [])
+    config["channels"] = merged_channels
+    config["youtube"] = {
+        **youtube,
+        "channel_handle": str(youtube.get("channel_handle", "")).strip(),
+        "token_file": str(youtube.get("token_file", "")).strip(),
     }
+    return config
 
 
 def write_theme_config(theme_name, channels):
@@ -160,10 +267,33 @@ def ensure_theme(theme_name=DEFAULT_THEME, channels=None):
 def discover_themes():
     os.makedirs(THEMES_SRC_PATH, exist_ok=True)
     requested_theme = os.getenv("SHORTFORM_THEME")
+    requested_active_themes = os.getenv("SHORTFORM_ACTIVE_THEMES")
+    allow_future = future_themes_allowed()
 
     if requested_theme:
-        ensure_theme(requested_theme)
-        return [clean_theme_name(requested_theme)]
+        theme = clean_theme_name(requested_theme)
+
+        if not theme_allowed_for_active_run(theme):
+            return []
+
+        ensure_theme(theme)
+        return [theme]
+
+    if requested_active_themes:
+        themes = [
+            clean_theme_name(theme)
+            for theme in requested_active_themes.split(",")
+            if clean_theme_name(theme)
+        ]
+        return [
+            theme
+            for theme in themes
+            if os.path.exists(theme_config_path(theme))
+            and (allow_future or theme in PHASE_ONE_ACTIVE_THEMES)
+        ]
+
+    if os.getenv("SHORTFORM_RUN_ALL_THEMES", "0") != "1" or not allow_future:
+        return phase_one_theme_names()
 
     themes = [
         clean_theme_name(os.path.splitext(filename)[0])

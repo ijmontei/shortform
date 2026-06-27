@@ -1,19 +1,297 @@
 {
     "theme": "comedy",
+    "profile": "comedy",
+    "brand": {
+        "channel_name": "The Joke Archive",
+        "positioning": "A ruthless curator of the funniest comedy podcast moments, filtered daily.",
+        "audience": "Comedy Shorts viewers who want the payoff without the full episode.",
+        "viewer_promise": "Fast laughs, reactions, roasts, and stories with clear punchlines.",
+        "voice": "sharp, playful curator",
+        "risk_tolerance": "medium",
+        "color_palette": [
+            "#15121F",
+            "#FF2E88",
+            "#FFD166",
+            "#4DE1FF",
+            "#B7FF5A"
+        ],
+        "creative_personality": "neon comedy club, punchy, fast, chaotic in a controlled way",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/joke_archive/joke_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/joke_archive/joke_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/joke_archive/joke_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/joke_archive/joke_archive_description.md"
+        }
+    },
     "youtube": {
         "channel_handle": "@TheJokeArchive",
         "token_file": "youtube_token_comedy.json"
     },
     "channels": [
-        "https://www.youtube.com/@joerogan/videos",
+        "https://www.youtube.com/@KillTony/videos",
         "https://www.youtube.com/theovon/videos",
-        "https://www.youtube.com/channel/UCwzCMiicL-hBUzyjWiJaseg/videos",
         "https://www.youtube.com/@BadFriends/videos",
+        "https://www.youtube.com/@GoodHangWithAmyPoehler/videos",
+        "https://www.youtube.com/@SmartLess/videos",
+        "https://www.youtube.com/@joerogan/videos",
         "https://www.youtube.com/@YMHStudios/videos",
         "https://www.youtube.com/@OfficialFlagrant/videos",
         "https://www.youtube.com/tigerbelly/videos",
+        "https://www.youtube.com/@AreYouGarbage/videos",
+        "https://www.youtube.com/channel/UCwzCMiicL-hBUzyjWiJaseg/videos",
         "https://www.youtube.com/@AndrewSantinoWhiskeyGinger/videos",
-        "https://www.youtube.com/@stavvysworld/videos",
+        "https://www.youtube.com/@stavvysworld/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "A ruthless curator of the funniest comedy podcast moments, filtered daily.",
+        "source_strategy": "Large comedy podcasts with repeatable reaction and punchline moments."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            8,
+            12,
+            18,
+            24,
+            32,
+            45
+        ],
+        "min_clip_duration": 7,
+        "max_clip_duration": 50,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 3,
+        "allow_cold_open": true,
+        "prefer_context": false,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "roast",
+            "self_own",
+            "wild_story",
+            "awkward_moment",
+            "guest_breaks"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "laugh",
+            "joke",
+            "roast",
+            "awkward",
+            "wild",
+            "hilarious",
+            "punchline"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "comedy",
+                "comedian",
+                "funny",
+                "laugh",
+                "joke",
+                "roast",
+                "awkward",
+                "wild",
+                "hilarious",
+                "punchline",
+                "stand up",
+                "standup",
+                "kt #",
+                "kill tony",
+                "bad friends",
+                "smartless",
+                "hot ones",
+                "theo von",
+                "whiskey ginger"
+            ],
+            "negative_keywords": [
+                "stock market",
+                "fed panic",
+                "rental properties",
+                "scotus",
+                "supreme court",
+                "murder trial",
+                "true crime",
+                "ai model",
+                "machine learning",
+                "fitness protocol",
+                "nutrition"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "killtony",
+                "ucwzcmiicl-hbuzyjwijaseg",
+                "theovon",
+                "badfriends",
+                "goodhangwithamypoehler",
+                "smartless",
+                "joerogan",
+                "ymhstudios",
+                "officialflagrant",
+                "tigerbelly",
+                "areyougarbage",
+                "andrewsantinowhiskeyginger",
+                "stavvysworld",
+                "firstwefeast"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "roast",
+            "self_own",
+            "wild_story",
+            "awkward_moment",
+            "guest_breaks",
+            "host_loses_it"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "cold_open",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "cold_open",
+        "max_intro_seconds": 1.8,
+        "caption_style": "comedy_punchline",
+        "framing_style": "speaker_reaction",
+        "overlay_style": "bold_arcade"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "{topic}",
+            "The {archetype} That Broke The Room",
+            "This {source} Moment Got Out Of Control"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#comedy",
+            "#funny",
+            "#podcast",
+            "#shorts"
+        ],
+        "tags": [
+            "comedy",
+            "funny",
+            "podcast clips",
+            "comedian",
+            "comedy shorts"
+        ],
+        "topic_tags": {
+            "laugh": "#laugh",
+            "joke": "#joke",
+            "roast": "#roast",
+            "awkward": "#awkward",
+            "wild": "#wild",
+            "hilarious": "#hilarious",
+            "punchline": "#punchline"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "targeted harassment",
+            "protected-class insults"
+        ],
+        "manual_review_topics": [
+            "edgy identity jokes",
+            "sexual content",
+            "drug stories"
+        ],
+        "minimum_transformation_score": 0.45
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.2,
+        "payoff": 0.24,
+        "standalone_context": 0.1,
+        "theme_signal": 0.22,
+        "public_popularity": 0.08,
+        "captionability": 0.05,
+        "visual_quality": 0.07,
+        "pacing": 0.04,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_order": 1,
+    "priority_channels": [
+        "https://www.youtube.com/@KillTony/videos",
+        "https://www.youtube.com/theovon/videos",
+        "https://www.youtube.com/@BadFriends/videos",
+        "https://www.youtube.com/@GoodHangWithAmyPoehler/videos",
+        "https://www.youtube.com/@SmartLess/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@joerogan/videos",
+        "https://www.youtube.com/@YMHStudios/videos",
+        "https://www.youtube.com/@OfficialFlagrant/videos",
+        "https://www.youtube.com/tigerbelly/videos",
         "https://www.youtube.com/@AreYouGarbage/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "SmartLess",
+            "route_to": [
+                "comedy",
+                "popculture"
+            ],
+            "when": "celebrity guest, comic story, or mainstream entertainment reveal"
+        },
+        {
+            "source": "The Diary of a CEO",
+            "route_to": [
+                "finance",
+                "health_fitness",
+                "technology_ai"
+            ],
+            "when": "guest/topic fits founder, wellness, or builder lane"
+        }
     ]
 }

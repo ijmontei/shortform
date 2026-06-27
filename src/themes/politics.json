@@ -1,15 +1,291 @@
 {
     "theme": "politics",
+    "profile": "politics",
+    "brand": {
+        "channel_name": "Civics Archive",
+        "positioning": "Context-first political interviews, debates, and policy moments without misleading rage packaging.",
+        "audience": "News/politics viewers who want high-context claims and debate moments.",
+        "viewer_promise": "Every clip has clear source framing, claim context, and restrained packaging.",
+        "voice": "measured editor",
+        "risk_tolerance": "low",
+        "color_palette": [
+            "#101827",
+            "#F2E3C6",
+            "#B87333",
+            "#4FB3A5",
+            "#6B7280"
+        ],
+        "creative_personality": "modern civic archive, serious, contextual, public-record energy",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/civics_archive/civics_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/civics_archive/civics_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/civics_archive/civics_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/civics_archive/civics_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@CivicsArchive",
+        "token_file": "youtube_token_politics.json"
+    },
     "channels": [
-        "https://www.youtube.com/@PiersMorganUncensored/videos",
-        "https://www.youtube.com/@MegynKelly/videos",
-        "https://www.youtube.com/@TuckerCarlson/videos",
         "https://www.youtube.com/@breakingpoints/videos",
+        "https://www.youtube.com/@MegynKelly/videos",
+        "https://www.youtube.com/@MeidasTouch/videos",
+        "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
+        "https://www.youtube.com/@PiersMorganUncensored/videos",
         "https://www.youtube.com/@PodSaveAmerica/videos",
         "https://www.youtube.com/@TheBulwark/videos",
+        "https://www.youtube.com/@TheFreePress/videos",
+        "https://www.youtube.com/@PBSNewsHour/videos",
+        "https://www.youtube.com/@TuckerCarlson/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Context-first political interviews, debates, and policy moments without misleading rage packaging.",
+        "source_strategy": "Mixed political interview sources with explicit manual-review gates."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            24,
+            35,
+            45,
+            58
+        ],
+        "min_clip_duration": 20,
+        "max_clip_duration": 60,
+        "default_clip_count": 8,
+        "theme_clip_budget": 12,
+        "theme_candidates_per_video": 6,
+        "min_readiness_score": 0.72,
+        "min_selected_score": 0.32,
+        "max_topic_similarity": 0.5,
+        "candidate_stride_seconds": 5,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": false,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "policy_explainer",
+            "heated_exchange",
+            "source_context",
+            "accountability_claim",
+            "debate_moment"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "election",
+            "policy",
+            "border",
+            "congress",
+            "court",
+            "war",
+            "media"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "trump",
+                "biden",
+                "vance",
+                "obama",
+                "scotus",
+                "supreme court",
+                "white house",
+                "democrat",
+                "republican",
+                "congress",
+                "senate",
+                "policy",
+                "election",
+                "impeachment",
+                "israel",
+                "iran",
+                "border",
+                "dhs",
+                "government",
+                "war",
+                "foreign policy",
+                "media"
+            ],
+            "negative_keywords": [
+                "physics",
+                "antimatter",
+                "dark energy",
+                "quantum",
+                "ronaldo",
+                "soccer",
+                "football",
+                "scotland",
+                "ghana",
+                "witch doctor",
+                "opera",
+                "music",
+                "movie",
+                "film",
+                "nba",
+                "nfl"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 0,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "breakingpoints",
+                "megynkelly",
+                "meidastouch",
+                "shawnryanshowofficial",
+                "podsaveamerica",
+                "thebulwark",
+                "thefreepress",
+                "pbsnewshour",
+                "tuckercarlson"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "policy_explainer",
+            "heated_exchange",
+            "source_context",
+            "accountability_claim",
+            "debate_moment"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.8,
+        "caption_style": "source_precise",
+        "framing_style": "source_identity",
+        "overlay_style": "fact_context"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "What {source} Said About {topic}",
+            "The Context Behind {topic}",
+            "This {archetype} Needed More Context"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#politics",
+            "#news",
+            "#government",
+            "#shorts"
+        ],
+        "tags": [
+            "politics",
+            "news",
+            "policy",
+            "government",
+            "debate"
+        ],
+        "topic_tags": {
+            "election": "#election",
+            "policy": "#policy",
+            "border": "#border",
+            "congress": "#congress",
+            "court": "#court",
+            "war": "#war",
+            "media": "#media"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": true,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "election claims",
+            "war claims",
+            "crime allegations",
+            "health policy claims",
+            "legal accusations"
+        ],
+        "manual_review_topics": [
+            "breaking news",
+            "claims about named private people",
+            "election integrity",
+            "source identity",
+            "date context",
+            "speaker attribution"
+        ],
+        "minimum_transformation_score": 0.7
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.1,
+        "payoff": 0.1,
+        "standalone_context": 0.2,
+        "theme_signal": 0.12,
+        "public_popularity": 0.04,
+        "captionability": 0.06,
+        "visual_quality": 0.04,
+        "pacing": 0.04,
+        "transformation": 0.16,
+        "claim_safety": 0.14
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_label": "politics_news_current_affairs",
+    "phase_one_order": 6,
+    "priority_channels": [
+        "https://www.youtube.com/@breakingpoints/videos",
+        "https://www.youtube.com/@MegynKelly/videos",
         "https://www.youtube.com/@MeidasTouch/videos",
-        "https://www.youtube.com/@LexFridman/videos",
+        "https://www.youtube.com/@ShawnRyanShowOfficial/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@PiersMorganUncensored/videos",
+        "https://www.youtube.com/@PodSaveAmerica/videos",
+        "https://www.youtube.com/@TheBulwark/videos",
         "https://www.youtube.com/@TheFreePress/videos",
         "https://www.youtube.com/@PBSNewsHour/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "The Shawn Ryan Show",
+            "route_to": [
+                "politics",
+                "truecrime"
+            ],
+            "when": "episode is geopolitics, intelligence, military, crime, or confession-led"
+        }
     ]
 }

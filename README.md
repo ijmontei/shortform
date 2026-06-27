@@ -25,6 +25,66 @@ Validate generated files and upload metadata after a run:
 .\venv_313\Scripts\python.exe .\run.py --validate-outputs
 ```
 
+Create a consolidated post-run QC/postmortem report:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --production-review
+```
+
+If a run is still active and you only want to package the latest logs without re-running heavier validation/quality checks:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --production-review --skip-review-validation --skip-review-quality
+```
+
+Generate the local manual-review dashboard:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --review-dashboard
+```
+
+Validate the theme-engine schema and upload-routing readiness without starting production:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --validate-theme-engine
+```
+
+Render visual regression previews for the ranked-countdown wheel-to-podium transition:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --visual-regression
+```
+
+This writes per-theme preview videos and contact sheets under `logs\visual_regression\...`, plus `logs\visual_regression_latest.json`. Use `--theme comedy` with the same command to inspect one theme.
+
+Scaffold a new theme from the universal schema:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --scaffold-theme new_theme_name --scaffold-profile generic
+```
+
+Approve or reject generated packages before upload:
+
+```powershell
+.\venv_313\Scripts\python.exe .\review_queue.py list --theme comedy --all
+.\venv_313\Scripts\python.exe .\review_queue.py approve --theme comedy --index 1 --notes "publishable"
+.\venv_313\Scripts\python.exe .\review_queue.py reject --theme comedy --index 2 --reason "weak hook"
+.\venv_313\Scripts\python.exe .\review_queue.py request --theme comedy --index 3 --action try_alternate_framing
+```
+
+Rejected clips and clips with open revision requests are always skipped by `upload.py`. Private-draft uploading still works without manual approvals by default; enable stricter gating when you want only approved clips to upload:
+
+```powershell
+$env:SHORTFORM_REQUIRE_REVIEW_APPROVAL_FOR_UPLOAD="1"
+```
+
+Collect YouTube Analytics metrics for uploaded videos and build experiment reports:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --collect-analytics --theme comedy --analytics-days 30
+.\venv_313\Scripts\python.exe .\run.py --experiment-report --theme comedy
+```
+
 ## Quality And Speed Controls
 
 - `yt-dlp` fetches channel metadata without cookies for speed. Media downloads are authenticated by default so age-restricted videos do not get treated as ordinary skips. Use an exported, signed-in, age-verified YouTube cookie file for the most reliable age-gated downloads:
@@ -39,8 +99,74 @@ Verify restricted-video access before a full run:
 .\venv_313\Scripts\python.exe .\ytdlp_auth.py
 ```
 
+Strictly verify a newly exported cookie file before installing it:
+
+```powershell
+.\venv_313\Scripts\python.exe .\ytdlp_auth.py --diagnose-cookie-file "C:\Users\Admin\Downloads\www.youtube.com_cookies.txt"
+.\venv_313\Scripts\python.exe .\ytdlp_auth.py --cookie-file "C:\Users\Admin\Downloads\www.youtube.com_cookies.txt"
+.\venv_313\Scripts\python.exe .\ytdlp_auth.py --install-cookie-export "C:\Users\Admin\Downloads\www.youtube.com_cookies.txt"
+```
+
+You can also let the helper find the newest valid export in Downloads. It will only install a file after that exact file passes the restricted-video auth test:
+
+```powershell
+.\venv_313\Scripts\python.exe .\ytdlp_auth.py --scan-cookie-exports
+.\venv_313\Scripts\python.exe .\ytdlp_auth.py --install-newest-cookie-export
+```
+
+`--cookie-file` and `--install-cookie-export` now prove that exact file unlocks the age-restricted test video. They do not silently pass because a browser-cookie fallback happened to work. `run.py --doctor` reports the strict project `cookies.txt` result and lists browser profiles for awareness. The pipeline reads the cookie file through a temporary copy and does not rewrite `cookies.txt`.
+
+If the auth check still says `Sign in to confirm your age`, export a broader signed-in cookie file. A YouTube-only export can contain `SID`/`PSID` cookies and still fail age-gated videos; the most reliable export includes cookies for `youtube.com`, `google.com`, and `accounts.google.com` from the same signed-in, age-verified browser session. Browser-cookie fallback is disabled by default so production uses the known project cookie file deterministically. If you intentionally want to rely on `--cookies-from-browser` fallback, fully close Chrome/Edge first, then set:
+
+```powershell
+$env:SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK="1"
+```
+
+Do not run raw `yt-dlp --cookies .\cookies.txt` against the project cookie file during debugging; yt-dlp may rewrite the file. Use `ytdlp_auth.py --cookie-file ...` or copy the cookie file to `%TEMP%` first.
+
+Video downloads may also require a YouTube PO-token provider. The pipeline auto-starts a local bgutil provider when this checkout exists:
+
+```text
+C:\Users\Admin\bgutil-ytdlp-pot-provider\server\build\main.js
+```
+
+Install/build it once with:
+
+```powershell
+git clone --single-branch --branch 1.3.1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git "$env:USERPROFILE\bgutil-ytdlp-pot-provider"
+Push-Location "$env:USERPROFILE\bgutil-ytdlp-pot-provider\server"
+npm ci
+npx tsc
+Pop-Location
+.\venv_313\Scripts\python.exe -m pip install -U bgutil-ytdlp-pot-provider
+```
+
+`run.py --doctor` reports whether `http://127.0.0.1:4416/ping` is reachable.
+
+The latest auth diagnostic is written to:
+
+```text
+logs/ytdlp_auth_latest.json
+```
+
 Set `SHORTFORM_REQUIRE_YOUTUBE_AUTH_FOR_MEDIA=0` only for quick public-video tests. Set `SHORTFORM_USE_COOKIES_FOR_FETCH=1` only if fetching channel metadata also needs authenticated cookies.
-Restricted auth failures halt the clip stage by default because age-gated videos are considered required inputs. Set `SHORTFORM_HALT_ON_RESTRICTED_DOWNLOAD_FAILURE=0` only if you intentionally want to skip blocked videos during a test run.
+Restricted media auth is checked before a production run cleans or downloads anything. Restricted auth failures halt the run by default because age-gated videos are considered required inputs. Use `--skip-media-auth-preflight`, set `SHORTFORM_SKIP_MEDIA_AUTH_PREFLIGHT=1`, or set `SHORTFORM_REQUIRE_YOUTUBE_AUTH_FOR_MEDIA=0` only for quick public-video tests. Set `SHORTFORM_HALT_ON_RESTRICTED_DOWNLOAD_FAILURE=0` only if you intentionally want to skip blocked videos during a test run.
+
+Media downloads default to `SHORTFORM_MEDIA_AUTH_POLICY=on_demand`: the run verifies age-gated cookie access first, then downloads public videos without cookies and retries with cookies only if YouTube asks for sign-in or returns an auth-like 403. This reduces authenticated request volume and helps preserve the session. Set `SHORTFORM_MEDIA_AUTH_POLICY=always` only if you intentionally want every media download to use cookies.
+
+If you want to start the run before closing Chrome, let the preflight wait instead of failing immediately:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --clean-slate --skip-youtube --wait-for-media-auth 900
+```
+
+The run will keep retrying restricted-video auth during that window. Close every Chrome/Edge window and background process, or install a stricter cookie export, and the same run will continue once the age-gated auth check passes.
+
+If you want the run itself to watch Downloads for a fresh export while it waits, add `--watch-cookie-exports`:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --clean-slate --skip-youtube --wait-for-media-auth 900 --watch-cookie-exports
+```
 
 For Visual Studio or other launchers that do not inherit PowerShell `$env:` values, add the setting to a local `.env` file:
 
@@ -131,6 +257,21 @@ $env:SHORTFORM_QUALITY_LAB_INCLUDE_VERIFICATION="1"
 
 That writes separate `*_with_verification.json` reports.
 
+Source dossiers now include processing metrics, source-tier editorial decisions, and slow-source flags. A source is marked for slow review when scoring exceeds this threshold:
+
+```powershell
+$env:SHORTFORM_SLOW_SOURCE_REVIEW_SECONDS="1800"
+```
+
+Production review reports join the latest run log, run summary, output validation, quality-lab results, source dossiers, slowest sources, and visible failures:
+
+```text
+logs/production_reviews/production_review_latest.json
+logs/production_reviews/production_review_<timestamp>.json
+```
+
+The production review also includes the latest theme-engine validation summary and links to per-theme analytics report files.
+
 Run a local crop-strategy bakeoff on downloaded media to compare face-locked, stable-face-lock, group-face-lock, and center-safe framing:
 
 ```powershell
@@ -156,6 +297,24 @@ $env:SHORTFORM_ENABLE_PERSON_FALLBACK="1"
 $env:SHORTFORM_CLIP_TRANSCRIBE_MODEL="tiny"
 $env:SHORTFORM_CLIP_TRANSCRIBE_BEAM_SIZE="1"
 ```
+
+You can also switch the scoring profile in one setting:
+
+```powershell
+$env:SHORTFORM_SPEED_PROFILE="debug"      # tiny model, beam 1
+$env:SHORTFORM_SPEED_PROFILE="production" # base model, beam 3
+$env:SHORTFORM_SPEED_PROFILE="premium"    # small model, beam 5
+```
+
+Very long interviews use a capped candidate-window policy by default: full scan for shorter sources, then a bounded mix of replay/timestamp/chapter windows, high-audio-energy windows, and evenly spaced coverage for long sources. This keeps daily production from spending hours scoring every possible window in a multi-hour interview.
+
+```powershell
+$env:SHORTFORM_ENABLE_SCORING_WINDOW_CAPS="1"
+$env:SHORTFORM_FULL_SOURCE_SCAN_MAX_SECONDS="5400"
+$env:SHORTFORM_MAX_SCORING_START_POINTS="520"
+```
+
+Set `SHORTFORM_ENABLE_SCORING_WINDOW_CAPS=0` for exhaustive scans, or use `SHORTFORM_SPEED_PROFILE=premium` for a deeper cap.
 
 - Subtitle transcription uses `faster-whisper` with word timestamps. The default subtitle beam is `1` for speed. Increase it only if subtitle accuracy needs it:
 
@@ -187,25 +346,43 @@ $env:SHORTFORM_MAX_NETWORK_FAILURES="4"
 
 ## Themes
 
-Themes are JSON files in `src/themes`.
+Themes are JSON files in `src/themes`. They now use the theme-engine schema: every theme can define its own source list, clip duration rules, scoring signals, packaging/intro style, metadata style, risk controls, review policy, and analytics targets.
 
-Current themes:
-
-- `src/themes/self_improvement.json`
-- `src/themes/sports.json`
-- `src/themes/comedy.json`
-- `src/themes/finance.json`
+Phase-one production runs default to eight themes: comedy, sports, finance/business, technology/AI, health and self-improvement, politics/news, pop culture/entertainment, and true crime/legal. Other JSON theme files are retained as future inventory. They do not run in default production, and even `--theme`, `SHORTFORM_ACTIVE_THEMES`, or `SHORTFORM_RUN_ALL_THEMES=1` stay phase-one unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is also set.
 
 Example:
 
 ```json
 {
     "theme": "sports",
+    "profile": "sports",
+    "brand": {
+        "channel_name": "The Sports Archive",
+        "positioning": "The best athlete debates, stories, rivalries, and legacy arguments clipped with context."
+    },
     "channels": [
         "https://www.youtube.com/@newheightshow/videos"
-    ]
+    ],
+    "clip_rules": {
+        "candidate_durations": [15, 24, 35, 45],
+        "min_clip_duration": 12,
+        "max_clip_duration": 55,
+        "min_readiness_score": 0.66
+    },
+    "packaging": {
+        "default_intro_mode": "context_card",
+        "caption_style": "bold_sports"
+    }
 }
 ```
+
+Research notes and the portfolio rationale live here:
+
+```text
+docs/theme_engine_research_2026.md
+```
+
+Only themes with `youtube.channel_handle` and an authenticated token file are allowed to upload. Generation can run for phase-one themes without upload routing; those themes skip YouTube upload until their theme JSON has a configured `youtube.channel_handle`. Restricted media auth still runs for production generation unless you intentionally disable it for public-video tests.
 
 ## Run
 
@@ -213,6 +390,18 @@ Run all themes end-to-end. Each theme runs fetch, clip generation, ranked countd
 
 ```powershell
 .\venv_313\Scripts\python.exe run.py
+```
+
+Start from a clean generated-output slate for the active phase-one themes:
+
+```powershell
+.\venv_313\Scripts\python.exe run.py --clean-slate --skip-youtube
+```
+
+To only clear generated final clips, working clips, subtitle scratch files, editorial metadata, and funnel state without starting production:
+
+```powershell
+.\venv_313\Scripts\python.exe run.py --clean-slate-only --skip-youtube
 ```
 
 The runner prints per-theme and overall timing summaries for pull, clip, countdown/editorial, subtitle, upload, and total runtime. It also writes full run logs:
@@ -231,10 +420,24 @@ Run one theme through fetch, clip generation, ranked countdown generation, and Y
 .\venv_313\Scripts\python.exe run.py --theme comedy
 ```
 
+Audit the implementation against the phase-one theme-engine brief:
+
+```powershell
+.\venv_313\Scripts\python.exe run.py --theme-engine-audit
+```
+
+The audit also checks the latest visual regression pack, so run `--visual-regression` after changing intro animation code.
+
 Generate classic raw subtitled clips in addition to the ranked countdown package:
 
 ```powershell
 .\venv_313\Scripts\python.exe run.py --theme comedy --classic-clips
+```
+
+Classic raw subtitled clips are review/debug artifacts by default. The production editorial gate blocks raw recycler clips from upload metadata unless you intentionally set:
+
+```powershell
+$env:SHORTFORM_ALLOW_RAW_CLIP_UPLOADS="1"
 ```
 
 Skip the editorial recap and run the older classic clip packaging path:

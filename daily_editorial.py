@@ -26,7 +26,10 @@ except ImportError:
     yt_dlp = None
 
 import ytdlp_auth
-from theme_config import BASE_DIR, DEFAULT_THEME, PULLED_FILE, discover_themes, ensure_theme, load_json_file, utc_timestamp, write_json_file
+from editorial_gates import evaluate_editorial_gates
+from metadata_generation import score_title_quality
+from theme_config import BASE_DIR, DEFAULT_THEME, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, utc_timestamp, write_json_file
+from theme_profile import load_theme_profile, theme_hashtags, theme_tags
 from popularity_signals import (
     build_popularity_profile_from_info,
     build_youtube_data_api_profile,
@@ -83,6 +86,7 @@ EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SEC
 EDITORIAL_TRANSITION_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TRANSITION_SECONDS", "0.45"))
 EDITORIAL_RANK_CARD_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_RANK_CARD_SECONDS", "0.0"))
 EDITORIAL_CLIP_MIN_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_MIN_SECONDS", "7.0"))
+EDITORIAL_BURN_SOURCE_CAPTIONS = os.getenv("SHORTFORM_EDITORIAL_BURN_SOURCE_CAPTIONS", "1") != "0"
 EDITORIAL_PERIOD_LABEL = os.getenv("SHORTFORM_EDITORIAL_PERIOD_LABEL", "this week").strip() or "this week"
 EDITORIAL_BOARD_SOURCE_LIMIT = max(5, int(os.getenv("SHORTFORM_EDITORIAL_BOARD_SOURCE_LIMIT", "12")))
 EDITORIAL_HARD_REJECT_BAD_OUTPUTS = os.getenv("SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS", "1") != "0"
@@ -93,6 +97,7 @@ POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SI
 POPULAR_SEGMENT_MIN_SCORE = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MIN_SCORE", "0.12"))
 POPULAR_SEGMENT_INTRO_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_INTRO_SECONDS", "2.85"))
 POPULAR_SEGMENT_MAX_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MAX_SECONDS", "58.0"))
+EDITORIAL_SUBTITLE_MODEL = None
 YOUTUBE_DATA_API_KEY = os.getenv("YOUTUBE_DATA_API_KEY", "").strip()
 ENABLE_YOUTUBE_DATA_API_SIGNALS = os.getenv("SHORTFORM_ENABLE_YOUTUBE_DATA_API_SIGNALS", "1") != "0"
 YOUTUBE_DATA_API_COMMENT_PAGES = max(1, int(os.getenv("SHORTFORM_YOUTUBE_DATA_API_COMMENT_PAGES", "1")))
@@ -144,15 +149,30 @@ THEME_TAGS = {
         "hashtags": ["#sports", "#athlete", "#podcast", "#shorts"],
         "tags": ["sports", "athlete interviews", "sports podcast", "nba", "nfl", "sports shorts"],
     },
-    "lifestyle": {
-        "label": "lifestyle",
-        "hashtags": ["#lifestyle", "#wellness", "#mindset", "#shorts"],
-        "tags": ["lifestyle", "wellness", "mindset", "self improvement", "health", "lifestyle podcast"],
+    "technology_ai": {
+        "label": "tech ai",
+        "hashtags": ["#ai", "#technology", "#builders", "#shorts"],
+        "tags": ["artificial intelligence", "technology", "builders", "founder interviews", "tech podcast", "ai shorts"],
     },
-    "gaming": {
-        "label": "gaming",
-        "hashtags": ["#gaming", "#videogames", "#gamingnews", "#shorts"],
-        "tags": ["gaming", "video games", "gaming podcast", "game developer", "esports", "gaming shorts"],
+    "health_fitness": {
+        "label": "wellness",
+        "hashtags": ["#wellness", "#psychology", "#health", "#shorts"],
+        "tags": ["wellness", "psychology", "health", "self improvement", "behavior change", "wellness podcast"],
+    },
+    "politics": {
+        "label": "politics",
+        "hashtags": ["#politics", "#news", "#currentaffairs", "#shorts"],
+        "tags": ["politics", "news", "current affairs", "political podcast", "policy", "politics shorts"],
+    },
+    "popculture": {
+        "label": "pop culture",
+        "hashtags": ["#popculture", "#celebrity", "#music", "#shorts"],
+        "tags": ["pop culture", "celebrity interviews", "music culture", "entertainment", "culture podcast", "celebrity shorts"],
+    },
+    "truecrime": {
+        "label": "crime legal",
+        "hashtags": ["#truecrime", "#legal", "#interview", "#shorts"],
+        "tags": ["true crime", "legal interviews", "confessional interview", "human stories", "courtroom", "crime podcast"],
     },
 }
 
@@ -287,12 +307,33 @@ def period_label():
 
 
 def theme_profile(theme):
+    profile = load_theme_profile(theme)
+    brand = profile.get("brand") or {}
+    packaging = profile.get("packaging", {}) or {}
+    label = (
+        brand.get("channel_name")
+        or profile.get("metadata_style", {}).get("label")
+        or theme.replace("_", " ")
+    )
     default = {
-        "label": theme.replace("_", " "),
+        "label": label,
         "hashtags": ["#podcast", "#recap", "#shorts"],
         "tags": ["podcast", "recap", "shorts", theme.replace("_", " ")],
+        "profile": profile.get("profile", "generic"),
+        "packaging": packaging,
+        "caption_style": packaging.get("caption_style", ""),
+        "framing_style": packaging.get("framing_style", ""),
+        "overlay_style": packaging.get("overlay_style", ""),
+        "default_intro_mode": packaging.get("default_intro_mode", ""),
+        "metadata_style": profile.get("metadata_style", {}),
     }
-    return {**default, **THEME_TAGS.get(theme, {})}
+    return {
+        **default,
+        **THEME_TAGS.get(theme, {}),
+        "label": label,
+        "hashtags": theme_hashtags(theme) or default["hashtags"],
+        "tags": theme_tags(theme) or default["tags"],
+    }
 
 
 def normalized_adjective_queue(queue):
@@ -486,6 +527,7 @@ def finalize_editorial_package(package, label):
     if not output_file or not os.path.exists(output_file):
         package.setdefault("posting_status", {})["youtube_shorts"] = "failed"
         package.setdefault("review", {})["rejection_reason"] = "missing rendered editorial output"
+        package["editorial_gates"] = evaluate_editorial_gates(package.get("theme", DEFAULT_THEME), package)
         return package
 
     try:
@@ -524,15 +566,23 @@ def finalize_editorial_package(package, label):
 
             package["video_file"] = ""
 
+    package["editorial_gates"] = evaluate_editorial_gates(package.get("theme", DEFAULT_THEME), package)
     return package
 
 
 def package_is_upload_ready(package):
+    editorial_gates = package.get("editorial_gates") or evaluate_editorial_gates(
+        package.get("theme", DEFAULT_THEME),
+        package,
+    )
+    captions_required = package.get("upload_ready_requires_burned_captions", True)
     return (
         bool(package.get("video_file"))
         and os.path.exists(package.get("video_file", ""))
         and (package.get("posting_status") or {}).get("youtube_shorts") == "ready"
+        and (not captions_required or package.get("content_has_burned_captions"))
         and not (package.get("render_qc") or {}).get("rejected")
+        and editorial_gates.get("passed", True)
     )
 
 
@@ -1354,6 +1404,120 @@ def spoken_topic(topic):
     return topic[0].lower() + topic[1:]
 
 
+THEME_TITLE_NOUNS = {
+    "comedy": "Comedy",
+    "sports": "Sports",
+    "finance": "Business",
+    "technology_ai": "AI",
+    "health_fitness": "Wellness",
+    "politics": "Politics",
+    "truecrime": "True Crime",
+    "popculture": "Culture",
+}
+
+
+def editorial_title_topic(topic):
+    cleaned = compact_text(str(topic or "").strip(" .!?"), 54)
+    return cleaned if cleaned else "The Standout Moment"
+
+
+def title_variant_index(*values, count=1):
+    seed = "|".join(str(value or "") for value in values)
+    return sum(ord(char) for char in seed) % max(1, count)
+
+
+def build_theme_native_editorial_title(theme, topic, adjective, countdown_slot, total_count, is_recap=False):
+    theme_key = str(theme or "").strip().lower()
+    theme_noun = THEME_TITLE_NOUNS.get(theme_key, theme_key.replace("_", " ").title() or "Interview")
+    topic_text = editorial_title_topic(topic)
+    adjective_text = str(adjective or "best").replace("_", " ").title()
+    period_text = period_label().title()
+
+    if is_recap:
+        patterns = {
+            "comedy": [
+                "{theme} Interviews: {adjective} Laughs From {period}",
+                "{adjective} Comedy Signals From {period}",
+            ],
+            "sports": [
+                "{adjective} Sports Debates From {period}",
+                "{theme} Interviews: The Stories That Moved The Board",
+            ],
+            "finance": [
+                "{adjective} Business Signals From {period}",
+                "{theme} Interviews: The Operator Notes From {period}",
+            ],
+            "technology_ai": [
+                "{adjective} AI Builder Signals From {period}",
+                "{theme} Interviews: The Product Questions From {period}",
+            ],
+            "health_fitness": [
+                "{adjective} Wellness Takeaways From {period}",
+                "{theme} Interviews: Practical Health Signals From {period}",
+            ],
+            "politics": [
+                "{adjective} Politics Context From {period}",
+                "{theme} Interviews: The Claims Worth Reviewing",
+            ],
+            "truecrime": [
+                "{adjective} Case Moments From {period}",
+                "{theme} Interviews: Testimony Worth Context",
+            ],
+            "popculture": [
+                "{adjective} Culture Reveals From {period}",
+                "{theme} Interviews: The Guest Moments That Landed",
+            ],
+        }
+        template_pool = patterns.get(theme_key, ["{adjective} {theme} Interview Signals From {period}"])
+        template = template_pool[title_variant_index(theme, adjective, period_text, count=len(template_pool))]
+        return compact_text(template.format(theme=theme_noun, adjective=adjective_text, period=period_text), 96)
+
+    patterns = {
+        "comedy": [
+            "{topic} Became #{slot} In The Comedy Countdown",
+            "The Joke That Put {topic} At #{slot}",
+        ],
+        "sports": [
+            "{topic} Put #{slot} On The Sports Board",
+            "The {theme} Debate Behind #{slot}: {topic}",
+        ],
+        "finance": [
+            "{topic} Became #{slot} On The Business Board",
+            "The Operator Signal Behind #{slot}: {topic}",
+        ],
+        "technology_ai": [
+            "{topic} Became #{slot} In The AI Builder List",
+            "The AI Tradeoff Behind #{slot}: {topic}",
+        ],
+        "health_fitness": [
+            "{topic} Became #{slot} In The Wellness List",
+            "The Practical Health Signal At #{slot}: {topic}",
+        ],
+        "politics": [
+            "{topic} Became #{slot} In The Politics Board",
+            "The Context Behind #{slot}: {topic}",
+        ],
+        "truecrime": [
+            "{topic} Became #{slot} In The Case Board",
+            "The Testimony Signal Behind #{slot}: {topic}",
+        ],
+        "popculture": [
+            "{topic} Became #{slot} In The Culture List",
+            "The Guest Reveal Behind #{slot}: {topic}",
+        ],
+    }
+    template_pool = patterns.get(theme_key, ["{topic} Became #{slot} In The {theme} List"])
+    template = template_pool[title_variant_index(theme, topic_text, countdown_slot, count=len(template_pool))]
+    title = template.format(
+        topic=topic_text,
+        slot=countdown_slot,
+        total=total_count,
+        theme=theme_noun,
+        adjective=adjective_text,
+    )
+    return compact_text(title, 96)
+
+
 def build_editorial_intro(theme, topic, rank, total_count, adjective, clip):
     theme_label = theme_profile(theme)["label"]
     context = clip.get("_countdown_context") or {}
@@ -1368,14 +1532,20 @@ def build_editorial_intro(theme, topic, rank, total_count, adjective, clip):
 def build_output_package(theme, output_path, source_clip, topic_item, rank, adjective, date_key, is_recap=False):
     profile = theme_profile(theme)
     theme_label = profile["label"]
+    caption_style = profile.get("caption_style", "")
+    overlay_style = profile.get("overlay_style", "")
+    framing_style = profile.get("framing_style", "")
     topic = topic_item["topic"]
     total_count = int(topic_item.get("_total_count") or DAILY_TOPIC_COUNT)
     countdown_slot = int(topic_item.get("_countdown_slot") or countdown_slot_for_rank(rank, total_count))
     best_clip = topic_item["clips"][0]
-    title = (
-        f"Today's {theme_label.title()} Podcast Recap"
-        if is_recap
-        else compact_text(f"#{countdown_slot}: {topic} | {adjective.title()} {theme_label.title()} Podcast Moments", 95)
+    title = build_theme_native_editorial_title(
+        theme,
+        topic,
+        adjective,
+        countdown_slot,
+        total_count,
+        is_recap=is_recap,
     )
     description = (
         f"Ranking the {adjective} moments from {period_label()} {theme_label} podcasts. "
@@ -1390,17 +1560,45 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
         adjective,
         theme_label,
     ])[:24]
+    rank_signals = dict(best_clip.get("rank_signals") or {})
+    rank_signals.update({
+        "editorial_rank": rank,
+        "countdown_slot": countdown_slot,
+        "countdown_total": total_count,
+        "editorial_adjective": adjective,
+        "content_format": "daily_editorial_recap" if is_recap else "daily_editorial_short",
+    })
+    title_quality = score_title_quality(
+        theme,
+        title,
+        topic_terms=[topic, best_clip.get("source_title", ""), rank_signals.get("source_channel", "")],
+    )
+    rank_signals["title_quality"] = title_quality
+    experiment = best_clip.get("experiment") or {
+        "experiment_id": f"{theme}_countdown_packaging",
+        "variant": profile.get("overlay_style") or profile.get("label", theme),
+        "hypothesis": "Theme-specific countdown packaging improves engaged view rate and channel session depth.",
+    }
 
     return {
         "theme": theme,
         "content_format": "daily_editorial_recap" if is_recap else "daily_editorial_short",
+        "content_has_burned_captions": True,
+        "upload_ready_requires_burned_captions": True,
+        "caption_style": caption_style,
+        "overlay_style": overlay_style,
+        "framing_style": framing_style,
         "editorial_date": date_key,
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(source_clip) if source_clip else "",
         "source_state_key": f"{theme}|editorial|{date_key}|{rank}",
         "source_video_url": best_clip.get("source_video_url", ""),
+        "source_channel": rank_signals.get("source_channel", ""),
         "source_title": best_clip.get("source_title", ""),
+        "clip_start_time": best_clip.get("start_time"),
+        "clip_end_time": best_clip.get("end_time"),
         "title": title,
+        "title_quality": title_quality,
         "caption": compact_text(description, 160),
         "hashtags": hashtags,
         "tags": tags,
@@ -1408,6 +1606,22 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
         "transcript_excerpt": best_clip.get("transcript_excerpt", ""),
         "hook_reason": f"daily {adjective} theme: {topic}",
         "score": topic_item.get("score", best_clip.get("score")),
+        "readiness_score": best_clip.get("readiness_score"),
+        "rank_signals": rank_signals,
+        "experiment": experiment,
+        "content_signal": {
+            "type": "ranked_countdown_moment",
+            "rank": rank,
+            "countdown_slot": countdown_slot,
+            "total_count": total_count,
+            "topic": topic,
+            "adjective": adjective,
+            "theme_archetype": rank_signals.get("theme_archetype", ""),
+            "popularity_source": rank_signals.get("popularity_source", ""),
+            "popularity_score": rank_signals.get("popularity_score", 0),
+            "source_channel": rank_signals.get("source_channel", ""),
+            "source_title": best_clip.get("source_title", ""),
+        },
         "review": {
             "quality_rating": "",
             "approved": False,
@@ -1432,16 +1646,87 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
     }
 
 
-def visual_style(rank):
-    return {
+THEME_VISUAL_STYLES = {
+    "comedy": {
         "accent": "0xFFE08A",
-        "accent2": "0x6F8FAF",
+        "accent2": "0xFF4B5C",
         "cream": "0xFFF4B8",
         "mint": "0xB7D7C2",
         "blue": "0x6F8FAF",
-        "dark": "0x2E3440",
-        "name": "archive_channel_palette",
-    }
+        "dark": "0x20151E",
+        "name": "comedy_arcade_countdown",
+    },
+    "sports": {
+        "accent": "0x7CFF6B",
+        "accent2": "0x4BA3FF",
+        "cream": "0xF4FFE8",
+        "mint": "0xBDEFD1",
+        "blue": "0x4BA3FF",
+        "dark": "0x162016",
+        "name": "sports_scoreboard_countdown",
+    },
+    "finance": {
+        "accent": "0xD6F36A",
+        "accent2": "0x59C3A5",
+        "cream": "0xF3F7D7",
+        "mint": "0xB7D7C2",
+        "blue": "0x6F8FAF",
+        "dark": "0x14211E",
+        "name": "operator_notebook_countdown",
+    },
+    "technology_ai": {
+        "accent": "0x8CF7FF",
+        "accent2": "0x9B8CFF",
+        "cream": "0xE7FBFF",
+        "mint": "0xB7D7FF",
+        "blue": "0x6F8FAF",
+        "dark": "0x101927",
+        "name": "builder_brief_countdown",
+    },
+    "health_fitness": {
+        "accent": "0xB7D7C2",
+        "accent2": "0xFFE08A",
+        "cream": "0xFFF4B8",
+        "mint": "0xCDE8D6",
+        "blue": "0x6F8FAF",
+        "dark": "0x18251F",
+        "name": "wellness_takeaway_countdown",
+    },
+    "politics": {
+        "accent": "0xE6EDF7",
+        "accent2": "0xC94C4C",
+        "cream": "0xF4F0E8",
+        "mint": "0xA9C4D8",
+        "blue": "0x6F8FAF",
+        "dark": "0x171B24",
+        "name": "civic_context_countdown",
+    },
+    "truecrime": {
+        "accent": "0xD8C7A1",
+        "accent2": "0xA54343",
+        "cream": "0xF2E8D2",
+        "mint": "0xAFC4B8",
+        "blue": "0x6F8FAF",
+        "dark": "0x171412",
+        "name": "case_file_countdown",
+    },
+    "popculture": {
+        "accent": "0xFFB7D5",
+        "accent2": "0xFFE08A",
+        "cream": "0xFFF4B8",
+        "mint": "0xB7D7C2",
+        "blue": "0x8EB6FF",
+        "dark": "0x201622",
+        "name": "culture_spotlight_countdown",
+    },
+}
+
+
+def visual_style(rank, theme=None):
+    theme_key = str(theme or "").strip().lower()
+    style = dict(THEME_VISUAL_STYLES.get(theme_key) or THEME_VISUAL_STYLES["comedy"])
+    style["rank"] = rank
+    return style
 
 
 def selected_topic_clips(topic_item):
@@ -1457,6 +1742,79 @@ def selected_topic_clips(topic_item):
             break
 
     return selected
+
+
+def editorial_subtitle_model():
+    global EDITORIAL_SUBTITLE_MODEL
+
+    if EDITORIAL_SUBTITLE_MODEL is None:
+        import subtitle_generation
+
+        EDITORIAL_SUBTITLE_MODEL = subtitle_generation.create_transcriber()
+
+    return EDITORIAL_SUBTITLE_MODEL
+
+
+def captioned_editorial_source_clip(theme, clip, scratch_dir):
+    if not EDITORIAL_BURN_SOURCE_CAPTIONS:
+        return clip
+
+    source_file = clip.get("output_file", "")
+
+    if not source_file or not os.path.exists(source_file):
+        return clip
+
+    if clip.get("content_has_burned_captions") or source_file.lower().endswith("_captioned.mp4"):
+        return clip
+
+    import subtitle_generation
+
+    subtitle_generation.configure_theme(theme)
+    caption_dir = os.path.join(scratch_dir, "captioned_sources")
+    os.makedirs(caption_dir, exist_ok=True)
+    basename = os.path.splitext(os.path.basename(source_file))[0]
+    output_file = os.path.join(caption_dir, clean_filename(f"{basename}_captioned") + ".mp4")
+    ass_path = os.path.join(caption_dir, clean_filename(f"{basename}_captioned") + ".ass")
+
+    if (
+        os.path.exists(output_file)
+        and os.path.getsize(output_file) > 0
+        and os.path.getmtime(output_file) >= os.path.getmtime(source_file)
+    ):
+        captioned = dict(clip)
+        captioned["raw_output_file"] = source_file
+        captioned["output_file"] = output_file
+        captioned["content_has_burned_captions"] = True
+        captioned["editorial_captioned_source_file"] = output_file
+        return captioned
+
+    print(f"Burning source captions for editorial clip: {os.path.basename(source_file)}")
+    words = subtitle_generation.transcribe_words(editorial_subtitle_model(), source_file)
+
+    if not words:
+        raise RuntimeError(f"No subtitle words were detected for editorial source clip: {source_file}")
+
+    event_count = subtitle_generation.build_ass_subtitles(words, ass_path, clip_metadata=clip)
+
+    if event_count <= 0:
+        raise RuntimeError(f"No subtitle events were created for editorial source clip: {source_file}")
+
+    subtitle_generation.burn_subtitles(source_file, ass_path, output_file)
+    captioned = dict(clip)
+    captioned["raw_output_file"] = source_file
+    captioned["output_file"] = output_file
+    captioned["content_has_burned_captions"] = True
+    captioned["editorial_captioned_source_file"] = output_file
+    captioned["editorial_caption_word_count"] = len(words)
+    captioned["editorial_caption_event_count"] = event_count
+    return captioned
+
+
+def captioned_editorial_source_clips(theme, clips, scratch_dir):
+    return [
+        captioned_editorial_source_clip(theme, clip, scratch_dir)
+        for clip in clips
+    ]
 
 
 def clip_play_duration_for(source_clip, per_clip_limit):
@@ -1739,6 +2097,10 @@ def make_scan_banner_card(banner, accent, accent2, fonts):
     image.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(7)))
 
     draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=9, fill=(11, 16, 24, 224), outline=(255, 255, 255, 58), width=2)
+    draw.rounded_rectangle((0, 36, 20, 88), radius=4, fill=(accent[0], accent[1], accent[2], 220))
+    draw.rounded_rectangle((width - 20, 36, width - 1, 88), radius=4, fill=(accent2[0], accent2[1], accent2[2], 184))
+    draw.rectangle((0, 54, width, 61), fill=(255, 244, 184, 28))
+    draw.rectangle((0, 68, width, 73), fill=(183, 215, 194, 22))
     draw.polygon([(0, 0), (width * 0.45, 0), (width * 0.25, height), (0, height)], fill=(accent[0], accent[1], accent[2], 42))
     draw.polygon([(width * 0.64, 0), (width, 0), (width, height), (width * 0.52, height)], fill=(accent2[0], accent2[1], accent2[2], 28))
     draw.rectangle((0, 0, 10, height), fill=accent)
@@ -1979,6 +2341,57 @@ def paste_rotated(base, layer, x, y, angle, alpha=1.0):
     base.alpha_composite(layer, (int(x), int(y)))
 
 
+def card_morph_layer(source_card, final_card, width, height, progress):
+    progress = clamp(progress)
+    layer = Image.new("RGBA", (max(1, int(width)), max(1, int(height))), (0, 0, 0, 0))
+    source = source_card.resize(layer.size, Image.Resampling.LANCZOS)
+    final = final_card.resize(layer.size, Image.Resampling.LANCZOS)
+    source_alpha = max(0.0, 1.0 - ease_in_out_cubic((progress - 0.78) / 0.22))
+    final_alpha = ease_in_out_cubic((progress - 0.74) / 0.22)
+
+    if progress >= 0.96:
+        layer.alpha_composite(final)
+        return layer
+
+    if source_alpha > 0.01:
+        layer.alpha_composite(multiply_alpha(source, source_alpha))
+
+    if final_alpha > 0.01:
+        layer.alpha_composite(multiply_alpha(final, final_alpha))
+
+    return layer
+
+
+def selected_card_start_pose(source_index, source_card, spin_end, wheel_top, wheel_height, row_spacing, total_scroll, lock_center, display_index):
+    offset = wheel_offset_at(spin_end, spin_end)
+    layout = wheel_card_layout(
+        source_index,
+        source_card,
+        offset,
+        wheel_top,
+        wheel_height,
+        row_spacing,
+        total_scroll,
+        lock_center,
+    )
+
+    if layout["visible"]:
+        return {
+            "x": layout["x"],
+            "y": layout["y"],
+            "scale": layout["scale"],
+            "alpha": max(0.72, layout["alpha"]),
+        }
+
+    side = -1 if display_index % 2 == 0 else 1
+    return {
+        "x": 58 + side * 230,
+        "y": int(lock_center + (display_index - 2) * row_spacing),
+        "scale": 0.88,
+        "alpha": 0.74,
+    }
+
+
 def draw_intro_header(draw, ranking_title, ranking_subtitle, fonts, accent, t):
     pulse_x = int(5 * math.sin(t * 5.5))
     draw.text(
@@ -1991,6 +2404,165 @@ def draw_intro_header(draw, ranking_title, ranking_subtitle, fonts, accent, t):
     )
     draw.text((58, 136), ranking_subtitle, font=fonts["subtitle"], fill=(255, 255, 255, 196))
     draw.rectangle((58, 216, 58 + int(360 + 46 * math.sin(t * 3.2)), 222), fill=accent)
+
+
+def draw_wheel_mechanism(draw, accent, accent2, t, wheel_top, wheel_height, lock_center, progress):
+    alpha = int(126 * ((1 - clamp(progress)) ** 1.35))
+
+    if alpha <= 4:
+        return
+
+    rail_left = 48
+    rail_right = 1032
+    rail_color = (accent2[0], accent2[1], accent2[2], alpha)
+    accent_color = (accent[0], accent[1], accent[2], min(210, alpha + 44))
+
+    draw.rounded_rectangle(
+        (rail_left - 12, wheel_top - 46, rail_right + 12, wheel_top + wheel_height + 46),
+        radius=34,
+        fill=(0, 0, 0, min(82, max(18, alpha // 2))),
+        outline=(255, 255, 255, max(18, alpha // 3)),
+        width=2,
+    )
+    draw.line((rail_left + 8, wheel_top - 18, rail_left + 8, wheel_top + wheel_height + 18), fill=rail_color, width=5)
+    draw.line((rail_right - 8, wheel_top - 18, rail_right - 8, wheel_top + wheel_height + 18), fill=rail_color, width=5)
+    draw.line((rail_left + 30, lock_center, rail_right - 30, lock_center), fill=accent_color, width=5)
+
+    pulley_centers = [
+        (rail_left + 8, wheel_top + 42),
+        (rail_right - 8, wheel_top + 42),
+        (rail_left + 8, wheel_top + wheel_height - 42),
+        (rail_right - 8, wheel_top + wheel_height - 42),
+    ]
+
+    for pulley_index, (cx, cy) in enumerate(pulley_centers):
+        radius = 34
+        draw.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            fill=(0, 0, 0, max(30, alpha // 2)),
+            outline=(accent[0], accent[1], accent[2], max(52, alpha)),
+            width=4,
+        )
+        spoke_angle = t * 6.2 + pulley_index * 0.7
+
+        for spoke_index in range(4):
+            angle = spoke_angle + spoke_index * math.pi / 2
+            ex = cx + math.cos(angle) * (radius - 7)
+            ey = cy + math.sin(angle) * (radius - 7)
+            draw.line((cx, cy, ex, ey), fill=(accent2[0], accent2[1], accent2[2], max(36, alpha)), width=3)
+
+    draw.rounded_rectangle(
+        (rail_left + 14, lock_center - 94, rail_right - 14, lock_center + 94),
+        radius=18,
+        outline=(255, 244, 184, max(28, int(alpha * 0.72))),
+        width=3,
+    )
+
+    for tick_index in range(8):
+        phase = (tick_index / 8.0 + t * 0.55) % 1.0
+        y = int(wheel_top + phase * wheel_height)
+        tick_alpha = int(alpha * (0.35 + 0.65 * (1 - abs((y - lock_center) / max(1, wheel_height / 2)))))
+        draw.rounded_rectangle(
+            (rail_left + 2, y - 12, rail_left + 30, y + 12),
+            radius=5,
+            fill=(accent[0], accent[1], accent[2], max(18, tick_alpha)),
+        )
+        draw.rounded_rectangle(
+            (rail_right - 30, y - 12, rail_right - 2, y + 12),
+            radius=5,
+            fill=(accent[0], accent[1], accent[2], max(18, tick_alpha)),
+        )
+
+
+def draw_card_carrier(draw, x, y, width, height, accent, accent2, alpha, t, index):
+    alpha = int(130 * clamp(alpha))
+
+    if alpha <= 8:
+        return
+
+    mid_y = int(y + height / 2)
+    left_anchor = int(x - 32)
+    right_anchor = int(x + width + 32)
+    belt_alpha = max(18, int(alpha * 0.55))
+    pin_alpha = max(28, int(alpha * 0.82))
+
+    draw.line(
+        (left_anchor, mid_y, right_anchor, mid_y),
+        fill=(accent2[0], accent2[1], accent2[2], belt_alpha),
+        width=3,
+    )
+    draw.line(
+        (left_anchor, mid_y + 14, right_anchor, mid_y + 14),
+        fill=(255, 244, 184, max(12, int(alpha * 0.22))),
+        width=2,
+    )
+
+    for side_x in (left_anchor, right_anchor):
+        draw.ellipse(
+            (side_x - 13, mid_y - 13, side_x + 13, mid_y + 13),
+            fill=(0, 0, 0, max(22, int(alpha * 0.45))),
+            outline=(accent[0], accent[1], accent[2], pin_alpha),
+            width=3,
+        )
+        spoke = t * 8.0 + index * 0.64
+
+        for spoke_index in range(3):
+            angle = spoke + spoke_index * (math.pi * 2 / 3)
+            end_x = side_x + math.cos(angle) * 10
+            end_y = mid_y + math.sin(angle) * 10
+            draw.line(
+                (side_x, mid_y, end_x, end_y),
+                fill=(255, 244, 184, max(18, int(alpha * 0.52))),
+                width=2,
+            )
+
+
+def draw_morph_energy(draw, accent, accent2, t, progress):
+    progress = clamp(progress)
+
+    if progress <= 0.01 or progress >= 0.88:
+        return
+
+    bloom = math.sin(math.pi * progress)
+    alpha = int(120 * bloom)
+    pull_x = 540 + int(math.sin(t * 4.2) * 18)
+
+    for arc_index in range(7):
+        y = int(530 + arc_index * 158 + math.sin(t * 5.1 + arc_index) * 18)
+        left = 70 + int(34 * progress)
+        right = 1010 - int(42 * progress)
+        arc_alpha = int(alpha * (0.22 + 0.18 * math.sin(t * 6.0 + arc_index)))
+        draw.arc(
+            (left, y - 58, right, y + 126),
+            start=186,
+            end=354,
+            fill=(accent2[0], accent2[1], accent2[2], max(16, arc_alpha)),
+            width=3 if arc_index % 2 else 4,
+        )
+
+    for line_index in range(18):
+        lane = line_index % 6
+        y = int(555 + lane * 190 + ((t * 680 + line_index * 37) % 152))
+        start_x = int(120 + ((line_index * 71 + t * 420) % 760))
+        end_x = int(start_x + 94 + 90 * bloom)
+        line_alpha = int(alpha * (0.18 + 0.30 * abs(math.sin(t * 5.8 + line_index))))
+        draw.line(
+            (start_x, y, min(1040, end_x), y - int(22 + 28 * progress)),
+            fill=(255, 244, 184, max(18, line_alpha)),
+            width=2 if line_index % 3 else 4,
+        )
+
+    for spark_index in range(14):
+        angle = t * 4.0 + spark_index * 0.82
+        radius = 60 + (spark_index % 5) * 28 + 90 * progress
+        cx = int(pull_x + math.cos(angle) * radius)
+        cy = int(940 + math.sin(angle * 0.82) * radius * 1.35)
+        spark_alpha = int(alpha * (0.20 + 0.30 * abs(math.sin(angle))))
+        draw.rounded_rectangle(
+            (cx - 4, cy - 4, cx + 4, cy + 4),
+            radius=3,
+            fill=(accent[0], accent[1], accent[2], max(12, spark_alpha)),
+        )
 
 
 def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_duration, ranking_title, ranking_subtitle, context, top_entries, source_banners, countdown_slot, style, background_video=None):
@@ -2019,16 +2591,19 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
     top_entries = top_entries or []
     display_entries = board_display_entries(top_entries, countdown_slot=countdown_slot, window_size=5)
     display_keys = {entry.get("source_state_key") for entry in display_entries}
+    display_index_by_key = {
+        entry.get("source_state_key"): index
+        for index, entry in enumerate(display_entries)
+    }
     current_entry = next(
         (entry for entry in display_entries if int(entry.get("slot") or 0) == int(countdown_slot or 0)),
         None,
     )
     source_banners = ensure_display_banners(source_banners, display_entries)
     scan_cards = [make_scan_banner_card(banner, accent, accent2, fonts) for banner in source_banners]
-    source_index_by_key = {
-        banner.get("source_state_key"): index
-        for index, banner in enumerate(source_banners)
-    }
+    source_index_by_key = {}
+    for index, banner in enumerate(source_banners):
+        source_index_by_key.setdefault(banner.get("source_state_key"), index)
     final_cards = [
         make_final_banner_card(
             entry,
@@ -2076,31 +2651,16 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
             frame = intro_background_frame(t, accent, accent2, background_capture)
             draw = ImageDraw.Draw(frame)
             draw_intro_header(draw, ranking_title, ranking_subtitle, fonts, accent, t)
+            final_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
 
-            if t < final_start:
-                lane_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
-                lane_alpha = int(36 + 128 * lane_progress)
-                draw.rounded_rectangle(
-                    (42, 820, 1038, 1070),
-                    radius=14,
-                    fill=(accent2[0], accent2[1], accent2[2], int(18 + 38 * lane_progress)),
-                    outline=(accent[0], accent[1], accent[2], lane_alpha),
-                    width=4,
-                )
-                if current_entry:
-                    current_slot = int(current_entry.get("slot") or countdown_slot)
-                    draw.text(
-                        (64, 846),
-                        f"#{current_slot}",
-                        font=fonts["lock"],
-                        fill=(accent[0], accent[1], accent[2], int(70 + 120 * lane_progress)),
-                        stroke_width=2,
-                        stroke_fill=(0, 0, 0, int(120 * lane_progress)),
-                    )
+            if t < final_lock:
+                lane_progress = final_progress
+                draw_wheel_mechanism(draw, accent, accent2, t, wheel_top, wheel_height, lock_center, lane_progress)
+                draw_morph_energy(draw, accent, accent2, t, final_progress)
 
                 offset = wheel_offset_at(min(t, spin_end), spin_end)
                 lock_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
-                survivor_morph = ease_in_out_cubic((t - (spin_end - 0.15)) / max(0.1, final_lock - spin_end + 0.15))
+                wheel_exit_progress = ease_out_cubic((t - spin_end) / 0.46)
 
                 for index, (banner, card) in enumerate(zip(source_banners, scan_cards)):
                     layout = wheel_card_layout(
@@ -2124,8 +2684,24 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     angle = 0.0
                     key = banner.get("source_state_key")
 
-                    if survivor_morph > 0 and key in display_keys:
-                        alpha *= max(0.18, 1 - survivor_morph * 0.82)
+                    display_index = display_index_by_key.get(key)
+                    display_morph_progress = 0.0
+
+                    if display_index is not None:
+                        display_morph_progress = ease_in_out_cubic(
+                            (t - spin_end - display_index * 0.035) / max(0.1, final_lock - spin_end)
+                        )
+
+                    if alpha <= 0.025:
+                        continue
+
+                    if lock_progress > 0 and key not in display_keys:
+                        alpha *= max(0.0, 1 - wheel_exit_progress * 1.08)
+                    elif lock_progress > 0:
+                        alpha *= max(0.46, 1 - wheel_exit_progress * 0.36)
+
+                    if key in display_keys and display_morph_progress > 0.01:
+                        continue
 
                     if lock_progress > 0 and key not in display_keys:
                         side = -1 if index % 2 == 0 else 1
@@ -2134,7 +2710,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                         x += int(side * sweep * (260 + (index % 3) * 42))
                         y += center_pull + int(math.sin(index * 1.7 + t * 8.5) * 12 * sweep)
                         angle = side * sweep * 2.8
-                        alpha *= max(0.0, 1 - sweep * 0.82)
+                        alpha *= max(0.0, 1 - max(sweep * 1.42, wheel_exit_progress * 1.08))
                         scale *= max(0.72, 1 - sweep * 0.16)
 
                     if lock_progress > 0.05 and key in display_keys:
@@ -2150,9 +2726,8 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     scaled_w = int(card.width * scale)
                     scaled_h = int(card.height * scale)
                     scaled = card.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+                    draw_card_carrier(draw, x, y, scaled_w, scaled_h, accent, accent2, alpha, t, index)
                     paste_rotated(frame, scaled, x, y, angle, alpha)
-
-            final_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
 
             if final_progress > 0:
                 for index, card in enumerate(final_cards):
@@ -2160,57 +2735,55 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     key = entry.get("source_state_key")
                     source_index = source_index_by_key.get(key, index)
                     source_card = scan_cards[source_index] if source_index < len(scan_cards) else card
-                    source_layout = wheel_card_layout(
+                    target_x = 58
+                    target_y = top_board_y(index)
+                    card_progress = ease_in_out_cubic((t - spin_end - index * 0.018) / max(0.1, final_lock - spin_end))
+                    if card_progress <= 0.01:
+                        continue
+                    start_pose = selected_card_start_pose(
                         source_index,
                         source_card,
-                        wheel_offset_at(spin_end, spin_end),
+                        spin_end,
                         wheel_top,
                         wheel_height,
                         row_spacing,
                         total_scroll,
                         lock_center,
+                        index,
                     )
-                    source_scale = source_layout["scale"] if source_layout["visible"] else 0.92
-                    start_x = source_layout["x"] if source_layout["visible"] else 82
-                    start_y = source_layout["y"] if source_layout["visible"] else int(760 + index * 142)
-                    target_x = 58
-                    target_y = top_board_y(index)
-                    card_progress = ease_in_out_cubic((t - spin_end - index * 0.055) / max(0.1, final_lock - spin_end))
-                    source_width = int(source_card.width * source_scale)
-                    source_height = int(source_card.height * source_scale)
-                    card_width = int(source_width + (964 - source_width) * card_progress)
-                    card_height = int(source_height + (176 - source_height) * card_progress)
-                    x = int(start_x + (target_x - start_x) * card_progress)
-                    y = int(start_y + (target_y - start_y) * card_progress)
-                    alpha = min(1.0, final_progress + 0.1)
-                    source_alpha = max(0.0, 1 - card_progress * 1.28) * alpha
-                    final_alpha = clamp((card_progress - 0.18) / 0.72) * alpha
-                    glow_alpha = int(95 * final_progress * (0.6 + 0.4 * math.sin(t * 9 + index)))
+                    source_width = int(source_card.width * start_pose["scale"])
+                    source_height = int(source_card.height * start_pose["scale"])
+                    start_x = int(start_pose["x"])
+                    start_y = int(start_pose["y"])
+                    size_progress = ease_in_out_cubic((card_progress - 0.46) / 0.38)
+                    card_width = int(source_width + (964 - source_width) * size_progress)
+                    card_height = int(source_height + (176 - source_height) * size_progress)
+                    position_progress = ease_out_cubic(card_progress)
+                    x = int(start_x + (target_x - start_x) * position_progress)
+                    y = int(start_y + (target_y - start_y) * position_progress)
+                    alpha = min(1.0, start_pose["alpha"] + card_progress * 0.34)
+                    glow_alpha = int(95 * card_progress * (0.6 + 0.4 * math.sin(t * 9 + index)))
 
-                    draw.rounded_rectangle(
-                        (42, target_y - 12, 1038, target_y + 188),
-                        radius=12,
-                        fill=(accent2[0], accent2[1], accent2[2], int(12 * final_alpha)),
-                        outline=(accent[0], accent[1], accent[2], max(0, glow_alpha)),
-                        width=3,
-                    )
+                    if card_progress > 0.88:
+                        draw.rounded_rectangle(
+                            (42, target_y - 12, 1038, target_y + 188),
+                            radius=12,
+                            fill=(accent2[0], accent2[1], accent2[2], 0),
+                            outline=(accent[0], accent[1], accent[2], max(0, int(glow_alpha * card_progress))),
+                            width=3,
+                        )
 
-                    if int(entry.get("slot") or 0) == countdown_slot:
+                    if card_progress > 0.76 and int(entry.get("slot") or 0) == countdown_slot:
                         pulse = 0.5 + 0.5 * math.sin(t * 9.5)
                         draw.rounded_rectangle(
                             (x - 10, y - 10, x + card_width + 10, y + card_height + 10),
                             radius=10,
-                            outline=(accent2[0], accent2[1], accent2[2], int(110 + 100 * pulse * final_progress)),
+                            outline=(accent2[0], accent2[1], accent2[2], int((110 + 100 * pulse) * card_progress)),
                             width=8,
                         )
 
-                    if source_alpha > 0.01:
-                        source_layer = source_card.resize((card_width, max(1, int(source_height + (card_height - source_height) * 0.35))), Image.Resampling.LANCZOS)
-                        paste_rotated(frame, source_layer, x, y, 0, source_alpha)
-
-                    if final_alpha > 0.01:
-                        layer = card.resize((card_width, card_height), Image.Resampling.LANCZOS)
-                        paste_rotated(frame, layer, x, y, 0, final_alpha)
+                    morph_layer = card_morph_layer(source_card, card, card_width, card_height, card_progress)
+                    paste_rotated(frame, morph_layer, x, y, 0, alpha)
 
             flattened = Image.alpha_composite(Image.new("RGBA", (width, height), (0, 0, 0, 255)), frame)
             process.stdin.write(flattened.convert("RGB").tobytes())
@@ -2242,7 +2815,11 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
     output_dir = paths["final_videos_path"]
     os.makedirs(output_dir, exist_ok=True)
 
-    topic_clips = selected_topic_clips(topic_item)
+    topic_clips = captioned_editorial_source_clips(
+        theme,
+        selected_topic_clips(topic_item),
+        scratch_dir,
+    )
 
     if not topic_clips:
         raise RuntimeError(f"No rendered source clips found for topic: {topic_item.get('topic', '')}")
@@ -2266,7 +2843,7 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
         for clip in topic_clips
     ]
 
-    style = visual_style(rank)
+    style = visual_style(rank, theme)
     theme_label = theme_profile(theme)["label"]
     theme_label_upper = theme_label.upper()
     period_upper = period_label().upper()
@@ -2476,7 +3053,11 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
         topic_item["_countdown_context"] = context
 
     reel_adjective = context.get("adjective") or adjective
-    topic_clips = [dict(clip) for clip in selected_topic_clips(topic_item)]
+    topic_clips = captioned_editorial_source_clips(
+        theme,
+        [dict(clip) for clip in selected_topic_clips(topic_item)],
+        scratch_dir,
+    )
 
     if not topic_clips:
         raise RuntimeError(f"No rendered source clips found for topic: {topic_item.get('topic', '')}")
@@ -2510,7 +3091,7 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
         for clip in topic_clips
     ]
 
-    style = visual_style(rank)
+    style = visual_style(rank, theme)
     theme_label = context.get("theme_label") or theme_profile(theme)["label"]
     output_filename = clean_filename(f"{date_key}_{theme}_countdown_{countdown_slot:02d}_{topic}") + "_upload.mp4"
     output_path = os.path.join(output_dir, output_filename)
@@ -2809,13 +3390,16 @@ def build_popular_segment_script(theme, item):
 def build_popular_output_package(theme, output_path, item, index, date_key, script, intro_audio, intro_duration, clip_duration):
     profile = theme_profile(theme)
     theme_label = profile["label"]
+    caption_style = profile.get("caption_style", "")
+    overlay_style = profile.get("overlay_style", "")
+    framing_style = profile.get("framing_style", "")
     clip = item["clip"]
     source_title = item.get("source_title") or clip.get("source_title") or "Podcast interview"
     channel = item.get("channel_label") or "Podcast Channel"
     topic = clip_summary(clip, source_title)
     signal_source = popular_segment_signal_source(item)
     title_prefix = "Most Replayed" if signal_source == "youtube_heatmap" else ("Most Popular" if signal_source != "internal_quality_fallback" else "Best Moment")
-    title = compact_text(f"{title_prefix} From {channel} | {theme_label.title()} Podcast Clip", 96)
+    title = compact_text(f"{title_prefix}: {topic} From {channel}", 96)
     description = (
         f"The most replayed/popular segment from {source_title}. "
         f"This moment is about {topic}."
@@ -2829,17 +3413,43 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
         source_title.lower(),
         topic.lower(),
     ])[:24]
+    rank_signals = dict(clip.get("rank_signals") or {})
+    rank_signals.update({
+        "popular_segment_index": index,
+        "content_format": "popular_segment_short",
+        "popular_segment_signal_source": signal_source,
+    })
+    title_quality = score_title_quality(
+        theme,
+        title,
+        topic_terms=[topic, source_title, channel],
+    )
+    rank_signals["title_quality"] = title_quality
+    experiment = clip.get("experiment") or {
+        "experiment_id": f"{theme}_popular_segment_packaging",
+        "variant": signal_source,
+        "hypothesis": "External popularity-backed clips outperform internally scored clips when packaging is otherwise similar.",
+    }
 
     return {
         "theme": theme,
         "content_format": "popular_segment_short",
+        "content_has_burned_captions": True,
+        "upload_ready_requires_burned_captions": True,
+        "caption_style": caption_style,
+        "overlay_style": overlay_style,
+        "framing_style": framing_style,
         "editorial_date": date_key,
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(clip.get("output_file", "")),
         "source_state_key": f"{theme}|popular|{date_key}|{index}|{item.get('source_state_key', '')}",
         "source_video_url": item.get("source_video_url") or clip.get("source_video_url", ""),
+        "source_channel": channel,
         "source_title": source_title,
+        "clip_start_time": clip.get("start_time"),
+        "clip_end_time": clip.get("end_time"),
         "title": title,
+        "title_quality": title_quality,
         "caption": compact_text(description, 160),
         "hashtags": hashtags,
         "tags": tags,
@@ -2847,11 +3457,16 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
         "transcript_excerpt": clip.get("transcript_excerpt", ""),
         "hook_reason": f"popular segment signal: {clip.get('rank_signals', {}).get('popularity_source', 'replay/popularity')}",
         "score": item.get("sort_score", clip.get("score")),
+        "readiness_score": clip.get("readiness_score"),
+        "rank_signals": rank_signals,
+        "experiment": experiment,
         "popularity_score": item.get("popularity_score", 0),
         "content_signal": {
             "type": "most_replayed_or_popular_segment",
             "popularity_score": item.get("popularity_score", 0),
             "source": signal_source,
+            "channel_label": channel,
+            "source_title": source_title,
             "profile_sources": clip.get("rank_signals", {}).get("popularity_profile_sources", []),
         },
         "editorial_script": script,
@@ -2889,7 +3504,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     output_dir = paths["final_videos_path"]
     os.makedirs(output_dir, exist_ok=True)
 
-    clip = item["clip"]
+    clip = captioned_editorial_source_clip(theme, item["clip"], scratch_dir)
     source_clip = clip.get("output_file", "")
 
     if not source_clip or not os.path.exists(source_clip):
@@ -2898,7 +3513,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     source_title = compact_text(item.get("source_title") or clip.get("source_title") or "Podcast interview", 76)
     channel = compact_text(item.get("channel_label") or "Podcast Channel", 42)
     topic = compact_text(clip_summary(clip, source_title), 82)
-    style = visual_style(index)
+    style = visual_style(index, theme)
     accent = style["accent"]
     accent2 = style["accent2"]
     cream = style.get("cream", "0xFFF4B8")
@@ -3045,6 +3660,18 @@ def render_recap_compilation(theme, date_key, packages, paths):
         is_recap=True,
     )
     package["editorial_parts"] = [item["video_file"] for item in packages]
+    package["source_context"] = [
+        {
+            "source_video_url": item.get("source_video_url", ""),
+            "source_channel": item.get("source_channel", ""),
+            "source_title": item.get("source_title", ""),
+            "transcript_excerpt": item.get("transcript_excerpt", ""),
+            "clip_start_time": item.get("clip_start_time"),
+            "clip_end_time": item.get("clip_end_time"),
+            "editorial_date": item.get("editorial_date", ""),
+        }
+        for item in packages
+    ]
     return finalize_editorial_package(package, "full daily recap")
 
 
@@ -3108,6 +3735,7 @@ def cleanup_stale_editorial_outputs(theme, paths, date_key, packages):
 
 
 def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
+    theme_name = assert_theme_allowed_for_active_run(theme_name)
     start = time.time()
     paths = ensure_theme(theme_name)
     theme = paths["theme"]

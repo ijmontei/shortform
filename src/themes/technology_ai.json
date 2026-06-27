@@ -1,0 +1,302 @@
+{
+    "theme": "technology_ai",
+    "profile": "technology",
+    "brand": {
+        "channel_name": "TechAI Archive",
+        "positioning": "Builder-first AI, startup, and technology interview clips with concrete tradeoffs.",
+        "audience": "Builders, operators, investors, and AI-curious viewers who want signal over hype.",
+        "viewer_promise": "Practical AI limitations, product strategy, technical tradeoffs, and founder lessons.",
+        "voice": "builder-minded analyst",
+        "risk_tolerance": "medium",
+        "color_palette": [
+            "#080B12",
+            "#00E5FF",
+            "#7C3AED",
+            "#A3FF12",
+            "#D8DEE9"
+        ],
+        "creative_personality": "futurist lab, AI systems, electric, technical but accessible",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/techai_archive/techai_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/techai_archive/techai_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/techai_archive/techai_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/techai_archive/techai_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@TechAIArchive",
+        "token_file": "youtube_token_technology_ai.json"
+    },
+    "channels": [
+        "https://www.youtube.com/@lexfridman/videos",
+        "https://www.youtube.com/@DwarkeshPatel/videos",
+        "https://www.youtube.com/@Waveform/videos",
+        "https://www.youtube.com/@TBPN/videos",
+        "https://www.youtube.com/@ycombinator/videos",
+        "https://www.youtube.com/@a16z/videos",
+        "https://www.youtube.com/@LennysPodcast/videos",
+        "https://www.youtube.com/@NoPriorsPodcast/videos",
+        "https://www.youtube.com/@LatentSpacePod/videos",
+        "https://www.youtube.com/@AcquiredFM/videos",
+        "https://www.youtube.com/@ThisWeekinStartups/videos",
+        "https://www.youtube.com/@PracticalAIFM/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Builder-first AI, startup, and technology interview clips with concrete tradeoffs.",
+        "source_strategy": "Builder/research/operator interviews where claims can be made concrete."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            20,
+            32,
+            45,
+            58
+        ],
+        "min_clip_duration": 16,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "builder_insight",
+            "ai_limitation",
+            "product_strategy",
+            "technical_explainer",
+            "startup_lesson"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "ai",
+            "agent",
+            "model",
+            "eval",
+            "startup",
+            "developer",
+            "security"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "ai",
+                "artificial intelligence",
+                "model",
+                "agent",
+                "openai",
+                "claude",
+                "code",
+                "developer",
+                "software",
+                "startup",
+                "founder",
+                "product",
+                "data",
+                "machine learning",
+                "robot",
+                "chip",
+                "security",
+                "eval",
+                "builder",
+                "tech",
+                "technology",
+                "steam machine",
+                "training paradigm"
+            ],
+            "negative_keywords": [
+                "physics",
+                "antimatter",
+                "dark energy",
+                "quantum",
+                "nba",
+                "nfl",
+                "soccer",
+                "football",
+                "ronaldo",
+                "basketball",
+                "tcg",
+                "trading card",
+                "art direction",
+                "movie",
+                "film",
+                "dating",
+                "celebrity",
+                "fitness",
+                "nutrition",
+                "election"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "dwarkeshpatel",
+                "waveform",
+                "tbpn",
+                "ycombinator",
+                "a16z",
+                "lennyspodcast",
+                "nopriorspodcast",
+                "latentspacepod",
+                "thisweekinstartups",
+                "practicalaifm"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "builder_insight",
+            "ai_limitation",
+            "product_strategy",
+            "technical_explainer",
+            "startup_lesson"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.5,
+        "caption_style": "technical_clean",
+        "framing_style": "speaker_diagram",
+        "overlay_style": "diagram_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The AI Problem Behind {topic}",
+            "Why {topic} Is Harder Than The Demo",
+            "This Builder Explains {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#ai",
+            "#technology",
+            "#startups",
+            "#shorts"
+        ],
+        "tags": [
+            "AI",
+            "technology",
+            "startups",
+            "builders",
+            "software",
+            "AI agents"
+        ],
+        "topic_tags": {
+            "ai": "#ai",
+            "agent": "#agent",
+            "model": "#model",
+            "eval": "#eval",
+            "startup": "#startup",
+            "developer": "#developer",
+            "security": "#security"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "security exploit detail",
+            "privacy-invasive advice",
+            "unsupported model capability claims"
+        ],
+        "manual_review_topics": [
+            "security",
+            "privacy",
+            "AI stock hype"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_order": 4,
+    "priority_channels": [
+        "https://www.youtube.com/@lexfridman/videos",
+        "https://www.youtube.com/@DwarkeshPatel/videos",
+        "https://www.youtube.com/@Waveform/videos",
+        "https://www.youtube.com/@TBPN/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@ycombinator/videos",
+        "https://www.youtube.com/@a16z/videos",
+        "https://www.youtube.com/@LennysPodcast/videos",
+        "https://www.youtube.com/@NoPriorsPodcast/videos",
+        "https://www.youtube.com/@LatentSpacePod/videos",
+        "https://www.youtube.com/@AcquiredFM/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "The Diary of a CEO",
+            "route_to": [
+                "technology_ai",
+                "finance"
+            ],
+            "when": "guest is AI founder, researcher, investor, or product builder"
+        },
+        {
+            "source": "Acquired",
+            "route_to": [
+                "technology_ai",
+                "finance"
+            ],
+            "when": "episode is tech-company history or strategy"
+        }
+    ]
+}

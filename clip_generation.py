@@ -4,6 +4,7 @@ if os.path.isdir(FFMPEG_BIN) and hasattr(os, "add_dll_directory"):
     os.add_dll_directory(FFMPEG_BIN)
 
 import csv
+import hashlib
 import json
 import math
 import subprocess
@@ -21,6 +22,7 @@ from theme_config import (
     DEFAULT_THEME,
     EXECUTED_FILE,
     PULLED_FILE,
+    assert_theme_allowed_for_active_run,
     discover_themes,
     ensure_theme,
     load_json_file,
@@ -28,6 +30,19 @@ from theme_config import (
     utc_timestamp,
     write_json_file,
 )
+from theme_profile import (
+    get_clip_rules,
+    get_metadata_style,
+    get_risk_controls,
+    get_scoring_weights,
+    load_theme_profile,
+    source_guard_disqualification,
+    theme_keyword_weights,
+    theme_topic_tags as profile_theme_topic_tags,
+)
+from theme_signals import score_theme_signals
+from analytics.feedback_prior import score_analytics_feedback_prior
+from metadata_generation import generate_description, generate_hashtags, generate_title, score_title_quality
 from popularity_signals import (
     build_popularity_profile_from_info,
     build_youtube_data_api_profile,
@@ -76,6 +91,20 @@ def configure_theme(theme_name):
 
 # Keep this on while tuning reframing; turn it off for resume runs that should reuse completed clips.
 REGENERATE_EXISTING_CLIPS = os.getenv("SHORTFORM_REGENERATE_EXISTING_CLIPS", "1") != "0"
+SPEED_PROFILE = os.getenv("SHORTFORM_SPEED_PROFILE", "production").strip().lower()
+
+
+def speed_profile_default(key, production, debug=None, premium=None):
+    if key in os.environ:
+        return os.getenv(key)
+
+    if SPEED_PROFILE in {"debug", "fast", "tiny"}:
+        return debug if debug is not None else production
+
+    if SPEED_PROFILE in {"premium", "deep", "quality"}:
+        return premium if premium is not None else production
+
+    return production
 
 MAX_CLIPS_PER_VIDEO = 10
 MIN_CLIP_DURATION = 30
@@ -86,31 +115,302 @@ MIN_SELECTED_CLIP_SCORE = 0.27
 MIN_WORDS_PER_CANDIDATE = 30
 MIN_CLIP_SPACING_SECONDS = 2
 MAX_TOPIC_SIMILARITY = 0.58
-SCORING_MODEL_VERSION = "2026-06-21-v7-retention-arc"
+SCORING_MODEL_VERSION = "2026-06-26-v9-theme-engine-guest-status"
 MIN_CLIP_READINESS_SCORE = float(os.getenv("SHORTFORM_MIN_CLIP_READINESS_SCORE", "0.62"))
 ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
 ENABLE_ALTERNATE_FRAMING_RETRY = os.getenv("SHORTFORM_ENABLE_ALTERNATE_FRAMING_RETRY", "1") != "0"
 FRAME_RETRY_SCORE_THRESHOLD = float(os.getenv("SHORTFORM_FRAME_RETRY_SCORE_THRESHOLD", "0.72"))
+MAX_CROP_SECONDS_PER_MINUTE = float(os.getenv("SHORTFORM_MAX_CROP_SECONDS_PER_MINUTE", "240"))
+MAX_CROP_WALL_SECONDS = float(os.getenv("SHORTFORM_MAX_CROP_WALL_SECONDS", "240"))
+MAX_CROP_FRAME_MULTIPLIER = float(os.getenv("SHORTFORM_MAX_CROP_FRAME_MULTIPLIER", "1.12"))
 FRAME_AUDIT_SAMPLE_COUNT = max(4, int(os.getenv("SHORTFORM_FRAME_AUDIT_SAMPLE_COUNT", "6")))
 GROUP_FACE_CONFIDENCE_THRESHOLD = float(os.getenv("SHORTFORM_GROUP_FACE_CONFIDENCE_THRESHOLD", "0.25"))
 HARD_REJECT_BAD_RENDERS = os.getenv("SHORTFORM_HARD_REJECT_BAD_RENDERS", "1") != "0"
 MIN_ACCEPTED_RENDER_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_ACCEPTED_RENDER_VISUAL_QUALITY", "0.55"))
 DEAD_FRAME_RATIO_THRESHOLD = float(os.getenv("SHORTFORM_DEAD_FRAME_RATIO_THRESHOLD", "0.22"))
 MIN_ALIVE_FRAME_RATE = float(os.getenv("SHORTFORM_MIN_ALIVE_FRAME_RATE", "0.68"))
-CLIP_TRANSCRIBE_MODEL_SIZE = os.getenv("SHORTFORM_CLIP_TRANSCRIBE_MODEL", "base").strip() or "base"
-CLIP_TRANSCRIBE_BEAM_SIZE = max(1, int(os.getenv("SHORTFORM_CLIP_TRANSCRIBE_BEAM_SIZE", "3")))
-CLIP_TRANSCRIBE_BEST_OF = max(1, int(os.getenv("SHORTFORM_CLIP_TRANSCRIBE_BEST_OF", str(CLIP_TRANSCRIBE_BEAM_SIZE))))
+CLIP_TRANSCRIBE_MODEL_SIZE = speed_profile_default(
+    "SHORTFORM_CLIP_TRANSCRIBE_MODEL",
+    production="base",
+    debug="tiny",
+    premium="small",
+).strip() or "base"
+CLIP_TRANSCRIBE_BEAM_SIZE = max(1, int(speed_profile_default(
+    "SHORTFORM_CLIP_TRANSCRIBE_BEAM_SIZE",
+    production="3",
+    debug="1",
+    premium="5",
+)))
+CLIP_TRANSCRIBE_BEST_OF = max(1, int(speed_profile_default(
+    "SHORTFORM_CLIP_TRANSCRIBE_BEST_OF",
+    production=str(CLIP_TRANSCRIBE_BEAM_SIZE),
+    debug="1",
+    premium=str(CLIP_TRANSCRIBE_BEAM_SIZE),
+)))
 ENABLE_THEME_GLOBAL_RANKING = os.getenv("SHORTFORM_ENABLE_THEME_GLOBAL_RANKING", "1") != "0"
 THEME_CLIP_BUDGET = max(1, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "15")))
 THEME_CANDIDATES_PER_VIDEO = max(1, int(os.getenv("SHORTFORM_THEME_CANDIDATES_PER_VIDEO", "8")))
 RECONSIDER_UNSELECTED_SOURCES = os.getenv("SHORTFORM_RECONSIDER_UNSELECTED", "0") == "1"
+REUSE_CACHED_CLIP_SCORES = os.getenv("SHORTFORM_REUSE_CACHED_CLIP_SCORES", "1") != "0"
+MAX_UNSCORED_SOURCES_PER_THEME = int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "-1"))
 ENABLE_POPULARITY_SCORING = os.getenv("SHORTFORM_ENABLE_POPULARITY_SCORING", "1") != "0"
 POPULARITY_SCORE_WEIGHT = float(os.getenv("SHORTFORM_POPULARITY_SCORE_WEIGHT", "0.16"))
+GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT = float(os.getenv("SHORTFORM_GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT", "0.018"))
+GUEST_RECOGNIZABILITY_THEMES = {
+    "sports",
+    "finance",
+    "technology_ai",
+    "popculture",
+}
 FETCH_COMMENT_TIMESTAMP_SIGNALS = os.getenv("SHORTFORM_FETCH_COMMENT_TIMESTAMP_SIGNALS", "1") != "0"
 COMMENT_TIMESTAMP_REFRESH_DAYS = float(os.getenv("SHORTFORM_COMMENT_TIMESTAMP_REFRESH_DAYS", "5"))
 YOUTUBE_DATA_API_KEY = os.getenv("YOUTUBE_DATA_API_KEY", "").strip()
 ENABLE_YOUTUBE_DATA_API_SIGNALS = os.getenv("SHORTFORM_ENABLE_YOUTUBE_DATA_API_SIGNALS", "1") != "0"
 YOUTUBE_DATA_API_COMMENT_PAGES = max(1, int(os.getenv("SHORTFORM_YOUTUBE_DATA_API_COMMENT_PAGES", "1")))
+SLOW_SOURCE_REVIEW_SECONDS = float(os.getenv("SHORTFORM_SLOW_SOURCE_REVIEW_SECONDS", "1800"))
+ENABLE_SCORING_WINDOW_CAPS = os.getenv("SHORTFORM_ENABLE_SCORING_WINDOW_CAPS", "1") != "0"
+FULL_SOURCE_SCAN_MAX_SECONDS = max(60, int(speed_profile_default(
+    "SHORTFORM_FULL_SOURCE_SCAN_MAX_SECONDS",
+    production="5400",
+    debug="1200",
+    premium="21600",
+)))
+MAX_SCORING_START_POINTS = max(40, int(speed_profile_default(
+    "SHORTFORM_MAX_SCORING_START_POINTS",
+    production="320",
+    debug="180",
+    premium="1600",
+)))
+SCORING_SIGNAL_WINDOW_RADIUS_SECONDS = max(10, int(os.getenv("SHORTFORM_SCORING_SIGNAL_WINDOW_RADIUS_SECONDS", "75")))
+ENABLE_SIGNAL_WINDOW_TRANSCRIPTION = os.getenv("SHORTFORM_ENABLE_SIGNAL_WINDOW_TRANSCRIPTION", "1") != "0"
+SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS = max(300, int(speed_profile_default(
+    "SHORTFORM_SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS",
+    production="1200",
+    debug="600",
+    premium="3600",
+)))
+SIGNAL_TRANSCRIPT_MAX_WINDOWS = max(4, int(speed_profile_default(
+    "SHORTFORM_SIGNAL_TRANSCRIPT_MAX_WINDOWS",
+    production="8",
+    debug="6",
+    premium="40",
+)))
+SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS = max(20, int(os.getenv(
+    "SHORTFORM_SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS",
+    str(max(75, SCORING_SIGNAL_WINDOW_RADIUS_SECONDS)),
+)))
+
+
+def active_theme_name(theme_name=None):
+    return theme_name or CURRENT_THEME or DEFAULT_THEME
+
+
+def active_theme_profile(theme_name=None):
+    return load_theme_profile(active_theme_name(theme_name))
+
+
+def active_clip_rules(theme_name=None):
+    return get_clip_rules(active_theme_name(theme_name))
+
+
+def rule_number(name, fallback, theme_name=None, cast=float):
+    rules = active_clip_rules(theme_name)
+    value = rules.get(name, fallback)
+
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return cast(fallback)
+
+
+def rule_list(name, fallback, theme_name=None):
+    value = active_clip_rules(theme_name).get(name, fallback)
+
+    if not isinstance(value, list) or not value:
+        return list(fallback)
+
+    return value
+
+
+def active_min_clip_duration(theme_name=None):
+    return rule_number("min_clip_duration", MIN_CLIP_DURATION, theme_name=theme_name, cast=int)
+
+
+def active_max_clip_duration(theme_name=None):
+    return rule_number("max_clip_duration", MAX_CLIP_DURATION, theme_name=theme_name, cast=int)
+
+
+def active_candidate_durations(theme_name=None):
+    durations = [
+        int(duration)
+        for duration in rule_list("candidate_durations", CANDIDATE_CLIP_DURATIONS, theme_name=theme_name)
+        if int(duration) > 0
+    ]
+    return durations or list(CANDIDATE_CLIP_DURATIONS)
+
+
+def active_min_selected_score(theme_name=None):
+    return rule_number("min_selected_score", MIN_SELECTED_CLIP_SCORE, theme_name=theme_name, cast=float)
+
+
+def active_min_readiness_score(theme_name=None):
+    return rule_number("min_readiness_score", MIN_CLIP_READINESS_SCORE, theme_name=theme_name, cast=float)
+
+
+def active_max_topic_similarity(theme_name=None):
+    return rule_number("max_topic_similarity", MAX_TOPIC_SIMILARITY, theme_name=theme_name, cast=float)
+
+
+def active_theme_clip_budget(theme_name=None):
+    return rule_number("theme_clip_budget", THEME_CLIP_BUDGET, theme_name=theme_name, cast=int)
+
+
+def active_theme_candidates_per_video(theme_name=None):
+    return rule_number("theme_candidates_per_video", THEME_CANDIDATES_PER_VIDEO, theme_name=theme_name, cast=int)
+
+
+def active_candidate_stride(theme_name=None):
+    return max(1, rule_number("candidate_stride_seconds", CANDIDATE_STRIDE_SECONDS, theme_name=theme_name, cast=int))
+
+
+def keyword_in_text(text, keyword):
+    key = str(keyword or "").strip().lower()
+    if not key:
+        return False
+
+    haystack = f" {str(text or '').lower()} "
+    if " " in key:
+        return key in haystack
+
+    return re.search(rf"\b{re.escape(key)}\b", haystack) is not None
+
+
+def source_disqualified_by_theme(source_record, theme_name=None):
+    return source_guard_disqualification(active_theme_profile(theme_name), source_record)
+
+
+def parse_countish_value(value):
+    if isinstance(value, (int, float)):
+        return int(max(0, value))
+
+    text = str(value or "").strip().lower().replace(",", "")
+    if not text:
+        return 0
+
+    multiplier = 1
+    if "b" in text:
+        multiplier = 1_000_000_000
+    elif "m" in text:
+        multiplier = 1_000_000
+    elif "k" in text:
+        multiplier = 1_000
+
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not match:
+        return 0
+
+    return int(float(match.group(1)) * multiplier)
+
+
+def title_has_named_guest_shape(title):
+    title = str(title or "").strip()
+
+    if not title:
+        return False
+
+    if re.search(r"\b(with|w/|ft\.?|featuring)\s+[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,3}", title):
+        return True
+
+    if re.search(r"[|:-]\s*[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,3}\b", title):
+        return True
+
+    name_like_phrases = re.findall(r"\b[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,3}\b", title)
+    ignore = {"Joe Rogan Experience", "The Diary", "This Past", "The Megyn Kelly Show"}
+    return any(phrase not in ignore and len(phrase.split()) <= 4 for phrase in name_like_phrases)
+
+
+def guest_recognizability_signal(theme_name, source_record, popularity_profile, readiness_score, arc_details, first_second_qc, transformation):
+    theme = active_theme_name(theme_name)
+    profile_name = str((active_theme_profile(theme).get("profile") or theme)).lower()
+    eligible_theme = theme in GUEST_RECOGNIZABILITY_THEMES or profile_name in {
+        "sports",
+        "finance",
+        "technology",
+        "popculture",
+    }
+    min_readiness = max(0.66, active_min_readiness_score(theme))
+    standalone_score = float((arc_details or {}).get("arc_standalone_score") or 0.0)
+    transformation_score = float((transformation or {}).get("transformation_score") or 0.0)
+    source_record = source_record or {}
+    popularity_profile = popularity_profile or {}
+    api_stats = (popularity_profile.get("youtube_data_api") or {}).get("stats") or {}
+    source_tier = str(source_record.get("source_tier") or "legacy").lower()
+    view_count = max(
+        parse_countish_value(api_stats.get("view_count")),
+        parse_countish_value(source_record.get("view_count")),
+        parse_countish_value(source_record.get("views")),
+    )
+    comment_count = max(
+        parse_countish_value(api_stats.get("comment_count")),
+        parse_countish_value(source_record.get("comment_count")),
+        parse_countish_value(source_record.get("comments")),
+    )
+    source_title = source_record.get("title") or popularity_profile.get("title") or ""
+    reasons = []
+    raw_score = 0.0
+
+    if source_tier == "priority":
+        raw_score += 0.34
+        reasons.append("priority_source")
+    elif source_tier == "secondary":
+        raw_score += 0.16
+        reasons.append("secondary_source")
+
+    if source_record.get("routing_override_matches"):
+        raw_score += 0.08
+        reasons.append("episode_routing_match")
+
+    if title_has_named_guest_shape(source_title):
+        raw_score += 0.20
+        reasons.append("named_guest_title_shape")
+
+    if view_count > 0:
+        raw_score += min(0.24, math.log10(view_count + 1) / 7.0 * 0.24)
+        reasons.append("public_view_count")
+
+    if comment_count > 0:
+        raw_score += min(0.10, math.log10(comment_count + 1) / 5.0 * 0.10)
+        reasons.append("public_comment_count")
+
+    raw_score = max(0.0, min(1.0, raw_score))
+    first_second_passed = not first_second_qc or first_second_qc.get("passed", True)
+    standalone_confirmed = (
+        float(readiness_score or 0.0) >= min_readiness
+        and standalone_score >= 0.48
+        and first_second_passed
+        and transformation_score >= 0.50
+    )
+    adjustment = raw_score * GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT if eligible_theme and standalone_confirmed else 0.0
+
+    return {
+        "eligible_theme": bool(eligible_theme),
+        "standalone_value_confirmed": bool(standalone_confirmed),
+        "score": round(raw_score, 4),
+        "adjustment": round(adjustment, 4),
+        "max_adjustment": GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT,
+        "reasons": reasons[:8],
+        "source_tier": source_tier,
+        "view_count": int(view_count),
+        "comment_count": int(comment_count),
+        "named_guest_title_shape": title_has_named_guest_shape(source_title),
+        "gates": {
+            "readiness_score": round(float(readiness_score or 0.0), 4),
+            "minimum_readiness": round(min_readiness, 4),
+            "standalone_context": round(standalone_score, 4),
+            "first_second_passed": bool(first_second_passed),
+            "transformation_score": round(transformation_score, 4),
+        },
+    }
 
 
 # =========================
@@ -133,8 +433,7 @@ if not os.path.exists(FFPROBE_EXE):
 YTDL_COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
-    "js_runtimes": {"deno": {}},
-    "allow_remote_features": True,
+    **ytdlp_auth.youtube_js_runtime_options(),
     "ignoreerrors": True,
     "continuedl": True,
     "retries": int(os.getenv("SHORTFORM_YTDLP_RETRIES", "6")),
@@ -151,6 +450,10 @@ YTDL_COMMON_OPTS = {
 SOURCE_MAX_HEIGHT = int(os.getenv("SHORTFORM_SOURCE_MAX_HEIGHT", "1080"))
 MAX_CONSECUTIVE_NETWORK_FAILURES = int(os.getenv("SHORTFORM_MAX_NETWORK_FAILURES", "2"))
 HALT_ON_RESTRICTED_DOWNLOAD_FAILURE = os.getenv("SHORTFORM_HALT_ON_RESTRICTED_DOWNLOAD_FAILURE", "1") != "0"
+ALLOW_FULL_SOURCE_FALLBACK = os.getenv("SHORTFORM_ALLOW_FULL_SOURCE_FALLBACK", "0") == "1"
+MAX_AUDIO_DOWNLOAD_BYTES = int(
+    os.getenv("SHORTFORM_MAX_AUDIO_DOWNLOAD_BYTES", str(300 * 1024 * 1024))
+)
 
 AUDIO_STREAM_COPY_EXTENSIONS = {
     "aac": ".m4a",
@@ -439,6 +742,33 @@ def find_downloaded_file_by_prefix(folder, prefix, extensions):
     return max(candidates, key=os.path.getmtime)
 
 
+def cleanup_download_remnants(folder, prefix):
+    if not os.path.isdir(folder):
+        return
+
+    for filename in os.listdir(folder):
+        if not filename.startswith(f"{prefix}."):
+            continue
+
+        filepath = os.path.join(folder, filename)
+        lower_name = filename.lower()
+
+        if lower_name.endswith(".part") or ".part-" in lower_name or lower_name.endswith(".ytdl"):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+
+
+def is_supported_youtube_video_url(video_url):
+    value = str(video_url or "").strip().lower()
+    return (
+        "youtube.com/watch?" in value
+        or "youtube.com/shorts/" in value
+        or "youtu.be/" in value
+    )
+
+
 def clean_title_for_filename(title):
     cleaned = "".join(
         char for char in title
@@ -459,7 +789,30 @@ class SkippableVideoError(RuntimeError):
 
 
 def is_skippable_video_error_message(message):
-    return ytdlp_auth.is_restricted_or_unavailable_error(message)
+    return ytdlp_auth.is_unavailable_video_error(message)
+
+
+def is_restricted_auth_error_message(message):
+    return ytdlp_auth.is_auth_needed_error(message)
+
+
+def raise_or_skip_download_error(error, video_url):
+    if isinstance(error, ytdlp_auth.RestrictedVideoAuthError):
+        raise error
+
+    if is_restricted_auth_error_message(error):
+        if HALT_ON_RESTRICTED_DOWNLOAD_FAILURE:
+            raise ytdlp_auth.RestrictedVideoAuthError(
+                f"restricted YouTube auth failed while downloading {video_url}: "
+                f"{str(error).splitlines()[0][:300]}"
+            ) from error
+
+        raise SkippableVideoError(f"video requires sign-in: {video_url}") from error
+
+    if is_skippable_video_error_message(error):
+        raise SkippableVideoError(f"video is unavailable: {video_url}") from error
+
+    raise error
 
 
 def is_network_download_error(error):
@@ -497,12 +850,13 @@ def download_audio_for_scoring(video_url, cleaned_title):
     output_template = os.path.join(audio_path, f"{cleaned_title}.%(ext)s")
     ydl_opts_audio = build_ytdl_opts({
         "format": (
-            "bestaudio[acodec^=mp4a]/"
-            "bestaudio[ext=m4a]/"
-            "bestaudio/"
-            "best[acodec!=none]"
+            "bestaudio[vcodec=none][acodec^=mp4a]/"
+            "bestaudio[vcodec=none][ext=m4a]/"
+            "bestaudio[vcodec=none]/"
+            "bestaudio"
         ),
         "outtmpl": output_template,
+        "max_filesize": MAX_AUDIO_DOWNLOAD_BYTES,
         "ignoreerrors": False,
     })
 
@@ -510,14 +864,11 @@ def download_audio_for_scoring(video_url, cleaned_title):
         run_ytdlp_then_retry_with_cookies(
             ydl_opts_audio,
             lambda ydl: ydl.download([video_url]),
-            auth_required=ytdlp_auth.media_auth_required(),
+            auth_required=ytdlp_auth.media_download_auth_required(),
             reason="audio scoring download",
         )
     except Exception as error:
-        if is_skippable_video_error_message(error):
-            raise SkippableVideoError(f"video requires sign-in or is unavailable: {video_url}") from error
-
-        raise
+        raise_or_skip_download_error(error, video_url)
 
     audio_filename = find_existing_audio_package(cleaned_title)
 
@@ -550,42 +901,81 @@ def download_video_section(video_url, cleaned_title, clip_number, clip):
         f"{cleaned_title} {section_start:.1f}s-{section_end:.1f}s"
     )
     output_template = os.path.join(videos_path, f"{prefix}.%(ext)s")
-    ydl_opts_section = build_ytdl_opts({
-        "format": (
-            f"bestvideo[height<={SOURCE_MAX_HEIGHT}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-            f"bestvideo[height<={SOURCE_MAX_HEIGHT}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[height<={SOURCE_MAX_HEIGHT}]+bestaudio/"
-            f"best[height<={SOURCE_MAX_HEIGHT}]/"
-            "best"
-        ),
-        "merge_output_format": "mp4",
-        "outtmpl": output_template,
-        "download_ranges": download_range_func(None, [(section_start, section_end)]),
-        "force_keyframes_at_cuts": True,
-        "ignoreerrors": False,
-    })
+    section_attempts = [
+        {
+            "label": "adaptive h264/aac mp4 section",
+            "format": (
+                f"bestvideo[height<={SOURCE_MAX_HEIGHT}][vcodec^=avc1][ext=mp4]+"
+                "bestaudio[acodec^=mp4a][ext=m4a]/"
+                f"bestvideo[height<={SOURCE_MAX_HEIGHT}][vcodec^=avc1]+"
+                "bestaudio[acodec^=mp4a]/"
+                f"best[height<={SOURCE_MAX_HEIGHT}][ext=mp4]"
+            ),
+            "merge_output_format": "mp4",
+        },
+        {
+            "label": "adaptive 1080p-compatible mkv section",
+            "format": (
+                f"bestvideo[height<={SOURCE_MAX_HEIGHT}]+bestaudio/"
+                f"best[height<={SOURCE_MAX_HEIGHT}]/best"
+            ),
+            "merge_output_format": "mkv",
+        },
+        {
+            "label": "progressive mp4 section",
+            "format": (
+                f"best[height<={SOURCE_MAX_HEIGHT}][ext=mp4]/"
+                f"best[height<={SOURCE_MAX_HEIGHT}]/best"
+            ),
+        },
+    ]
     start_download = time.time()
+    attempt_errors = []
 
-    try:
-        run_ytdlp_then_retry_with_cookies(
-            ydl_opts_section,
-            lambda ydl: ydl.download([video_url]),
-            auth_required=ytdlp_auth.media_auth_required(),
-            reason="selected video section download",
-        )
-    except Exception as error:
-        if is_skippable_video_error_message(error):
-            raise SkippableVideoError(f"video requires sign-in or is unavailable: {video_url}") from error
+    for attempt in section_attempts:
+        cleanup_download_remnants(videos_path, prefix)
+        print(f" -> Trying {attempt['label']}")
+        ydl_opts_section = build_ytdl_opts({
+            "format": attempt["format"],
+            "outtmpl": output_template,
+            "download_ranges": download_range_func(None, [(section_start, section_end)]),
+            "ignoreerrors": False,
+        })
 
-        raise
+        if attempt.get("merge_output_format"):
+            ydl_opts_section["merge_output_format"] = attempt["merge_output_format"]
 
-    section_file = find_downloaded_file_by_prefix(videos_path, prefix, {".mp4", ".mkv", ".webm", ".mov"})
+        try:
+            run_ytdlp_then_retry_with_cookies(
+                ydl_opts_section,
+                lambda ydl: ydl.download([video_url]),
+                auth_required=ytdlp_auth.media_download_auth_required(),
+                reason=f"selected video section download ({attempt['label']})",
+            )
+        except Exception as error:
+            if (
+                isinstance(error, (SkippableVideoError, ytdlp_auth.RestrictedVideoAuthError))
+                or is_restricted_auth_error_message(error)
+                or is_skippable_video_error_message(error)
+            ):
+                raise_or_skip_download_error(error, video_url)
 
-    if not section_file:
-        raise RuntimeError(f"selected video section download failed for {video_url}")
+            attempt_errors.append(
+                f"{attempt['label']}: {str(error).splitlines()[0][:240]}"
+            )
+            continue
 
-    print(f" -> Selected video section download took: {time.time() - start_download:.2f} seconds")
-    return section_file, section_start
+        section_file = find_downloaded_file_by_prefix(videos_path, prefix, {".mp4", ".mkv", ".webm", ".mov"})
+
+        if section_file:
+            print(f" -> Selected video section download took: {time.time() - start_download:.2f} seconds")
+            return section_file, section_start
+
+        attempt_errors.append(f"{attempt['label']}: no media file was created")
+
+    cleanup_download_remnants(videos_path, prefix)
+    details = "; ".join(attempt_errors[-3:]) if attempt_errors else "no attempt details"
+    raise RuntimeError(f"selected video section download failed for {video_url}: {details}")
 
 
 def download_media(video_url, cleaned_title):
@@ -615,14 +1005,11 @@ def download_media(video_url, cleaned_title):
             run_ytdlp_then_retry_with_cookies(
                 ydl_opts_combined,
                 lambda ydl: ydl.download([video_url]),
-                auth_required=ytdlp_auth.media_auth_required(),
+                auth_required=ytdlp_auth.media_download_auth_required(),
                 reason="source video download",
             )
         except Exception as error:
-            if is_skippable_video_error_message(error):
-                raise SkippableVideoError(f"video requires sign-in or is unavailable: {video_url}") from error
-
-            raise
+            raise_or_skip_download_error(error, video_url)
 
         if os.path.exists(video_filename) and os.path.getsize(video_filename) == 0:
             os.remove(video_filename)
@@ -1370,6 +1757,22 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
     pending_speaker_hits = 0
     offcenter_hits = 0
     fallback_person_center_x = None
+    source_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    source_duration = (source_frame_count / fps) if source_frame_count > 0 and fps > 0 else 0.0
+    crop_timeout_seconds = max(
+        45.0,
+        min(
+            MAX_CROP_WALL_SECONDS,
+            (source_duration / 60.0) * MAX_CROP_SECONDS_PER_MINUTE,
+        ),
+    )
+    max_processed_frames = None
+    if source_frame_count > 0:
+        max_processed_frames = max(
+            1,
+            int(math.ceil(source_frame_count * MAX_CROP_FRAME_MULTIPLIER)),
+        )
+
     frame_count = 0
     detection_checks = 0
     face_detection_hits = 0
@@ -1420,9 +1823,21 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
         face_detection_hits = int(group_face_target.get("face_samples", 0) or 0)
 
     written_frames = 0
+    crop_started_at = time.time()
 
     try:
         while True:
+            if time.time() - crop_started_at > crop_timeout_seconds:
+                raise TimeoutError(
+                    f"{strategy} smart crop exceeded {crop_timeout_seconds:.1f}s "
+                    f"for {source_duration:.1f}s clip"
+                )
+            if max_processed_frames is not None and frame_count > max_processed_frames:
+                raise TimeoutError(
+                    f"{strategy} smart crop processed too many frames "
+                    f"({frame_count}>{max_processed_frames})"
+                )
+
             ret, frame = cap.read()
 
             if not ret or frame is None:
@@ -1855,6 +2270,25 @@ def probe_video_file(video_path):
     return metadata
 
 
+def is_valid_existing_clip(video_path, min_size_bytes=1024 * 1024):
+    if not os.path.exists(video_path):
+        return False
+
+    try:
+        if os.path.getsize(video_path) < min_size_bytes:
+            return False
+    except OSError:
+        return False
+
+    probe = probe_video_file(video_path)
+    return (
+        probe.get("duration", 0.0) >= 3.0
+        and probe.get("width") == 1080
+        and probe.get("height") == 1920
+        and bool(probe.get("has_audio"))
+    )
+
+
 def estimate_black_frame_ratio(video_path, max_samples=18):
     cap = cv2.VideoCapture(video_path)
 
@@ -2283,7 +2717,9 @@ def build_render_qc(video_path, crop_stats, expected_duration, face_cascades=Non
     if not probe["has_audio"]:
         flags.append("missing audio")
 
-    if expected_duration and abs(probe["duration"] - expected_duration) > 1.25:
+    duration_tolerance = max(4.0, min(9.0, float(expected_duration or 0) * 0.14))
+
+    if expected_duration and abs(probe["duration"] - expected_duration) > duration_tolerance:
         flags.append("duration drift")
 
     if black_frame_ratio > 0.08:
@@ -2398,6 +2834,39 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
     return result
 
 
+def preflight_allows_center_safe_render(preflight_qc):
+    if not isinstance(preflight_qc, dict):
+        return False
+
+    flags = set(preflight_qc.get("flags") or [])
+    if not flags or flags - {"low preflight face presence"}:
+        return False
+
+    return (
+        int(preflight_qc.get("face_frames") or 0) == 0
+        and float(preflight_qc.get("alive_frame_rate") or 0.0) >= 0.88
+        and float(preflight_qc.get("dead_frame_ratio") or 0.0) <= 0.12
+        and float(preflight_qc.get("black_frame_ratio") or 0.0) <= 0.05
+        and float(preflight_qc.get("avg_edge_density") or 0.0) >= 0.015
+    )
+
+
+def preflight_allows_partial_face_render(preflight_qc):
+    if not isinstance(preflight_qc, dict):
+        return False
+
+    flags = set(preflight_qc.get("flags") or [])
+    if not flags or flags - {"low preflight face presence"}:
+        return False
+
+    return (
+        int(preflight_qc.get("face_frames") or 0) > 0
+        and float(preflight_qc.get("alive_frame_rate") or 0.0) >= 0.82
+        and float(preflight_qc.get("dead_frame_ratio") or 0.0) <= 0.15
+        and float(preflight_qc.get("black_frame_ratio") or 0.0) <= 0.05
+    )
+
+
 def render_attempt_quality_score(render_qc):
     frame_score = float(render_qc.get("visual_quality_score", 0.0) or 0.0)
     frame_path = render_qc.get("frame_path", {}) or {}
@@ -2426,11 +2895,74 @@ def render_attempt_quality_score(render_qc):
     )
 
 
+def fallback_framing_strategies():
+    profile = active_theme_profile()
+    profile_name = str(profile.get("profile") or "").lower()
+    framing_style = str((profile.get("packaging") or {}).get("framing_style") or "").lower()
+    rich_fallback_profiles = {"comedy", "sports", "gaming", "popculture"}
+    standard_fallbacks = ["stable_face_lock", "center_safe"]
+
+    if os.getenv("SHORTFORM_ENABLE_EXPENSIVE_FRAMING_FALLBACKS", "0") != "1":
+        return standard_fallbacks
+
+    if profile_name in rich_fallback_profiles or "reaction" in framing_style or "debate" in framing_style:
+        return ["stable_face_lock", "dual_speaker_stack", "group_face_lock", "center_safe"]
+
+    return standard_fallbacks
+
+
+def primary_framing_strategy(preflight_qc=None):
+    profile = active_theme_profile()
+    profile_name = str(profile.get("profile") or "").lower()
+    framing_style = str((profile.get("packaging") or {}).get("framing_style") or "").lower()
+    reaction_profiles = {"comedy", "sports", "gaming", "popculture", "finance"}
+    primary_face_strategy = os.getenv("SHORTFORM_PRIMARY_FACE_STRATEGY", "stable_face_lock").strip()
+
+    if primary_face_strategy not in {"face_locked", "stable_face_lock"}:
+        primary_face_strategy = "stable_face_lock"
+
+    if preflight_allows_partial_face_render(preflight_qc):
+        return primary_face_strategy
+
+    if preflight_allows_center_safe_render(preflight_qc):
+        return "center_safe"
+
+    if profile_name in reaction_profiles or "reaction" in framing_style or "debate" in framing_style:
+        return primary_face_strategy
+
+    face_presence = 0.0
+    if isinstance(preflight_qc, dict):
+        face_presence = float(preflight_qc.get("face_presence_rate") or 0.0)
+
+    if face_presence >= 0.35 or "speaker" in framing_style:
+        return "stable_face_lock"
+
+    return "center_safe"
+
+
 def should_try_alternate_framing(render_qc):
     if not ENABLE_ALTERNATE_FRAMING_RETRY:
         return False
 
     flags = set(render_qc.get("flags", []))
+    profile = active_theme_profile()
+    profile_name = str(profile.get("profile") or "").lower()
+    framing_style = str((profile.get("packaging") or {}).get("framing_style") or "").lower()
+    rich_retry_profiles = {"comedy", "sports", "gaming", "popculture", "finance"}
+    needs_reaction_retry = (
+        profile_name in rich_retry_profiles
+        or "reaction" in framing_style
+        or "debate" in framing_style
+    )
+    no_speaker_flags = {
+        "alive frames often miss speaker",
+        "extended no-speaker run in final crop",
+        "low final face presence",
+    }
+
+    if flags & no_speaker_flags and not needs_reaction_retry:
+        return False
+
     visual_score = float(render_qc.get("visual_quality_score", 0.0) or 0.0)
     retry_flags = {
         "low final face presence",
@@ -2460,7 +2992,6 @@ def render_rejection_reasons(render_qc):
         "no readable final frames",
         "unexpected resolution",
         "missing audio",
-        "duration drift",
         "possible black frames",
         "final render has black frames",
         "final render has low-information frames",
@@ -2492,38 +3023,74 @@ def render_crop_attempt(
 ):
     start_step2 = time.time()
 
-    crop_stats = smart_crop_to_shorts(
-        temp_subclip=temp_subclip,
-        temp_tracked_avi=temp_tracked_avi,
-        model=model,
-        face_cascades=face_cascades,
-        strategy=strategy,
-    )
+    def failed_attempt(error, elapsed_seconds):
+        message = str(error).splitlines()[0][:300]
+        flag = "crop timeout" if isinstance(error, TimeoutError) else "crop attempt failed"
+        crop_stats = {
+            "strategy": strategy,
+            "framing_score": 0.0,
+            "face_detection_rate": 0.0,
+            "speaker_switches": 0,
+            "offcenter_reframes": 0,
+        }
+        render_qc = {
+            "passed": False,
+            "flags": [flag, message],
+            "visual_quality_score": 0.0,
+            "render_strategy": strategy,
+            "attempt_quality_score": 0.0,
+            "crop": crop_stats,
+            "frame_path": {},
+        }
+        print(f" -> Step 2 ({strategy} smart crop) failed after {elapsed_seconds:.2f} seconds: {message}")
+        return {
+            "strategy": strategy,
+            "output_file": "",
+            "tracked_file": temp_tracked_avi,
+            "crop_stats": crop_stats,
+            "render_qc": render_qc,
+            "step2_seconds": elapsed_seconds,
+            "step3_seconds": 0.0,
+        }
+
+    try:
+        crop_stats = smart_crop_to_shorts(
+            temp_subclip=temp_subclip,
+            temp_tracked_avi=temp_tracked_avi,
+            model=model,
+            face_cascades=face_cascades,
+            strategy=strategy,
+        )
+    except Exception as error:
+        return failed_attempt(error, time.time() - start_step2)
 
     step2_seconds = time.time() - start_step2
     print(f" -> Step 2 ({strategy} smart crop) took: {step2_seconds:.2f} seconds")
 
     start_step3 = time.time()
 
-    run_subprocess([
-        FFMPEG_EXE,
-        "-y",
-        "-i", temp_tracked_avi,
-        "-i", temp_subclip,
-        "-map", "0:v:0",
-        "-map", "1:a?",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "20",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-shortest",
-        "-movflags", "+faststart",
-        final_filename,
-    ], "FFmpeg audio muxing")
+    try:
+        run_subprocess([
+            FFMPEG_EXE,
+            "-y",
+            "-i", temp_tracked_avi,
+            "-i", temp_subclip,
+            "-map", "0:v:0",
+            "-map", "1:a?",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            final_filename,
+        ], "FFmpeg audio muxing")
 
-    assert_file_exists(final_filename, "Final clip attempt")
+        assert_file_exists(final_filename, "Final clip attempt")
+    except Exception as error:
+        return failed_attempt(error, step2_seconds + (time.time() - start_step3))
 
     render_qc = build_render_qc(
         video_path=final_filename,
@@ -2569,8 +3136,14 @@ class CandidateClip:
     duration_score: float
     boundary_score: float
     diversity_score: float
-    rank_signals: dict
-    transcript_excerpt: str
+    theme_signal_score: float = 0.0
+    theme_signals: dict = field(default_factory=dict)
+    first_second_qc: dict = field(default_factory=dict)
+    transformation_score: float = 0.0
+    reused_content_risk: float = 0.0
+    experiment: dict = field(default_factory=dict)
+    rank_signals: dict = field(default_factory=dict)
+    transcript_excerpt: str = ""
     hook_reason: str = ""
     topic_fingerprint: list = field(default_factory=list)
     suggested_title: str = ""
@@ -2993,7 +3566,7 @@ def saturating_score(value, scale):
 
 
 def get_theme_profile(theme_name=None):
-    return THEME_SCORING_PROFILES.get(theme_name or CURRENT_THEME, {})
+    return active_theme_profile(theme_name)
 
 
 def combined_keyword_weights(theme_name=None):
@@ -3001,14 +3574,14 @@ def combined_keyword_weights(theme_name=None):
     return {
         **VIRAL_KEYWORD_WEIGHTS,
         **profile.get("keywords", {}),
+        **theme_keyword_weights(active_theme_name(theme_name)),
     }
 
 
 def theme_topic_tags(theme_name=None):
-    profile = get_theme_profile(theme_name)
     return {
         **HASHTAG_KEYWORDS,
-        **profile.get("topic_tags", {}),
+        **profile_theme_topic_tags(active_theme_name(theme_name)),
     }
 
 
@@ -3160,14 +3733,24 @@ def candidate_selection_ready(candidate):
     readiness = float(getattr(candidate, "readiness_score", 0.0) or 0.0)
     external_signal = candidate_external_signal_score(candidate)
     hard_failures = signals.get("readiness_hard_failures", []) or []
+    min_readiness = active_min_readiness_score()
 
     if tier == "reject" and external_signal < 0.34:
         return False
 
-    if hard_failures and readiness < MIN_CLIP_READINESS_SCORE and external_signal < 0.42:
+    if hard_failures and readiness < min_readiness and external_signal < 0.42:
         return False
 
-    if readiness < MIN_CLIP_READINESS_SCORE and (external_signal < 0.38 or readiness < 0.54):
+    if readiness < min_readiness and (external_signal < 0.38 or readiness < 0.54):
+        return False
+
+    if candidate.first_second_qc and not candidate.first_second_qc.get("passed", True):
+        intro_mode = (candidate.rank_signals or {}).get("recommended_intro_mode", "")
+
+        if intro_mode == "cold_open":
+            return False
+
+    if candidate.reused_content_risk >= 0.42 and get_risk_controls(active_theme_name()).get("requires_claim_context"):
         return False
 
     return True
@@ -3607,8 +4190,10 @@ def naturalize_clip_window(segments, provisional_start, duration, total_duration
         if segment["start"] < clip_end and segment["end"] <= clip_end + 0.05
     ]
 
-    if clip_end - clip_start > MAX_CLIP_DURATION:
-        clip_end = clip_start + MAX_CLIP_DURATION
+    max_clip_duration = active_max_clip_duration()
+
+    if clip_end - clip_start > max_clip_duration:
+        clip_end = clip_start + max_clip_duration
         matching_segments = [
             segment
             for segment in matching_segments
@@ -3636,7 +4221,7 @@ def naturalize_clip_window(segments, provisional_start, duration, total_duration
         gap = float(next_segment["start"]) - float(matching_segments[-1]["end"])
         proposed_end = float(next_segment["end"]) + 0.18
 
-        if gap > 1.4 or proposed_end - clip_start > MAX_CLIP_DURATION:
+        if gap > 1.4 or proposed_end - clip_start > max_clip_duration:
             break
 
         matching_segments.append(next_segment)
@@ -3645,24 +4230,54 @@ def naturalize_clip_window(segments, provisional_start, duration, total_duration
     return clip_start, clip_end, matching_segments
 
 
-def build_suggested_copy(text, hook_reason, topic_terms, text_details=None):
+def build_suggested_copy(text, hook_reason, topic_terms, text_details=None, source_record=None):
     text = clean_transcript_text(text)
     text_details = text_details or {}
+    source_record = source_record or {}
+    archetype = text_details.get("theme_archetype") or text_details.get("hook_type", "") or "clip"
+    clip_stub = {
+        "transcript_excerpt": text[:320],
+        "topic_fingerprint": topic_terms,
+        "hook_reason": hook_reason,
+        "duration": text_details.get("duration", 45),
+        "source_title": source_record.get("title", ""),
+    }
+    generated_title = generate_title(
+        active_theme_name(),
+        archetype=archetype,
+        clip=clip_stub,
+        source_record=source_record,
+        signals={"topic_terms": topic_terms},
+    )
+    title_quality = score_title_quality(active_theme_name(), generated_title, topic_terms=topic_terms)
     sentences = [
         compact_text(sentence, 78)
         for sentence in re.split(r"(?<=[.?!])\s+", text)
         if len(sentence.strip()) >= 18
     ]
 
-    title = ""
+    title = (
+        generated_title
+        if (
+            title_quality["specificity"] >= 0.38
+            and title_quality.get("honesty", 0.0) >= 0.70
+            and not title_quality.get("generic_title")
+            and not title_quality.get("mechanical_title")
+            and not title_quality.get("repetitive_title")
+            and title_quality.get("theme_native_title", True)
+            and title_quality.get("not_clickbait", True)
+        )
+        else ""
+    )
 
-    for sentence in sentences[:5]:
-        sentence_terms = set(words_from_text(sentence))
-        signal_terms = CONFLICT_KEYWORDS | EMOTION_KEYWORDS | TOPIC_KEYWORDS
+    if not title:
+        for sentence in sentences[:5]:
+            sentence_terms = set(words_from_text(sentence))
+            signal_terms = CONFLICT_KEYWORDS | EMOTION_KEYWORDS | TOPIC_KEYWORDS
 
-        if "?" in sentence or bool(sentence_terms & signal_terms):
-            title = sentence
-            break
+            if "?" in sentence or bool(sentence_terms & signal_terms):
+                title = sentence
+                break
 
     if not title:
         title = sentences[0] if sentences else compact_text(text, 78)
@@ -3676,33 +4291,124 @@ def build_suggested_copy(text, hook_reason, topic_terms, text_details=None):
         or hook_reason.replace("hook phrase: ", "").replace("mainstream topic: ", "")
     )
     caption = compact_text(f"{title} | {hook_label}", 140)
-    description = compact_text(
-        f"{title} {compact_text(text, 180)}",
-        260,
+    description = generate_description(
+        active_theme_name(),
+        {**clip_stub, "suggested_title": title},
+        transformation_notes=["theme-specific title", "source-context packaging"],
     )
-
-    hashtags = []
-    tag_lookup = theme_topic_tags()
-
-    for term in topic_terms:
-        normalized = term.replace("_", " ")
-        tag = tag_lookup.get(normalized) or tag_lookup.get(normalized.split(" ")[0])
-
-        if tag and tag not in hashtags:
-            hashtags.append(tag)
-
-        if len(hashtags) >= 4:
-            break
-
-    for fallback in get_theme_profile().get("hashtags", ["#podcast", "#shorts"]):
-        if fallback not in hashtags:
-            hashtags.append(fallback)
+    hashtags = generate_hashtags(active_theme_name(), archetype=archetype, topic_terms=topic_terms)
 
     return title, caption, hashtags[:7], description
 
 
 def candidate_to_dict(candidate):
     return asdict(candidate)
+
+
+def clip_score_cache_path(cleaned_title):
+    if not transcriptions_path:
+        return ""
+
+    return os.path.join(
+        transcriptions_path,
+        f"{cleaned_title}_clip_scores.json",
+    )
+
+
+def has_cached_clip_scores(cleaned_title):
+    path = clip_score_cache_path(cleaned_title)
+    return bool(path and os.path.exists(path))
+
+
+def candidate_from_cached_dict(payload):
+    fields = CandidateClip.__dataclass_fields__
+    values = {
+        key: payload[key]
+        for key in fields
+        if key in payload
+    }
+    return CandidateClip(**values)
+
+
+def load_cached_scored_source(cleaned_title, video_record, video_url, source_state_key):
+    if not REUSE_CACHED_CLIP_SCORES:
+        return None
+
+    scoring_filepath = clip_score_cache_path(cleaned_title)
+    if not scoring_filepath or not os.path.exists(scoring_filepath):
+        return None
+
+    with open(scoring_filepath, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    candidates_payload = payload.get("top_candidates") or payload.get("selected") or []
+    candidates = []
+    for item in candidates_payload:
+        try:
+            candidate = candidate_from_cached_dict(item)
+        except TypeError:
+            continue
+
+        candidate.source_state_key = candidate.source_state_key or source_state_key
+        candidate.source_video_url = candidate.source_video_url or video_url
+        candidate.source_title = candidate.source_title or video_record.get("title", "")
+        candidate.rank_signals["source_state_key"] = candidate.source_state_key
+        candidate.rank_signals["source_title"] = candidate.source_title
+        candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    top_candidates = sorted(candidates, key=candidate_ranking_key, reverse=True)[:active_theme_candidates_per_video()]
+    video_record["_candidate_count"] = int(len(candidates_payload))
+    video_record["_theme_ranked_candidate_count"] = int(len(top_candidates))
+    video_record["_last_cleaned_title"] = cleaned_title
+    metrics = video_record.setdefault("_processing_metrics", {})
+    metrics["score_cache_reused"] = True
+    metrics["score_cache_path"] = scoring_filepath
+    metrics["theme_ranked_candidate_count"] = len(top_candidates)
+
+    print(
+        "Reused cached clip scores: "
+        f"{scoring_filepath} ({len(top_candidates)} kept for theme ranking)\n"
+    )
+
+    return {
+        "state_key": source_state_key,
+        "record": video_record,
+        "video_filename": "",
+        "video_url": video_url,
+        "audio_filename": "",
+        "cleaned_title": cleaned_title,
+        "candidates": top_candidates,
+    }
+
+
+def file_fingerprint(path, sample_bytes=1024 * 1024):
+    if not path or not os.path.exists(path):
+        return {}
+
+    stat = os.stat(path)
+    size = int(stat.st_size)
+    digest = hashlib.sha256()
+    digest.update(str(size).encode("utf-8"))
+    digest.update(str(int(stat.st_mtime)).encode("utf-8"))
+
+    with open(path, "rb") as f:
+        first = f.read(sample_bytes)
+        digest.update(first)
+
+        if size > sample_bytes:
+            f.seek(max(0, size - sample_bytes))
+            digest.update(f.read(sample_bytes))
+
+    return {
+        "path": os.path.abspath(path),
+        "size_bytes": size,
+        "mtime_unix": float(stat.st_mtime),
+        "fingerprint": digest.hexdigest(),
+        "sample_bytes": int(sample_bytes),
+    }
 
 
 def candidate_archetypes(candidate):
@@ -3729,6 +4435,8 @@ def candidate_archetypes(candidate):
         archetypes.append("debate_or_exchange")
     if float(getattr(candidate, "audio_score", 0.0) or 0.0) >= 0.72:
         archetypes.append("high_energy")
+    if signals.get("theme_archetype"):
+        archetypes.insert(0, signals.get("theme_archetype"))
 
     if not archetypes:
         archetypes.append("general_quality")
@@ -3751,6 +4459,16 @@ def compact_candidate_summary(candidate):
         "popularity_score": round(float(getattr(candidate, "popularity_score", 0.0)), 4),
         "comment_score": round(float(getattr(candidate, "comment_score", 0.0)), 4),
         "comment_topic_score": round(float(signals.get("comment_topic_score") or 0.0), 4),
+        "theme_signal_score": round(float(getattr(candidate, "theme_signal_score", 0.0) or 0.0), 4),
+        "theme_signals": candidate.theme_signals,
+        "guest_recognizability_score": round(float(signals.get("guest_recognizability_score") or 0.0), 4),
+        "guest_recognizability_adjustment": round(float(signals.get("guest_recognizability_adjustment") or 0.0), 4),
+        "guest_recognizability_reasons": (signals.get("guest_recognizability") or {}).get("reasons", []),
+        "first_second_qc": candidate.first_second_qc,
+        "transformation_score": round(float(getattr(candidate, "transformation_score", 0.0) or 0.0), 4),
+        "reused_content_risk": round(float(getattr(candidate, "reused_content_risk", 0.0) or 0.0), 4),
+        "recommended_intro_mode": signals.get("recommended_intro_mode", ""),
+        "captionability_score": round(float(signals.get("captionability_score") or 0.0), 4),
         "audio_score": round(float(candidate.audio_score), 4),
         "opening_score": round(float(candidate.opening_score), 4),
         "boundary_score": round(float(candidate.boundary_score), 4),
@@ -4110,6 +4828,50 @@ def write_source_dossier(cleaned_title, source_record, popularity_profile, candi
     youtube_data_api = popularity_profile.get("youtube_data_api") or {}
     stats = youtube_data_api.get("stats") or {}
     inventory = build_candidate_inventory(candidates)
+    readiness_distribution = build_readiness_distribution(candidates)
+    selected_clips = selected_clips or []
+    selected_readiness = [
+        float(getattr(clip, "readiness_score", 0.0) or 0.0)
+        for clip in selected_clips
+    ]
+    selected_publish_ready = [
+        clip
+        for clip in selected_clips
+        if (clip.rank_signals or {}).get("readiness_tier") in {"elite", "strong"}
+    ]
+    external_backed_candidates = [
+        clip
+        for clip in candidates
+        if candidate_external_signal_score(clip) >= 0.18
+    ]
+    internally_discovered_candidates = [
+        clip
+        for clip in candidates
+        if candidate_external_signal_score(clip) < 0.18
+        and float(getattr(clip, "readiness_score", 0.0) or 0.0) >= active_min_readiness_score()
+    ]
+    processing = dict((source_record or {}).get("_processing_metrics", {}) or {})
+    processing_runtime = float(
+        processing.get("total_source_workflow_seconds")
+        or processing.get("scoring_seconds")
+        or 0.0
+    )
+
+    if processing_runtime > 0 and "selected_clips_per_hour_processed" not in processing:
+        processing["selected_clips_per_hour_processed"] = round(
+            len(selected_clips) / max(0.01, processing_runtime / 3600),
+            4,
+        )
+
+    source_tier = "weak_source"
+
+    if len(selected_publish_ready) >= 3 or int(readiness_distribution.get("elite") or 0) >= 12:
+        source_tier = "primary_milk_source"
+    elif len(selected_publish_ready) >= 1 or int(readiness_distribution.get("strong") or 0) >= 80:
+        source_tier = "selective_source"
+    elif int(readiness_distribution.get("usable") or 0) >= 400:
+        source_tier = "thin_but_usable"
+
     dossier = {
         "source": {
             "cleaned_title": cleaned_title,
@@ -4118,7 +4880,24 @@ def write_source_dossier(cleaned_title, source_record, popularity_profile, candi
             "state_key": (source_record or {}).get("state_key", ""),
             "channel": stats.get("channel_title") or (source_record or {}).get("channel", ""),
             "published_at": stats.get("published_at") or (source_record or {}).get("published_at", ""),
+            "source_tier": (source_record or {}).get("source_tier", ""),
+            "origin_theme": (source_record or {}).get("origin_theme", ""),
+            "routed_from_theme": (source_record or {}).get("routed_from_theme", ""),
+            "route_targets": (source_record or {}).get("route_targets", []),
+            "routing_status": (source_record or {}).get("routing_status", ""),
+            "routing_override_matches": (source_record or {}).get("routing_override_matches", []),
         },
+        "editorial_decision": {
+            "source_tier": source_tier,
+            "worth_clipping": source_tier in {"primary_milk_source", "selective_source"},
+            "selected_clip_count": len(selected_clips),
+            "selected_publish_ready_count": len(selected_publish_ready),
+            "avg_selected_readiness": round(sum(selected_readiness) / len(selected_readiness), 4) if selected_readiness else None,
+            "externally_backed_candidate_count": len(external_backed_candidates),
+            "internally_discovered_publishable_count": len(internally_discovered_candidates),
+            "slow_source_review": bool(processing.get("slow_source_review")),
+        },
+        "processing_metrics": processing,
         "signal_coverage": {
             "profile_sources": popularity_profile.get("sources", []),
             "has_heatmap": bool(popularity_profile.get("heatmap")),
@@ -4137,7 +4916,7 @@ def write_source_dossier(cleaned_title, source_record, popularity_profile, candi
         "top_popularity_markers": top_popularity_markers(popularity_profile),
         "top_comment_topic_terms": top_comment_topic_terms(popularity_profile),
         "score_distribution": build_score_distribution(candidates),
-        "readiness_distribution": build_readiness_distribution(candidates),
+        "readiness_distribution": readiness_distribution,
         "topic_summary": build_topic_summary(candidates),
         "candidate_inventory": inventory,
         "selected_clips": [compact_candidate_summary(clip) for clip in selected_clips],
@@ -4191,6 +4970,8 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
     with open(review_json, "w", encoding="utf-8") as f:
         json.dump({
             "scoring_model_version": SCORING_MODEL_VERSION,
+            "theme": active_theme_name(),
+            "theme_profile": active_theme_profile(),
             "selected": selected_payload,
             "top_candidates": top_candidate_payload,
             "candidate_inventory": candidate_inventory,
@@ -4207,6 +4988,17 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
         "opening_score",
         "comment_score",
         "comment_topic_score",
+        "theme_signal_score",
+        "guest_recognizability_score",
+        "guest_recognizability_adjustment",
+        "guest_recognizability_reasons",
+        "guest_standalone_gate",
+        "theme_archetype",
+        "intro_mode",
+        "first_second_passed",
+        "transformation_score",
+        "reused_content_risk",
+        "captionability_score",
         "popularity_score",
         "arc_score",
         "readiness_score",
@@ -4265,6 +5057,17 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
                 "opening_score": f"{clip.opening_score:.4f}",
                 "comment_score": f"{clip.comment_score:.4f}",
                 "comment_topic_score": f"{(clip.rank_signals or {}).get('comment_topic_score', 0.0):.4f}",
+                "theme_signal_score": f"{getattr(clip, 'theme_signal_score', 0.0):.4f}",
+                "guest_recognizability_score": f"{(clip.rank_signals or {}).get('guest_recognizability_score', 0.0):.4f}",
+                "guest_recognizability_adjustment": f"{(clip.rank_signals or {}).get('guest_recognizability_adjustment', 0.0):.4f}",
+                "guest_recognizability_reasons": "; ".join((clip.rank_signals or {}).get("guest_recognizability", {}).get("reasons", [])),
+                "guest_standalone_gate": (clip.rank_signals or {}).get("guest_recognizability", {}).get("standalone_value_confirmed", ""),
+                "theme_archetype": (clip.rank_signals or {}).get("theme_archetype", ""),
+                "intro_mode": (clip.rank_signals or {}).get("recommended_intro_mode", ""),
+                "first_second_passed": (clip.first_second_qc or {}).get("passed", ""),
+                "transformation_score": f"{getattr(clip, 'transformation_score', 0.0):.4f}",
+                "reused_content_risk": f"{getattr(clip, 'reused_content_risk', 0.0):.4f}",
+                "captionability_score": f"{(clip.rank_signals or {}).get('captionability_score', 0.0):.4f}",
                 "popularity_score": f"{getattr(clip, 'popularity_score', 0.0):.4f}",
                 "arc_score": f"{getattr(clip, 'arc_score', 0.0):.4f}",
                 "readiness_score": f"{getattr(clip, 'readiness_score', 0.0):.4f}",
@@ -4310,20 +5113,156 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
     return review_json, review_csv
 
 
-def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en"):
+def get_media_duration_seconds(media_path):
+    result = subprocess.run(
+        [
+            FFPROBE_EXE,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            media_path,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    if result.returncode != 0:
+        return 0.0
+
+    try:
+        return max(0.0, float(result.stdout.strip() or 0))
+    except ValueError:
+        return 0.0
+
+
+def merge_time_windows(windows, min_gap=12.0):
+    merged = []
+
+    for start, end in sorted(windows):
+        start = max(0.0, float(start))
+        end = max(start, float(end))
+
+        if end <= start:
+            continue
+
+        if merged and start <= merged[-1][1] + min_gap:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    return merged
+
+
+def transcript_signal_windows(popularity_profile, total_duration):
+    if not ENABLE_SIGNAL_WINDOW_TRANSCRIPTION:
+        return []
+
+    total_duration = float(total_duration or 0)
+
+    if total_duration <= SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS:
+        return []
+
+    signals = popularity_signal_times(popularity_profile or {}, total_duration)
+
+    radius = SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS
+    windows = []
+
+    if signals:
+        selected_centers = []
+
+        for signal_time, _source in signals[:SIGNAL_TRANSCRIPT_MAX_WINDOWS * 5]:
+            if any(abs(signal_time - center) < radius * 1.65 for center in selected_centers):
+                continue
+
+            selected_centers.append(signal_time)
+            windows.append((
+                max(0.0, signal_time - radius),
+                min(total_duration, signal_time + radius),
+            ))
+
+            if len(windows) >= SIGNAL_TRANSCRIPT_MAX_WINDOWS:
+                break
+    else:
+        # First-pass triage for long sources with no public signals. This avoids
+        # spending hours on a source before we know whether it has strong moments.
+        sample_count = max(4, min(SIGNAL_TRANSCRIPT_MAX_WINDOWS, int(total_duration // 600) + 3))
+        safe_start = min(total_duration, radius)
+        safe_end = max(safe_start, total_duration - radius)
+
+        for index in range(sample_count):
+            ratio = index / max(1, sample_count - 1)
+            center = safe_start + (safe_end - safe_start) * ratio
+            windows.append((
+                max(0.0, center - radius),
+                min(total_duration, center + radius),
+            ))
+
+    return sorted(windows)[:SIGNAL_TRANSCRIPT_MAX_WINDOWS]
+
+
+def extract_transcription_window(audio_filename, cleaned_title, start, end, index):
+    window_dir = os.path.join(transcriptions_path, "_transcribe_windows")
+    os.makedirs(window_dir, exist_ok=True)
+    output_file = os.path.join(
+        window_dir,
+        f"{cleaned_title}_window_{index:02d}_{int(start)}_{int(end)}.wav",
+    )
+
+    if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+        return output_file
+
+    run_subprocess([
+        FFMPEG_EXE,
+        "-y",
+        "-ss", f"{float(start):.3f}",
+        "-to", f"{float(end):.3f}",
+        "-i", audio_filename,
+        "-ac", "1",
+        "-ar", "16000",
+        "-acodec", "pcm_s16le",
+        output_file,
+    ], "Signal transcription window extraction")
+    return output_file
+
+
+def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", popularity_profile=None):
+    total_duration_hint = float((popularity_profile or {}).get("duration") or 0)
+    total_duration = total_duration_hint or get_media_duration_seconds(audio_filename)
+    signal_windows = transcript_signal_windows(popularity_profile or {}, total_duration)
+    transcript_suffix = "_segments_signal_windows.json" if signal_windows else "_segments.json"
     transcript_filepath = os.path.join(
         transcriptions_path,
-        f"{cleaned_title}_segments.json",
+        f"{cleaned_title}{transcript_suffix}",
     )
+    audio_fingerprint = file_fingerprint(audio_filename)
+    transcript_scope = {
+        "mode": "signal_windows" if signal_windows else "full_source",
+        "source_duration_seconds": round(total_duration, 2),
+        "full_source_max_seconds": SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS,
+        "window_count": len(signal_windows),
+        "windows": [
+            {"start": round(start, 2), "end": round(end, 2)}
+            for start, end in signal_windows
+        ],
+    }
 
     if os.path.exists(transcript_filepath) and os.path.getsize(transcript_filepath) > 0:
         with open(transcript_filepath, "r", encoding="utf-8") as f:
             cached_payload = json.load(f)
 
+        cached_fingerprint = (cached_payload.get("audio_fingerprint") or {}).get("fingerprint")
         cache_matches_settings = (
             cached_payload.get("model_size") == CLIP_TRANSCRIBE_MODEL_SIZE
             and int(cached_payload.get("beam_size", 0) or 0) == CLIP_TRANSCRIBE_BEAM_SIZE
             and int(cached_payload.get("best_of", 0) or 0) == CLIP_TRANSCRIBE_BEST_OF
+            and (
+                not cached_fingerprint
+                or cached_fingerprint == audio_fingerprint.get("fingerprint")
+            )
+            and cached_payload.get("transcript_scope") == transcript_scope
         )
 
         if cache_matches_settings:
@@ -4352,42 +5291,90 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en"):
 
     print(
         "Transcribing segment text only "
-        f"(Language forced to: {lang_code}, beam={CLIP_TRANSCRIBE_BEAM_SIZE})..."
+        f"(Language forced to: {lang_code}, beam={CLIP_TRANSCRIBE_BEAM_SIZE}, scope={transcript_scope['mode']})..."
     )
     start_transcribe = time.time()
 
-    segments_iter, info = model.transcribe(
-        audio_filename,
-        language=lang_code,
-        beam_size=CLIP_TRANSCRIBE_BEAM_SIZE,
-        best_of=CLIP_TRANSCRIBE_BEST_OF,
-        vad_filter=True,
-        word_timestamps=False,
-        condition_on_previous_text=False,
+    segments = []
+    detected_language = lang_code
+
+    if signal_windows:
+        print(
+            " -> Using signal-window transcription: "
+            f"{len(signal_windows)} windows around public replay/chapter/comment signals "
+            f"for {int(total_duration)}s source."
+        )
+
+        for index, (window_start, window_end) in enumerate(signal_windows, start=1):
+            window_file = extract_transcription_window(
+                audio_filename,
+                cleaned_title,
+                window_start,
+                window_end,
+                index,
+            )
+            segments_iter, info = model.transcribe(
+                window_file,
+                language=lang_code,
+                beam_size=CLIP_TRANSCRIBE_BEAM_SIZE,
+                best_of=CLIP_TRANSCRIBE_BEST_OF,
+                vad_filter=True,
+                word_timestamps=False,
+                condition_on_previous_text=False,
+            )
+            detected_language = getattr(info, "language", detected_language)
+
+            for segment in segments_iter:
+                segments.append({
+                    "start": float(segment.start) + window_start,
+                    "end": float(segment.end) + window_start,
+                    "text": segment.text.strip(),
+                })
+    else:
+        segments_iter, info = model.transcribe(
+            audio_filename,
+            language=lang_code,
+            beam_size=CLIP_TRANSCRIBE_BEAM_SIZE,
+            best_of=CLIP_TRANSCRIBE_BEST_OF,
+            vad_filter=True,
+            word_timestamps=False,
+            condition_on_previous_text=False,
+        )
+        detected_language = getattr(info, "language", detected_language)
+
+        for segment in segments_iter:
+            segments.append({
+                "start": float(segment.start),
+                "end": float(segment.end),
+                "text": segment.text.strip(),
+            })
+
+    segments = sorted(
+        [
+            segment
+            for segment in segments
+            if segment.get("text")
+        ],
+        key=lambda segment: segment["start"],
     )
 
-    segments = []
-
-    for segment in segments_iter:
-        segments.append({
-            "start": float(segment.start),
-            "end": float(segment.end),
-            "text": segment.text.strip(),
-        })
-
     payload = {
-        "language": getattr(info, "language", lang_code),
-        "duration": float(getattr(info, "duration", 0) or 0),
+        "language": detected_language,
+        "duration": float(total_duration or 0),
         "model_size": CLIP_TRANSCRIBE_MODEL_SIZE,
         "beam_size": CLIP_TRANSCRIBE_BEAM_SIZE,
         "best_of": CLIP_TRANSCRIBE_BEST_OF,
+        "audio_fingerprint": audio_fingerprint,
+        "transcript_scope": transcript_scope,
+        "transcribed_at": utc_timestamp(),
+        "transcription_seconds": round(time.time() - start_transcribe, 2),
         "segments": segments,
     }
 
     with open(transcript_filepath, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
 
-    print(f" -> Segment transcription took: {time.time() - start_transcribe:.2f} seconds\n")
+    print(f" -> Segment transcription took: {payload['transcription_seconds']:.2f} seconds\n")
 
     return payload
 
@@ -4399,10 +5386,17 @@ def analyze_audio_features(audio_filename, cleaned_title):
     )
 
     if os.path.exists(features_filepath) and os.path.getsize(features_filepath) > 0:
-        print("Reusing audio feature cache...")
-
         with open(features_filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+            cached_payload = json.load(f)
+
+        cached_fingerprint = (cached_payload.get("audio_fingerprint") or {}).get("fingerprint")
+        current_fingerprint = file_fingerprint(audio_filename).get("fingerprint")
+
+        if not cached_fingerprint or cached_fingerprint == current_fingerprint:
+            print("Reusing audio feature cache...")
+            return cached_payload
+
+        print("Audio feature cache was created for different audio; regenerating...")
 
     analysis_wav = os.path.join(audio_path, f"{cleaned_title}_analysis_16k.wav")
 
@@ -4488,6 +5482,9 @@ def analyze_audio_features(audio_filename, cleaned_title):
     )
 
     payload = {
+        "audio_fingerprint": file_fingerprint(audio_filename),
+        "analyzed_at": utc_timestamp(),
+        "audio_feature_seconds": round(time.time() - start_audio, 2),
         "seconds": [
             {
                 "time": index,
@@ -4504,7 +5501,7 @@ def analyze_audio_features(audio_filename, cleaned_title):
     with open(features_filepath, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
 
-    print(f" -> Audio feature mapping took: {time.time() - start_audio:.2f} seconds\n")
+    print(f" -> Audio feature mapping took: {payload['audio_feature_seconds']:.2f} seconds\n")
 
     return payload
 
@@ -4747,17 +5744,334 @@ def score_spoken_pacing(text, duration):
 
 
 def score_duration(duration):
-    if duration < MIN_CLIP_DURATION or duration > MAX_CLIP_DURATION:
+    min_clip_duration = active_min_clip_duration()
+    max_clip_duration = active_max_clip_duration()
+
+    if duration < min_clip_duration or duration > max_clip_duration:
         return 0.0
 
-    ideal_duration = 42
-    return max(0.35, 1.0 - abs(duration - ideal_duration) / 35)
+    durations = active_candidate_durations()
+    ideal_duration = float(np.median(durations)) if durations else 42.0
+    spread = max(18.0, max_clip_duration - min_clip_duration)
+    return max(0.35, 1.0 - abs(duration - ideal_duration) / spread)
 
 
-def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=None):
+def analyze_first_second_qc(video_path, transcript_excerpt, intro_mode, theme_profile):
+    first_word = first_spoken_word(transcript_excerpt)
+    weak_first_word = first_word in WEAK_START_WORDS or first_word in FILLER_OPENERS
+    words = words_from_text(transcript_excerpt)
+    has_context_card = intro_mode in {"context_card", "voice_setup", "explain_then_clip", "editorial_countdown"}
+    flags = []
+
+    if not words:
+        flags.append("no transcript in opening")
+
+    if weak_first_word and not has_context_card:
+        flags.append(f"weak first word: {first_word}")
+
+    return {
+        "audio_starts_fast": bool(words),
+        "subtitle_starts_fast": bool(words),
+        "visual_interest_score": 0.5 if has_context_card else 0.0,
+        "weak_first_word": weak_first_word,
+        "has_face_or_context_card": has_context_card,
+        "dead_air_seconds": 0.0 if words else 1.0,
+        "passed": not flags,
+        "flags": flags,
+    }
+
+
+def score_captionability(text, duration):
+    words = words_from_text(text)
+
+    if not words or duration <= 0:
+        return 0.0, {"flags": ["no words for captions"]}
+
+    words_per_second = len(words) / max(1.0, duration)
+    longest_word = max((len(word) for word in words), default=0)
+    long_sentence_count = sum(
+        1
+        for sentence in re.split(r"(?<=[.?!])\s+", text)
+        if len(words_from_text(sentence)) > 18
+    )
+    score = 1.0
+
+    if words_per_second > 3.8:
+        score -= min(0.28, (words_per_second - 3.8) * 0.12)
+
+    if longest_word > 18:
+        score -= 0.08
+
+    if long_sentence_count:
+        score -= min(0.20, long_sentence_count * 0.06)
+
+    score = max(0.0, min(1.0, score))
+    return score, {
+        "words_per_second": float(words_per_second),
+        "longest_word": int(longest_word),
+        "long_caption_sentence_count": int(long_sentence_count),
+        "flags": [
+            flag
+            for flag, condition in [
+                ("too fast for clean captions", words_per_second > 4.2),
+                ("long caption sentence", long_sentence_count > 0),
+            ]
+            if condition
+        ],
+    }
+
+
+def score_transformation_candidate(theme_name, intro_mode, theme_signal_result, title_quality, popularity_score):
+    risk_controls = get_risk_controls(theme_name)
+    transformation_notes = ["curated source selection", "vertical reframing", "caption packaging"]
+    score = 0.24
+
+    if intro_mode in {"context_card", "voice_setup", "explain_then_clip", "clip_then_takeaway"}:
+        score += 0.18
+        transformation_notes.append(f"{intro_mode} intro")
+
+    if float(theme_signal_result.get("theme_signal_score") or 0.0) >= 0.32:
+        score += 0.14
+        transformation_notes.append("theme-specific editorial signal")
+
+    if (
+        title_quality.get("specificity", 0.0) >= 0.45
+        and title_quality.get("theme_native_title", True)
+        and not title_quality.get("generic_title")
+        and not title_quality.get("mechanical_title")
+        and not title_quality.get("repetitive_title")
+    ):
+        score += 0.12
+        transformation_notes.append("specific title framing")
+    elif title_quality.get("generic_title") or title_quality.get("mechanical_title"):
+        score -= 0.05
+        transformation_notes.append("title framing needs editorial rewrite")
+
+    if popularity_score >= 0.18:
+        score += 0.08
+        transformation_notes.append("public replay/comment signal")
+
+    if risk_controls.get("requires_claim_context"):
+        score += 0.08 if intro_mode != "cold_open" else -0.08
+
+    score = max(0.0, min(1.0, score))
+    minimum = float(risk_controls.get("minimum_transformation_score") or 0.55)
+    reused_content_risk = max(0.0, min(1.0, minimum + 0.20 - score))
+    return {
+        "transformation_score": score,
+        "reused_content_risk": reused_content_risk,
+        "minimum_transformation_score": minimum,
+        "transformation_notes": transformation_notes,
+    }
+
+
+def theme_weighted_candidate_score(
+    text_score,
+    opening_score,
+    arc_details,
+    popularity_score,
+    captionability_score,
+    boundary_score,
+    pacing_score,
+    transformation_score,
+    reused_content_risk,
+    theme_signal_score,
+):
+    weights = get_scoring_weights(active_theme_name())
+    hook_score = max(opening_score, float(arc_details.get("arc_hook_score") or 0.0))
+    payoff_score = max(float(arc_details.get("arc_payoff_score") or 0.0), float(arc_details.get("arc_resolution_score") or 0.0))
+    context_score = float(arc_details.get("arc_standalone_score") or 0.0)
+    visual_proxy = max(0.0, min(1.0, boundary_score * 0.72 + captionability_score * 0.28))
+    components = {
+        "hook": hook_score,
+        "payoff": payoff_score,
+        "standalone_context": context_score,
+        "theme_signal": theme_signal_score,
+        "public_popularity": popularity_score,
+        "captionability": captionability_score,
+        "visual_quality": visual_proxy,
+        "pacing": pacing_score,
+        "transformation": transformation_score,
+        "claim_safety": 1.0 - reused_content_risk,
+    }
+    active_weights = {
+        key: float(value)
+        for key, value in weights.items()
+        if key in components and float(value) > 0
+    }
+    weight_total = sum(active_weights.values()) or 1.0
+    score = sum(components[key] * value for key, value in active_weights.items()) / weight_total
+    risk_penalty = reused_content_risk * (0.12 if get_risk_controls(active_theme_name()).get("requires_claim_context") else 0.07)
+    return max(0.0, min(1.0, score - risk_penalty)), components
+
+
+def aligned_start_point(value, stride, max_start):
+    value = max(0, min(int(value), int(max_start)))
+    stride = max(1, int(stride))
+    return max(0, min(max_start, int(round(value / stride) * stride)))
+
+
+def popularity_signal_times(popularity_profile, total_duration):
+    signals = []
+    total_duration = max(1, float(total_duration or 0))
+
+    for marker in sorted(
+        popularity_profile.get("heatmap") or [],
+        key=lambda item: float(item.get("value") or item.get("score") or 0),
+        reverse=True,
+    )[:120]:
+        start = float(marker.get("start_time", marker.get("start", marker.get("time", 0))) or 0)
+        end = float(marker.get("end_time", marker.get("end", start + 12)) or start + 12)
+        midpoint = max(0.0, min(total_duration, (start + end) / 2))
+        signals.append((midpoint, "youtube_heatmap"))
+
+    for marker in sorted(
+        popularity_profile.get("timestamp_markers") or [],
+        key=lambda item: int(item.get("count") or 1),
+        reverse=True,
+    )[:120]:
+        marker_time = float(marker.get("time") or 0)
+
+        if 0 <= marker_time <= total_duration:
+            signals.append((marker_time, "timestamp_mentions"))
+
+    for chapter in (popularity_profile.get("chapters") or [])[:80]:
+        chapter_start = float(chapter.get("start_time", chapter.get("start", 0)) or 0)
+
+        if 0 <= chapter_start <= total_duration:
+            signals.append((chapter_start, "chapters"))
+
+    return signals
+
+
+def high_energy_start_points(seconds, stride, max_start, max_count):
+    if max_count <= 0 or not seconds:
+        return []
+
+    step = max(stride, 10)
+    window = 12
+    scored = []
+
+    for start in range(0, max(1, max_start + 1), step):
+        end = min(len(seconds), start + window)
+        values = [
+            float(second.get("excitement") or 0)
+            for second in seconds[start:end]
+            if isinstance(second, dict)
+        ]
+
+        if not values:
+            continue
+
+        scored.append((float(np.mean(values)), aligned_start_point(start, stride, max_start)))
+
+    ranked = sorted(scored, reverse=True)
+    starts = []
+
+    for _, start in ranked:
+        if start not in starts:
+            starts.append(start)
+
+        if len(starts) >= max_count:
+            break
+
+    return starts
+
+
+def evenly_spaced_start_points(max_start, stride, max_count):
+    if max_count <= 0:
+        return []
+
+    if max_count == 1:
+        return [0]
+
+    starts = []
+
+    for index in range(max_count):
+        ratio = index / max(1, max_count - 1)
+        starts.append(aligned_start_point(ratio * max_start, stride, max_start))
+
+    return sorted(set(starts))
+
+
+def candidate_start_points(total_duration, min_clip_duration, max_clip_duration, candidate_stride, seconds, popularity_profile):
+    max_start = max(0, int(total_duration - min_clip_duration))
+    all_starts = list(range(0, max(1, max_start + 1), candidate_stride))
+    policy = {
+        "enabled": ENABLE_SCORING_WINDOW_CAPS,
+        "mode": "full_scan",
+        "source_duration_seconds": int(total_duration),
+        "full_scan_max_seconds": FULL_SOURCE_SCAN_MAX_SECONDS,
+        "max_start_points": MAX_SCORING_START_POINTS,
+        "available_start_points": len(all_starts),
+        "selected_start_points": len(all_starts),
+        "public_signal_count": 0,
+        "high_energy_start_points": 0,
+        "coverage_start_points": 0,
+    }
+
+    if (
+        not ENABLE_SCORING_WINDOW_CAPS
+        or len(all_starts) <= MAX_SCORING_START_POINTS
+    ):
+        return all_starts, policy
+
+    signal_times = popularity_signal_times(popularity_profile or {}, total_duration)
+    signal_starts = []
+    radius = SCORING_SIGNAL_WINDOW_RADIUS_SECONDS
+
+    for signal_time, _source in signal_times:
+        for offset in [-radius, -max_clip_duration, -max_clip_duration / 2, 0, max_clip_duration / 2]:
+            start = aligned_start_point(signal_time + offset, candidate_stride, max_start)
+
+            if start not in signal_starts:
+                signal_starts.append(start)
+
+    max_signal_starts = max(40, int(MAX_SCORING_START_POINTS * 0.48))
+    signal_starts = signal_starts[:max_signal_starts]
+    remaining = max(0, MAX_SCORING_START_POINTS - len(signal_starts))
+    energy_starts = high_energy_start_points(
+        seconds=seconds,
+        stride=candidate_stride,
+        max_start=max_start,
+        max_count=max(0, int(remaining * 0.45)),
+    )
+    selected = []
+
+    for start in signal_starts + energy_starts:
+        if start not in selected:
+            selected.append(start)
+
+    coverage_needed = max(0, MAX_SCORING_START_POINTS - len(selected))
+    coverage_starts = evenly_spaced_start_points(max_start, candidate_stride, coverage_needed)
+
+    for start in coverage_starts:
+        if start not in selected:
+            selected.append(start)
+
+    selected = sorted(selected[:MAX_SCORING_START_POINTS])
+    policy.update({
+        "mode": "capped_two_pass",
+        "selected_start_points": len(selected),
+        "public_signal_count": len(signal_times),
+        "public_signal_start_points": len(signal_starts),
+        "high_energy_start_points": len(energy_starts),
+        "coverage_start_points": len(coverage_starts),
+    })
+    return selected, policy
+
+
+def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=None, source_record=None):
     seconds = audio_payload.get("seconds", [])
     segments = transcript_payload.get("segments", [])
     popularity_profile = popularity_profile or {}
+    source_record = source_record or {}
+    theme_name = active_theme_name()
+    theme_profile = active_theme_profile(theme_name)
+    min_clip_duration = active_min_clip_duration(theme_name)
+    max_clip_duration = active_max_clip_duration(theme_name)
+    candidate_durations = active_candidate_durations(theme_name)
+    candidate_stride = active_candidate_stride(theme_name)
 
     if not seconds:
         return []
@@ -4765,8 +6079,28 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
     total_duration = len(seconds)
     candidates = []
 
-    for start in range(0, max(1, total_duration - MIN_CLIP_DURATION + 1), CANDIDATE_STRIDE_SECONDS):
-        for duration in CANDIDATE_CLIP_DURATIONS:
+    start_points, window_policy = candidate_start_points(
+        total_duration=total_duration,
+        min_clip_duration=min_clip_duration,
+        max_clip_duration=max_clip_duration,
+        candidate_stride=candidate_stride,
+        seconds=seconds,
+        popularity_profile=popularity_profile,
+    )
+    transcript_payload["_candidate_window_policy"] = window_policy
+
+    print(
+        " -> Candidate window policy: "
+        f"{window_policy['mode']} "
+        f"({window_policy['selected_start_points']}/{window_policy['available_start_points']} start points, "
+        f"duration={window_policy['source_duration_seconds']}s)"
+    )
+
+    for start in start_points:
+        for duration in candidate_durations:
+            if duration > max_clip_duration:
+                continue
+
             naturalized = naturalize_clip_window(
                 segments=segments,
                 provisional_start=start,
@@ -4780,7 +6114,7 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
             clip_start, clip_end, matching_segments = naturalized
             actual_duration = clip_end - clip_start
 
-            if actual_duration < MIN_CLIP_DURATION or not matching_segments:
+            if actual_duration < min_clip_duration or actual_duration > max_clip_duration or not matching_segments:
                 continue
 
             text = clean_transcript_text(" ".join(segment["text"] for segment in matching_segments))
@@ -4872,28 +6206,113 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
                 text=text,
                 hook_reason=hook_reason,
                 topic_terms=topic_terms,
-                text_details=text_details,
+                text_details={
+                    **text_details,
+                    "duration": actual_duration,
+                },
+                source_record=source_record,
             )
             topic_terms = merge_title_topics(topic_terms, suggested_title)
-
-            quality_score = (
-                0.27 * text_score
-                + 0.13 * audio_score
-                + 0.13 * opening_score
-                + 0.08 * comment_score
-                + 0.06 * comment_topic_score
-                + 0.16 * arc_score
-                + 0.06 * pacing_score
-                + 0.03 * duration_score
-                + 0.08 * boundary_score
+            theme_signal_result = score_theme_signals(
+                theme_name=theme_name,
+                text=text,
+                segments=matching_segments,
+                audio_path="",
+                clip_start=clip_start,
+                clip_end=clip_end,
+                metadata={
+                    "theme_profile": theme_profile,
+                    "popularity_profile": popularity_profile,
+                    "text_details": text_details,
+                    "arc_details": arc_details,
+                },
             )
+            if theme_signal_result.get("archetype"):
+                suggested_title, suggested_caption, hashtags, suggested_description = build_suggested_copy(
+                    text=text,
+                    hook_reason=hook_reason,
+                    topic_terms=extract_topic_fingerprint(text),
+                    text_details={
+                        **text_details,
+                        "duration": actual_duration,
+                        "theme_archetype": theme_signal_result.get("archetype", ""),
+                    },
+                    source_record=source_record,
+                )
+                topic_terms = merge_title_topics(extract_topic_fingerprint(text), suggested_title)
+
+            theme_signal_score = float(theme_signal_result.get("theme_signal_score") or 0.0)
+            intro_mode = theme_signal_result.get("recommended_intro_mode") or (theme_profile.get("packaging") or {}).get("default_intro_mode", "context_card")
+            first_second_qc = analyze_first_second_qc(
+                video_path=None,
+                transcript_excerpt=opening_text or text[:220],
+                intro_mode=intro_mode,
+                theme_profile=theme_profile,
+            )
+            captionability_score, captionability_details = score_captionability(text, actual_duration)
+            title_quality = score_title_quality(theme_name, suggested_title, topic_terms=topic_terms)
+            transformation = score_transformation_candidate(
+                theme_name=theme_name,
+                intro_mode=intro_mode,
+                theme_signal_result=theme_signal_result,
+                title_quality=title_quality,
+                popularity_score=popularity_score,
+            )
+            score, score_components = theme_weighted_candidate_score(
+                text_score=text_score,
+                opening_score=opening_score,
+                arc_details=arc_details,
+                popularity_score=popularity_score,
+                captionability_score=captionability_score,
+                boundary_score=boundary_score,
+                pacing_score=pacing_score,
+                transformation_score=transformation["transformation_score"],
+                reused_content_risk=transformation["reused_content_risk"],
+                theme_signal_score=theme_signal_score,
+            )
+            quality_score = score
             popularity_boost = POPULARITY_SCORE_WEIGHT * popularity_score * (0.62 + 0.38 * boundary_score)
             readiness_multiplier = 0.82 + 0.22 * readiness_score
 
             if readiness_details.get("readiness_tier") == "reject":
                 readiness_multiplier -= 0.10
 
-            score = min(1.0, max(0.0, quality_score * readiness_multiplier + popularity_boost))
+            score = min(1.0, max(0.0, score * readiness_multiplier + popularity_boost))
+            feedback_prior = score_analytics_feedback_prior(
+                theme=theme_name,
+                source_record=source_record,
+                archetype=theme_signal_result.get("archetype", ""),
+                intro_mode=intro_mode,
+                caption_style=(theme_profile.get("packaging") or {}).get("caption_style", ""),
+                content_format="raw_candidate",
+                duration=actual_duration,
+            )
+            score = min(1.0, max(0.0, score + float(feedback_prior.get("score_adjustment") or 0.0)))
+            score_components["analytics_feedback_adjustment"] = float(feedback_prior.get("score_adjustment") or 0.0)
+            source_tier = str((source_record or {}).get("source_tier") or "legacy").lower()
+            source_tier_adjustment = {
+                "priority": 0.025,
+                "secondary": 0.010,
+                "legacy": 0.0,
+            }.get(source_tier, 0.0)
+
+            if (source_record or {}).get("routing_override_matches"):
+                source_tier_adjustment += 0.005
+
+            score = min(1.0, max(0.0, score + source_tier_adjustment))
+            score_components["source_inventory_adjustment"] = round(source_tier_adjustment, 4)
+            guest_signal = guest_recognizability_signal(
+                theme_name=theme_name,
+                source_record=source_record,
+                popularity_profile=popularity_profile,
+                readiness_score=readiness_score,
+                arc_details=arc_details,
+                first_second_qc=first_second_qc,
+                transformation=transformation,
+            )
+            guest_adjustment = float(guest_signal.get("adjustment") or 0.0)
+            score = min(1.0, max(0.0, score + guest_adjustment))
+            score_components["guest_recognizability_adjustment"] = round(guest_adjustment, 4)
 
             candidates.append(CandidateClip(
                 start_time=float(clip_start),
@@ -4910,12 +6329,46 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
                 duration_score=float(duration_score),
                 boundary_score=float(boundary_score),
                 diversity_score=1.0,
+                theme_signal_score=float(theme_signal_score),
+                theme_signals=theme_signal_result,
+                first_second_qc=first_second_qc,
+                transformation_score=float(transformation["transformation_score"]),
+                reused_content_risk=float(transformation["reused_content_risk"]),
+                experiment={
+                    "experiment_id": f"{theme_name}_intro_mode",
+                    "variant": intro_mode,
+                    "hypothesis": "Theme-aligned intro mode improves engaged view rate and retention.",
+                },
                 rank_signals={
                     **text_details,
                     **arc_details,
                     **readiness_details,
                     "boundary_flags": boundary_flags,
                     "quality_score": float(quality_score),
+                    "theme_score_components": score_components,
+                    "analytics_feedback_prior": feedback_prior,
+                    "source_tier": source_tier,
+                    "origin_theme": (source_record or {}).get("origin_theme", active_theme_name()),
+                    "routed_from_theme": (source_record or {}).get("routed_from_theme", ""),
+                    "route_targets": (source_record or {}).get("route_targets", []),
+                    "routing_status": (source_record or {}).get("routing_status", "primary"),
+                    "routing_override_matches": (source_record or {}).get("routing_override_matches", []),
+                    "guest_recognizability": guest_signal,
+                    "guest_recognizability_score": float(guest_signal.get("score") or 0.0),
+                    "guest_recognizability_adjustment": guest_adjustment,
+                    "theme_profile": theme_profile.get("profile", "generic"),
+                    "theme_signal_score": float(theme_signal_score),
+                    "theme_signals": theme_signal_result.get("signals", {}),
+                    "theme_signal_concerns": theme_signal_result.get("concerns", []),
+                    "theme_archetype": theme_signal_result.get("archetype", ""),
+                    "recommended_intro_mode": intro_mode,
+                    "first_second_qc": first_second_qc,
+                    "captionability_score": float(captionability_score),
+                    "captionability": captionability_details,
+                    "transformation_score": float(transformation["transformation_score"]),
+                    "reused_content_risk": float(transformation["reused_content_risk"]),
+                    "transformation_notes": transformation.get("transformation_notes", []),
+                    "title_quality": title_quality,
                     "popularity_score": float(popularity_score),
                     "popularity_heatmap_score": float(popularity_details.get("heatmap_score") or 0),
                     "popularity_timestamp_score": float(popularity_details.get("timestamp_score") or 0),
@@ -4924,6 +6377,8 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
                     "popularity_profile_sources": popularity_details.get("profile_sources", []),
                     "comment_topic_score": float(comment_topic_score),
                     "comment_topic_matched_terms": comment_topic_details.get("matched_terms", []),
+                    "candidate_window_policy_mode": window_policy.get("mode", ""),
+                    "candidate_window_policy": window_policy,
                 },
                 transcript_excerpt=text[:260].strip(),
                 hook_reason=hook_reason,
@@ -4937,12 +6392,15 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
     return candidates
 
 
-def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO, existing_fingerprints=None):
+def select_non_overlapping_clips(candidates, max_clips=None, existing_fingerprints=None):
     selected = []
     existing_fingerprints = existing_fingerprints or []
+    max_clips = max_clips or int(active_clip_rules().get("default_clip_count") or MAX_CLIPS_PER_VIDEO)
+    min_selected_score = active_min_selected_score()
+    max_topic_similarity = active_max_topic_similarity()
 
     for candidate in sorted(candidates, key=candidate_ranking_key, reverse=True):
-        if candidate.score < MIN_SELECTED_CLIP_SCORE:
+        if candidate.score < min_selected_score:
             continue
 
         if not candidate_selection_ready(candidate):
@@ -4974,7 +6432,7 @@ def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO, exis
         max_total_overlap = max(max_topic_overlap, max_existing_overlap)
         candidate.diversity_score = float(1.0 - max_total_overlap)
 
-        if max_total_overlap > MAX_TOPIC_SIMILARITY:
+        if max_total_overlap > max_topic_similarity:
             continue
 
         selected.append(candidate)
@@ -4987,10 +6445,79 @@ def select_non_overlapping_clips(candidates, max_clips=MAX_CLIPS_PER_VIDEO, exis
 
 def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popularity_profile=None, source_record=None):
     start_finding = time.time()
+    source_record = source_record or {}
+    disqualified, negative_hits = source_disqualified_by_theme(source_record, active_theme_name())
+    if disqualified:
+        print(
+            " -> Source skipped by theme guard "
+            f"(negative source signals: {', '.join(map(str, negative_hits))})"
+        )
+        source_record["_processing_metrics"] = {
+            "scoring_seconds": 0.0,
+            "transcript_stage_seconds": 0.0,
+            "audio_feature_stage_seconds": 0.0,
+            "candidate_build_seconds": 0.0,
+            "candidate_window_policy": {"mode": "source_disqualified"},
+            "candidate_count": 0,
+            "slow_source_threshold_seconds": SLOW_SOURCE_REVIEW_SECONDS,
+            "slow_source_review": False,
+            "source_disqualified": True,
+            "negative_source_signals": negative_hits,
+        }
+        scoring_filepath = os.path.join(
+            transcriptions_path,
+            f"{cleaned_title}_clip_scores.json",
+        )
+        with open(scoring_filepath, "w", encoding="utf-8") as f:
+            json.dump({
+                "scoring_model_version": SCORING_MODEL_VERSION,
+                "candidate_window_policy": {"mode": "source_disqualified"},
+                "selected": [],
+                "top_candidates": [],
+                "source_disqualified": True,
+                "negative_source_signals": negative_hits,
+            }, f, indent=4)
+        write_clip_review_exports(cleaned_title, [], [])
+        write_source_dossier(
+            cleaned_title=cleaned_title,
+            source_record=source_record,
+            popularity_profile=popularity_profile or {},
+            candidates=[],
+            selected_clips=[],
+        )
+        return []
 
-    transcript_payload = transcribe_audio_segments(audio_filename, cleaned_title, lang_code)
+    start_audio_stage = time.time()
     audio_payload = analyze_audio_features(audio_filename, cleaned_title)
-    candidates = build_candidate_clips(transcript_payload, audio_payload, popularity_profile=popularity_profile)
+    audio_stage_seconds = time.time() - start_audio_stage
+    start_transcript_stage = time.time()
+    transcript_payload = transcribe_audio_segments(
+        audio_filename,
+        cleaned_title,
+        lang_code,
+        popularity_profile=popularity_profile,
+    )
+    transcript_stage_seconds = time.time() - start_transcript_stage
+    start_candidate_stage = time.time()
+    candidates = build_candidate_clips(
+        transcript_payload,
+        audio_payload,
+        popularity_profile=popularity_profile,
+        source_record=source_record,
+    )
+    candidate_stage_seconds = time.time() - start_candidate_stage
+    candidate_window_policy = transcript_payload.get("_candidate_window_policy", {})
+    scoring_seconds = time.time() - start_finding
+    source_record["_processing_metrics"] = {
+        "scoring_seconds": round(scoring_seconds, 2),
+        "transcript_stage_seconds": round(transcript_stage_seconds, 2),
+        "audio_feature_stage_seconds": round(audio_stage_seconds, 2),
+        "candidate_build_seconds": round(candidate_stage_seconds, 2),
+        "candidate_window_policy": candidate_window_policy,
+        "candidate_count": len(candidates),
+        "slow_source_threshold_seconds": SLOW_SOURCE_REVIEW_SECONDS,
+        "slow_source_review": scoring_seconds > SLOW_SOURCE_REVIEW_SECONDS,
+    }
 
     scoring_filepath = os.path.join(
         transcriptions_path,
@@ -5000,6 +6527,7 @@ def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popula
     with open(scoring_filepath, "w", encoding="utf-8") as f:
         json.dump({
             "scoring_model_version": SCORING_MODEL_VERSION,
+            "candidate_window_policy": candidate_window_policy,
             "selected": [],
             "top_candidates": [
                 candidate_to_dict(clip)
@@ -5010,13 +6538,19 @@ def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popula
     review_json, review_csv = write_clip_review_exports(cleaned_title, [], candidates)
     dossier_path = write_source_dossier(
         cleaned_title=cleaned_title,
-        source_record=source_record or {},
+        source_record=source_record,
         popularity_profile=popularity_profile or {},
         candidates=candidates,
         selected_clips=[],
     )
 
-    print(f" -> Viral clip scoring took: {time.time() - start_finding:.2f} seconds")
+    if source_record["_processing_metrics"]["slow_source_review"]:
+        print(
+            " -> Slow source review flagged: "
+            f"{scoring_seconds:.2f}s > {SLOW_SOURCE_REVIEW_SECONDS:.2f}s"
+        )
+
+    print(f" -> Viral clip scoring took: {scoring_seconds:.2f} seconds")
     print(f" -> Candidate clips scored: {len(candidates)}\n")
     print(f" -> Clip review JSON: {review_json}")
     print(f" -> Clip review CSV: {review_csv}\n")
@@ -5044,6 +6578,11 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en", popularity_p
     with open(scoring_filepath, "w", encoding="utf-8") as f:
         json.dump({
             "scoring_model_version": SCORING_MODEL_VERSION,
+            "candidate_window_policy": (
+                candidates[0].rank_signals.get("candidate_window_policy")
+                if candidates and isinstance(candidates[0].rank_signals, dict)
+                else {}
+            ),
             "selected": [candidate_to_dict(clip) for clip in clips],
             "top_candidates": [
                 candidate_to_dict(clip)
@@ -5124,48 +6663,95 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
     allow_low_face_preflight = os.getenv("SHORTFORM_ALLOW_LOW_FACE_PREFLIGHT") == "1"
     clip_number = 1
     rendered_count = 0
+    full_source_fallback_video = video_filename
+    section_download_broken_for_source = False
 
     for clip in clips:
         source_duration = clip.end_time - clip.start_time
 
-        if not (MIN_CLIP_DURATION <= source_duration <= MAX_CLIP_DURATION):
+        if not (active_min_clip_duration() <= source_duration <= active_max_clip_duration()):
             continue
 
         input_video_filename = video_filename
         render_clip = clip
         downloaded_section_file = ""
+        acquisition_notes = []
 
         if not input_video_filename and video_url and DOWNLOAD_VIDEO_SECTIONS:
-            try:
-                downloaded_section_file, section_start = download_video_section(
-                    video_url=video_url,
-                    cleaned_title=cleaned_title,
-                    clip_number=clip_number,
-                    clip=clip,
-                )
-            except Exception as section_err:
-                clip.render_qc = {
-                    "passed": False,
-                    "flags": [f"section download failed: {section_err}"],
-                }
-                print(f" -> Skipping clip {clip_number}; selected video section failed: {section_err}\n")
-                write_clip_review_exports(cleaned_title, clips)
-                clip_number += 1
-                continue
+            if section_download_broken_for_source and full_source_fallback_video:
+                input_video_filename = full_source_fallback_video
+                acquisition_notes.append("used full-source fallback after section download failed earlier")
+            else:
+                try:
+                    downloaded_section_file, section_start = download_video_section(
+                        video_url=video_url,
+                        cleaned_title=cleaned_title,
+                        clip_number=clip_number,
+                        clip=clip,
+                    )
+                except Exception as section_err:
+                    print(" -> Selected section download failed.")
+                    print(f"    Section error: {section_err}")
 
-            input_video_filename = downloaded_section_file
-            render_clip = replace(
-                clip,
-                start_time=max(0.0, float(clip.start_time) - section_start),
-                end_time=max(0.1, float(clip.end_time) - section_start),
-            )
+                    if not ALLOW_FULL_SOURCE_FALLBACK:
+                        clip.render_qc = {
+                            "passed": False,
+                            "flags": [
+                                f"section download failed: {section_err}",
+                                "full-source fallback disabled for production speed",
+                            ],
+                        }
+                        print(
+                            f" -> Skipping clip {clip_number}; full-source fallback is disabled. "
+                            "Set SHORTFORM_ALLOW_FULL_SOURCE_FALLBACK=1 only for a targeted rerun.\n"
+                        )
+                        write_clip_review_exports(cleaned_title, clips)
+                        clip_number += 1
+                        continue
+
+                    section_download_broken_for_source = True
+                    print(" -> Full-source fallback is enabled; downloading the source video.")
+
+                    try:
+                        if not full_source_fallback_video:
+                            full_source_fallback_video, _ = download_media(video_url, cleaned_title)
+                            full_source_fallback_video = os.path.abspath(full_source_fallback_video)
+
+                        assert_file_exists(full_source_fallback_video, "Full source fallback video")
+                        input_video_filename = full_source_fallback_video
+                        acquisition_notes.append(
+                            "section download failed; rendered from full-source fallback"
+                        )
+                    except Exception as fallback_err:
+                        clip.render_qc = {
+                            "passed": False,
+                            "flags": [
+                                f"section download failed: {section_err}",
+                                f"full-source fallback failed: {fallback_err}",
+                            ],
+                        }
+                        print(
+                            f" -> Skipping clip {clip_number}; selected section and fallback both failed: "
+                            f"{fallback_err}\n"
+                        )
+                        write_clip_review_exports(cleaned_title, clips)
+                        clip_number += 1
+                        continue
+                else:
+                    input_video_filename = downloaded_section_file
+                    render_clip = replace(
+                        clip,
+                        start_time=max(0.0, float(clip.start_time) - section_start),
+                        end_time=max(0.1, float(clip.end_time) - section_start),
+                    )
+                    acquisition_notes.append("rendered from selected video section")
 
         if not input_video_filename:
             raise RuntimeError("No input video file available for selected clip rendering")
 
         duration = render_clip.end_time - render_clip.start_time
 
-        if not (MIN_CLIP_DURATION <= duration <= MAX_CLIP_DURATION):
+        if not (active_min_clip_duration() <= duration <= active_max_clip_duration()):
             continue
 
         print(f"--- Processing Clip {clip_number} (Duration: {duration:.2f}s) ---")
@@ -5190,13 +6776,14 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
 
         if (
             not REGENERATE_EXISTING_CLIPS
-            and os.path.exists(final_filename)
-            and os.path.getsize(final_filename) > 0
+            and is_valid_existing_clip(final_filename)
         ):
             print(f" -> Final clip already exists, skipping: {final_filename}\n")
             rendered_count += 1
             clip_number += 1
             continue
+        elif not REGENERATE_EXISTING_CLIPS and os.path.exists(final_filename):
+            print(f" -> Existing final clip is invalid; regenerating: {final_filename}")
 
         try:
             # STEP 1: Extract raw subclip using FFmpeg
@@ -5230,7 +6817,11 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
                 flags = preflight_qc.get("flags", [])
                 print(f" -> Preflight visual QC warnings: {', '.join(flags)}")
 
-                if not allow_low_face_preflight:
+                if preflight_allows_partial_face_render(preflight_qc):
+                    print(" -> Continuing with face-lock render because partial speaker evidence exists.")
+                elif preflight_allows_center_safe_render(preflight_qc):
+                    print(" -> Continuing with center-safe render because the clip is visually active.")
+                elif not allow_low_face_preflight:
                     clip.render_qc = {
                         "passed": False,
                         "flags": flags,
@@ -5242,16 +6833,17 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             # STEP 2/3: Render, audit, and optionally retry with safer framing.
             attempts = []
             audit_dir = get_frame_audit_dir()
+            first_strategy = primary_framing_strategy(preflight_qc)
             face_audit_path = os.path.join(
                 audit_dir,
-                f"{cleaned_title}_{clip_number}_face_locked.jpg",
+                f"{cleaned_title}_{clip_number}_{first_strategy}.jpg",
             )
 
             first_attempt = render_crop_attempt(
                 temp_subclip=temp_subclip,
                 temp_tracked_avi=temp_tracked_avi,
                 final_filename=final_filename,
-                strategy="face_locked",
+                strategy=first_strategy,
                 model=model,
                 face_cascades=face_cascades,
                 expected_duration=duration,
@@ -5260,37 +6852,104 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             attempts.append(first_attempt)
 
             if should_try_alternate_framing(first_attempt["render_qc"]):
-                print(" -> Face-locked framing looks risky; trying fallback crop strategies.")
+                first_qc = first_attempt["render_qc"]
+                first_quality = float(first_qc.get("attempt_quality_score") or 0.0)
+                fallback_accept_threshold = float(os.getenv("SHORTFORM_FALLBACK_ACCEPT_SCORE", "0.68"))
+                first_has_output = bool(first_attempt.get("output_file") and os.path.exists(first_attempt["output_file"]))
 
-                for fallback_strategy in ["stable_face_lock", "group_face_lock", "dual_speaker_stack", "center_safe"]:
-                    fallback_tracked_avi = os.path.join(
-                        clips_path,
-                        f"{cleaned_title}_{clip_number}_{fallback_strategy}.avi",
+                if (
+                    first_has_output
+                    and not render_rejection_reasons(first_qc)
+                    and first_quality >= fallback_accept_threshold
+                ):
+                    print(
+                        f" -> {first_strategy} framing has warnings but is usable "
+                        f"(quality={first_quality:.2f}); accepting without extra fallbacks."
                     )
-                    fallback_final_filename = os.path.join(
-                        clips_path,
-                        f"{cleaned_title}_{clip_number}_{fallback_strategy}.mp4",
-                    )
-                    temporary_artifacts.extend([fallback_tracked_avi, fallback_final_filename])
-                    fallback_audit_path = os.path.join(
-                        audit_dir,
-                        f"{cleaned_title}_{clip_number}_{fallback_strategy}.jpg",
-                    )
-                    attempts.append(render_crop_attempt(
-                        temp_subclip=temp_subclip,
-                        temp_tracked_avi=fallback_tracked_avi,
-                        final_filename=fallback_final_filename,
-                        strategy=fallback_strategy,
-                        model=model,
-                        face_cascades=face_cascades,
-                        expected_duration=duration,
-                        audit_path=fallback_audit_path,
-                    ))
+                else:
+                    print(f" -> {first_strategy} framing looks risky; trying fallback crop strategies.")
+                    fallback_strategies = fallback_framing_strategies()
+                    first_flags = set(first_qc.get("flags", []))
+                    timeout_recovery = "crop timeout" in first_flags
 
+                    if timeout_recovery:
+                        fallback_strategies = [
+                            strategy
+                            for strategy in ["stable_face_lock", "center_safe"]
+                            if strategy in fallback_strategies and strategy != first_strategy
+                        ]
+
+                    for fallback_strategy in fallback_strategies:
+                        if fallback_strategy == first_strategy:
+                            continue
+
+                        fallback_tracked_avi = os.path.join(
+                            clips_path,
+                            f"{cleaned_title}_{clip_number}_{fallback_strategy}.avi",
+                        )
+                        fallback_final_filename = os.path.join(
+                            clips_path,
+                            f"{cleaned_title}_{clip_number}_{fallback_strategy}.mp4",
+                        )
+                        temporary_artifacts.extend([fallback_tracked_avi, fallback_final_filename])
+                        fallback_audit_path = os.path.join(
+                            audit_dir,
+                            f"{cleaned_title}_{clip_number}_{fallback_strategy}.jpg",
+                        )
+                        fallback_attempt = render_crop_attempt(
+                            temp_subclip=temp_subclip,
+                            temp_tracked_avi=fallback_tracked_avi,
+                            final_filename=fallback_final_filename,
+                            strategy=fallback_strategy,
+                            model=model,
+                            face_cascades=face_cascades,
+                            expected_duration=duration,
+                            audit_path=fallback_audit_path,
+                        )
+                        attempts.append(fallback_attempt)
+
+                        fallback_qc = fallback_attempt["render_qc"]
+
+                        fallback_quality = float(fallback_qc.get("attempt_quality_score") or 0.0)
+
+                        if (
+                            not render_rejection_reasons(fallback_qc)
+                            and fallback_quality >= fallback_accept_threshold
+                        ):
+                            print(
+                                " -> Fallback framing accepted early "
+                                f"(strategy={fallback_strategy}, "
+                                f"quality={fallback_qc.get('attempt_quality_score', 0.0):.2f})."
+                            )
+                            break
+
+            valid_attempts = [
+                attempt
+                for attempt in attempts
+                if attempt.get("output_file") and os.path.exists(attempt["output_file"])
+            ]
             selected_attempt = max(
-                attempts,
+                valid_attempts or attempts,
                 key=lambda item: item["render_qc"].get("attempt_quality_score", 0.0),
             )
+
+            if not selected_attempt.get("output_file") or not os.path.exists(selected_attempt["output_file"]):
+                clip.render_qc = selected_attempt["render_qc"]
+                clip.render_qc["passed"] = False
+                clip.render_qc["rejected"] = True
+                clip.render_qc["rejection_reasons"] = ["all framing attempts failed"]
+                clip.render_qc["all_framing_attempts"] = [
+                    {
+                        "strategy": attempt["strategy"],
+                        "quality": attempt["render_qc"].get("attempt_quality_score", 0.0),
+                        "visual": attempt["render_qc"].get("visual_quality_score", 0.0),
+                        "flags": attempt["render_qc"].get("flags", []),
+                        "audit_file": attempt["render_qc"].get("frame_audit_file", ""),
+                    }
+                    for attempt in attempts
+                ]
+                print(" -> Rejecting render: all framing attempts failed")
+                continue
 
             if selected_attempt["output_file"] != final_filename:
                 if os.path.exists(final_filename):
@@ -5306,6 +6965,11 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             clip.output_file = os.path.abspath(final_filename)
             clip.render_qc = selected_attempt["render_qc"]
             clip.render_qc["preflight"] = preflight_qc
+            if acquisition_notes:
+                clip.render_qc["media_acquisition"] = acquisition_notes[-1]
+                clip.render_qc["flags"] = sorted(
+                    set(clip.render_qc.get("flags", []) + acquisition_notes)
+                )
             clip.render_qc["all_framing_attempts"] = [
                 {
                     "strategy": attempt["strategy"],
@@ -5422,6 +7086,9 @@ def process_video(video_record):
         video_record["_last_error_type"] = ""
         video_title = video_record.get("title") or ""
 
+        if not is_supported_youtube_video_url(video_url):
+            raise SkippableVideoError(f"unsupported non-video YouTube URL: {video_url}")
+
         if not video_title:
             info = run_ytdlp_then_retry_with_cookies(
                 build_ytdl_opts(),
@@ -5455,10 +7122,22 @@ def process_video(video_record):
         return bool(rendered_count)
 
     except Exception as e:
-        if isinstance(e, ytdlp_auth.RestrictedVideoAuthError) and HALT_ON_RESTRICTED_DOWNLOAD_FAILURE:
+        if (
+            HALT_ON_RESTRICTED_DOWNLOAD_FAILURE
+            and (
+                isinstance(e, ytdlp_auth.RestrictedVideoAuthError)
+                or is_restricted_auth_error_message(e)
+            )
+        ):
             video_record["_last_error_type"] = "blocked"
             print(f"Restricted YouTube auth failed for: {video_record.get('video_url')}\n{e}\n")
-            raise
+            if isinstance(e, ytdlp_auth.RestrictedVideoAuthError):
+                raise
+
+            raise ytdlp_auth.RestrictedVideoAuthError(
+                f"restricted YouTube auth failed for {video_record.get('video_url')}: "
+                f"{str(e).splitlines()[0][:300]}"
+            ) from e
 
         if isinstance(e, (SkippableVideoError, ytdlp_auth.RestrictedVideoAuthError)) or is_skippable_video_error_message(e):
             video_record["_last_error_type"] = "blocked"
@@ -5479,6 +7158,9 @@ def score_video_for_theme_ranking(video_record):
         video_record["_last_error_type"] = ""
         video_title = video_record.get("title") or ""
 
+        if not is_supported_youtube_video_url(video_url):
+            raise SkippableVideoError(f"unsupported non-video YouTube URL: {video_url}")
+
         if not video_title:
             info = run_ytdlp_then_retry_with_cookies(
                 build_ytdl_opts(),
@@ -5492,6 +7174,15 @@ def score_video_for_theme_ranking(video_record):
             video_title = info.get("title", "Unknown_Video")
 
         cleaned_title = clean_title_for_filename(video_title)
+        cached_source = load_cached_scored_source(
+            cleaned_title=cleaned_title,
+            video_record=video_record,
+            video_url=video_url,
+            source_state_key=source_state_key,
+        )
+        if cached_source is not None:
+            return cached_source
+
         audio_filename = download_audio_for_scoring(video_url, cleaned_title)
 
         assert_file_exists(audio_filename, "Extracted audio")
@@ -5506,7 +7197,7 @@ def score_video_for_theme_ranking(video_record):
             source_record=video_record,
         )
 
-        top_candidates = sorted(candidates, key=candidate_ranking_key, reverse=True)[:THEME_CANDIDATES_PER_VIDEO]
+        top_candidates = sorted(candidates, key=candidate_ranking_key, reverse=True)[:active_theme_candidates_per_video()]
 
         for clip in top_candidates:
             clip.source_state_key = source_state_key
@@ -5518,8 +7209,23 @@ def score_video_for_theme_ranking(video_record):
         video_record["_candidate_count"] = len(candidates)
         video_record["_theme_ranked_candidate_count"] = len(top_candidates)
         video_record["_last_cleaned_title"] = cleaned_title
+        processing_metrics = video_record.setdefault("_processing_metrics", {})
+        elapsed_video_seconds = time.time() - start_video_total
+        processing_metrics["total_source_workflow_seconds"] = round(elapsed_video_seconds, 2)
+        processing_metrics["theme_ranked_candidate_count"] = len(top_candidates)
+        processing_metrics["selected_clips_per_hour_processed"] = round(
+            len(top_candidates) / max(0.01, elapsed_video_seconds / 3600),
+            4,
+        )
+        write_source_dossier(
+            cleaned_title=cleaned_title,
+            source_record=video_record,
+            popularity_profile=popularity_profile or {},
+            candidates=candidates,
+            selected_clips=[],
+        )
         print(
-            f"=== Candidate scoring duration for video: {time.time() - start_video_total:.2f} seconds "
+            f"=== Candidate scoring duration for video: {elapsed_video_seconds:.2f} seconds "
             f"({len(top_candidates)} kept for theme ranking) ===\n"
         )
 
@@ -5534,10 +7240,22 @@ def score_video_for_theme_ranking(video_record):
         }
 
     except Exception as e:
-        if isinstance(e, ytdlp_auth.RestrictedVideoAuthError) and HALT_ON_RESTRICTED_DOWNLOAD_FAILURE:
+        if (
+            HALT_ON_RESTRICTED_DOWNLOAD_FAILURE
+            and (
+                isinstance(e, ytdlp_auth.RestrictedVideoAuthError)
+                or is_restricted_auth_error_message(e)
+            )
+        ):
             video_record["_last_error_type"] = "blocked"
             print(f"Restricted YouTube auth failed for: {video_record.get('video_url')}\n{e}\n")
-            raise
+            if isinstance(e, ytdlp_auth.RestrictedVideoAuthError):
+                raise
+
+            raise ytdlp_auth.RestrictedVideoAuthError(
+                f"restricted YouTube auth failed for {video_record.get('video_url')}: "
+                f"{str(e).splitlines()[0][:300]}"
+            ) from e
 
         if isinstance(e, (SkippableVideoError, ytdlp_auth.RestrictedVideoAuthError)) or is_skippable_video_error_message(e):
             video_record["_last_error_type"] = "blocked"
@@ -5560,12 +7278,15 @@ def theme_candidate_overlaps(candidate, selected_clip):
     )
 
 
-def select_theme_best_clips(candidates, max_clips=THEME_CLIP_BUDGET, existing_fingerprints=None):
+def select_theme_best_clips(candidates, max_clips=None, existing_fingerprints=None):
     selected = []
     existing_fingerprints = existing_fingerprints or []
+    max_clips = max_clips or active_theme_clip_budget()
+    min_selected_score = active_min_selected_score()
+    max_topic_similarity = active_max_topic_similarity()
 
     for candidate in sorted(candidates, key=candidate_ranking_key, reverse=True):
-        if candidate.score < MIN_SELECTED_CLIP_SCORE:
+        if candidate.score < min_selected_score:
             continue
 
         if not candidate_selection_ready(candidate):
@@ -5591,7 +7312,7 @@ def select_theme_best_clips(candidates, max_clips=THEME_CLIP_BUDGET, existing_fi
         max_total_overlap = max(max_topic_overlap, max_existing_overlap)
         candidate.diversity_score = float(1.0 - max_total_overlap)
 
-        if max_total_overlap > MAX_TOPIC_SIMILARITY:
+        if max_total_overlap > max_topic_similarity:
             continue
 
         selected.append(candidate)
@@ -5631,7 +7352,8 @@ def write_theme_selection_report(theme_name, selected_clips, all_candidates):
     payload = {
         "theme": theme_name,
         "scoring_model_version": SCORING_MODEL_VERSION,
-        "clip_budget": THEME_CLIP_BUDGET,
+        "clip_budget": active_theme_clip_budget(theme_name),
+        "clip_rules": active_clip_rules(theme_name),
         "candidate_count": len(all_candidates),
         "selected_count": len(selected_clips),
         "readiness_distribution": build_readiness_distribution(all_candidates),
@@ -5658,14 +7380,34 @@ def update_failed_clip_generation_record(pulled_data, state_key, record):
 def run_theme_global_ranked_generation(videos_to_process, pulled_data):
     print(
         "Theme-wide ranking enabled: "
-        f"scoring every source, then rendering only the top {THEME_CLIP_BUDGET} clips.\n"
+        f"scoring every source, then rendering only the top {active_theme_clip_budget()} clips.\n"
     )
 
     scored_sources = []
     consecutive_network_failures = 0
+    uncached_score_attempts = 0
 
     for state_key, record in videos_to_process:
         record["state_key"] = state_key
+        video_title = record.get("title") or ""
+        cleaned_title = clean_title_for_filename(video_title) if video_title else ""
+        has_score_cache = bool(cleaned_title and has_cached_clip_scores(cleaned_title))
+
+        if (
+            MAX_UNSCORED_SOURCES_PER_THEME >= 0
+            and not has_score_cache
+            and uncached_score_attempts >= MAX_UNSCORED_SOURCES_PER_THEME
+        ):
+            print(
+                "Skipping unscored source due to resume scoring cap "
+                f"(SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME={MAX_UNSCORED_SOURCES_PER_THEME}): "
+                f"{record.get('video_url')}"
+            )
+            continue
+
+        if not has_score_cache:
+            uncached_score_attempts += 1
+
         scored_source = score_video_for_theme_ranking(record)
 
         if scored_source is None:
@@ -5704,7 +7446,7 @@ def run_theme_global_ranked_generation(videos_to_process, pulled_data):
     existing_fingerprints = load_existing_theme_topic_fingerprints()
     selected_clips = select_theme_best_clips(
         all_candidates,
-        max_clips=THEME_CLIP_BUDGET,
+        max_clips=active_theme_clip_budget(),
         existing_fingerprints=existing_fingerprints,
     )
     selected_by_source = {}
@@ -5772,6 +7514,7 @@ def run_clip_generation(theme=None):
 
 
 def run_clip_generation_for_theme(theme_name):
+    theme_name = assert_theme_allowed_for_active_run(theme_name)
     configure_theme(theme_name)
     run_start = time.time()
     pulled_data = load_json_file(PULLED_FILE, {})
@@ -5786,7 +7529,12 @@ def run_clip_generation_for_theme(theme_name):
     theme_records = [
         (state_key, record)
         for state_key, record in pulled_data.items()
-        if record.get("theme") == CURRENT_THEME and record.get("video_url")
+        if (
+            record.get("theme") == CURRENT_THEME
+            and record.get("video_url")
+            and not record.get("source_guard_disqualified")
+            and is_supported_youtube_video_url(record.get("video_url"))
+        )
     ]
     videos_to_process = [
         (state_key, record)

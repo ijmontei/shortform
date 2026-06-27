@@ -1,0 +1,289 @@
+{
+    "theme": "health_fitness",
+    "profile": "health_fitness",
+    "brand": {
+        "channel_name": "HealthScience Archive",
+        "positioning": "Evidence-aware health, fitness, nutrition, and longevity interview clips with safety context.",
+        "audience": "Health-conscious viewers who want practical but responsible advice.",
+        "viewer_promise": "A usable health concept with medical-review risk flags when needed.",
+        "voice": "clear health editor",
+        "risk_tolerance": "low",
+        "color_palette": [
+            "#102027",
+            "#12D6C5",
+            "#7ED957",
+            "#F7FFF7",
+            "#F6C85F"
+        ],
+        "creative_personality": "fresh science lab, practical wellness, clean, energetic",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/healthscience_archive/healthscience_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/healthscience_archive/healthscience_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/healthscience_archive/healthscience_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/healthscience_archive/healthscience_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@HealthScienceArchive",
+        "token_file": "youtube_token_health_fitness.json"
+    },
+    "channels": [
+        "https://www.youtube.com/@hubermanlab/videos",
+        "https://www.youtube.com/@melrobbins/videos",
+        "https://www.youtube.com/@JayShettyPodcast/videos",
+        "https://www.youtube.com/@TheDiaryOfACEO/videos",
+        "https://www.youtube.com/@RichRoll/videos",
+        "https://www.youtube.com/@PeterAttiaMD/videos",
+        "https://www.youtube.com/@FoundMyFitness/videos",
+        "https://www.youtube.com/@drchatterjee/videos",
+        "https://www.youtube.com/@LewisHowes/videos",
+        "https://www.youtube.com/@drmarkhyman/videos",
+        "https://www.youtube.com/@MindPumpShow/videos",
+        "https://www.youtube.com/@ChrisWillx/videos",
+        "https://www.youtube.com/@ZOE/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Evidence-aware health, fitness, nutrition, and longevity interview clips with safety context.",
+        "source_strategy": "Health experts and fitness interview channels with high demand but strong safety gates."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            18,
+            28,
+            40,
+            55
+        ],
+        "min_clip_duration": 14,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.55,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": true,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "health_mistake",
+            "daily_protocol",
+            "nutrition_rule",
+            "training_insight",
+            "longevity_explainer"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "sleep",
+            "exercise",
+            "nutrition",
+            "protein",
+            "stress",
+            "longevity",
+            "metabolism"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "health",
+                "fitness",
+                "exercise",
+                "workout",
+                "training",
+                "nutrition",
+                "diet",
+                "protein",
+                "sleep",
+                "body",
+                "fat loss",
+                "lean muscle",
+                "longevity",
+                "metabolism",
+                "recovery",
+                "fertility",
+                "depression",
+                "trauma",
+                "stress",
+                "anxiety",
+                "doctor",
+                "dr."
+            ],
+            "negative_keywords": [
+                "billionaire",
+                "crash",
+                "selling",
+                "stock",
+                "market",
+                "investing",
+                "crypto",
+                "election",
+                "trump",
+                "movie",
+                "film",
+                "nba",
+                "nfl"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "hubermanlab",
+                "melrobbins",
+                "jayshettypodcast",
+                "richroll",
+                "peterattiamd",
+                "foundmyfitness",
+                "drchatterjee",
+                "lewishowes",
+                "drmarkhyman",
+                "mindpumpshow",
+                "chriswillx",
+                "zoe"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "health_mistake",
+            "daily_protocol",
+            "nutrition_rule",
+            "training_insight",
+            "longevity_explainer"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "clip_then_takeaway",
+            "context_card",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "clip_then_takeaway",
+        "max_intro_seconds": 2.5,
+        "caption_style": "calm_takeaway",
+        "framing_style": "clean_speaker",
+        "overlay_style": "takeaway_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Health Mistake Behind {topic}",
+            "A Clearer Way To Think About {topic}",
+            "Why {topic} Matters For Your Body"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#health",
+            "#fitness",
+            "#nutrition",
+            "#shorts"
+        ],
+        "tags": [
+            "health",
+            "fitness",
+            "nutrition",
+            "longevity",
+            "wellness"
+        ],
+        "topic_tags": {
+            "sleep": "#sleep",
+            "exercise": "#exercise",
+            "nutrition": "#nutrition",
+            "protein": "#protein",
+            "stress": "#stress",
+            "longevity": "#longevity",
+            "metabolism": "#metabolism"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": true,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "medical cure claims",
+            "supplement claims",
+            "mental-health crisis advice"
+        ],
+        "manual_review_topics": [
+            "medical protocols",
+            "diet claims",
+            "therapy claims"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_label": "health_wellness_psychology",
+    "phase_one_order": 5,
+    "priority_channels": [
+        "https://www.youtube.com/@hubermanlab/videos",
+        "https://www.youtube.com/@melrobbins/videos",
+        "https://www.youtube.com/@JayShettyPodcast/videos",
+        "https://www.youtube.com/@TheDiaryOfACEO/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@RichRoll/videos",
+        "https://www.youtube.com/@PeterAttiaMD/videos",
+        "https://www.youtube.com/@FoundMyFitness/videos",
+        "https://www.youtube.com/@drchatterjee/videos",
+        "https://www.youtube.com/@LewisHowes/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "The Diary of a CEO",
+            "route_to": [
+                "health_fitness",
+                "finance",
+                "technology_ai"
+            ],
+            "when": "episode is health, psychology, founder, or AI-builder led"
+        }
+    ]
+}

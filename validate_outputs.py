@@ -5,7 +5,9 @@ import subprocess
 import sys
 import time
 
-from theme_config import BASE_DIR, discover_themes, ensure_theme, load_json_file, write_json_file
+from editorial_gates import RAW_RECYCLER_CONTENT_FORMATS, TRANSFORMED_CONTENT_FORMATS, evaluate_editorial_gates
+from theme_config import BASE_DIR, THEMES_OUTPUT_PATH, clean_theme_name, discover_themes, ensure_theme, future_themes_allowed, load_json_file, write_json_file
+from theme_profile import get_review_policy
 
 
 FFMPEG_BIN = r"C:\ffmpeg\bin"
@@ -18,6 +20,17 @@ ENABLE_FRAME_QA = os.getenv("SHORTFORM_VALIDATE_FRAME_QA", "1") != "0"
 FINAL_FRAME_AUDITS = os.getenv("SHORTFORM_VALIDATE_FRAME_AUDITS", "1") != "0"
 MIN_FINAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_FINAL_VISUAL_QUALITY", "0.55"))
 EDITORIAL_FACE_QA_FORMATS = {"raw_subtitled_clip", "classic_clip"}
+
+
+def package_with_effective_youtube_metadata(package):
+    package = dict(package or {})
+    youtube_package = (package.get("platforms") or {}).get("youtube_shorts") or {}
+    youtube_title = str(youtube_package.get("title") or "").strip()
+
+    if youtube_title:
+        package["title"] = youtube_title
+
+    return package
 
 
 def probe_video(path):
@@ -162,8 +175,43 @@ def validate_theme(theme):
             item_issues.append(f"short is longer than 60s ({media['duration']:.1f}s)")
 
         status = (package.get("posting_status") or {}).get("youtube_shorts", "")
-        if status not in {"ready", "failed", "uploaded"}:
+        if status not in {"ready", "failed", "uploaded", "needs_revision", "rejected"}:
             item_issues.append(f"unexpected YouTube posting status '{status}'")
+
+        gate_package = package_with_effective_youtube_metadata(package)
+        editorial_gates = evaluate_editorial_gates(theme, gate_package)
+        youtube_package = (package.get("platforms") or {}).get("youtube_shorts") or {}
+        privacy_status = str(youtube_package.get("privacy_status") or "private").lower()
+        review = package.get("review") or {}
+        content_format = package.get("content_format", "")
+
+        if status in {"ready", "uploaded"} and not editorial_gates.get("passed", True):
+            item_issues.append(f"editorial gates failed: {', '.join(editorial_gates.get('flags') or [])}")
+
+        if status in {"ready", "uploaded"} and not package.get("content_has_burned_captions"):
+            item_issues.append("ready/uploaded package is missing burned-in captions flag")
+
+        if status in {"ready", "uploaded"} and package.get("upload_ready_requires_burned_captions", True) is not True:
+            item_issues.append("ready/uploaded package does not require burned-in captions")
+
+        if status in {"ready", "uploaded"} and content_format in TRANSFORMED_CONTENT_FORMATS and not package.get("content_has_burned_captions"):
+            item_issues.append("transformed upload-ready package is missing burned-in captions")
+
+        if status in {"ready", "uploaded"} and content_format in RAW_RECYCLER_CONTENT_FORMATS and os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") != "1":
+            item_issues.append("raw recycler clip is marked upload-ready without SHORTFORM_ALLOW_RAW_CLIP_UPLOADS=1")
+
+        if status in {"ready", "uploaded"} and not package.get("editorial_gates"):
+            item_issues.append("ready/uploaded package is missing stored editorial gate result")
+
+        if status in {"ready", "uploaded"} and not str(youtube_package.get("title") or package.get("title") or "").strip():
+            item_issues.append("ready/uploaded package is missing YouTube title")
+
+        if (
+            privacy_status != "private"
+            and get_review_policy(theme).get("require_manual_approval_before_public", True)
+            and not review.get("approved")
+        ):
+            item_issues.append(f"{privacy_status} upload requires manual review approval")
 
         frame_qc = {}
         frame_issues = []
@@ -180,10 +228,12 @@ def validate_theme(theme):
             "video_file": video_file,
             "content_format": package.get("content_format", ""),
             "posting_status": status,
+            "privacy_status": privacy_status,
             "width": media["width"],
             "height": media["height"],
             "duration": round(media["duration"], 3),
             "frame_qc": frame_qc,
+            "editorial_gates": editorial_gates,
             "status": "ok" if not item_issues else "failed",
             "issues": item_issues,
         })
@@ -193,6 +243,23 @@ def validate_theme(theme):
 
 def validate_outputs(theme=None):
     themes = [theme] if theme else discover_themes()
+    active_theme_set = {clean_theme_name(theme_name) for theme_name in themes}
+    ignored_output_dirs = []
+
+    if not theme and not future_themes_allowed() and os.path.isdir(THEMES_OUTPUT_PATH):
+        ignored_output_dirs = [
+            name
+            for name in sorted(os.listdir(THEMES_OUTPUT_PATH))
+            if os.path.isdir(os.path.join(THEMES_OUTPUT_PATH, name))
+            and clean_theme_name(name) not in active_theme_set
+        ]
+
+        if ignored_output_dirs:
+            print(
+                "Ignoring inactive/future-theme output folders: "
+                f"{', '.join(ignored_output_dirs)}"
+            )
+
     total_checked = 0
     all_issues = []
     theme_reports = {}
@@ -217,6 +284,7 @@ def validate_outputs(theme=None):
     report = {
         "validated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "themes": theme_reports,
+        "ignored_inactive_output_dirs": ignored_output_dirs,
         "checked": total_checked,
         "issue_count": len(all_issues),
         "issues": all_issues,

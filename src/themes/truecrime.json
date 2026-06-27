@@ -1,15 +1,311 @@
 {
     "theme": "truecrime",
+    "profile": "truecrime",
+    "brand": {
+        "channel_name": "Criminology Archive",
+        "positioning": "Context-rich true-crime and legal interview moments with careful claim framing.",
+        "audience": "True-crime viewers who engage deeply with cases, timelines, motives, and courtroom moments.",
+        "viewer_promise": "Case context, source attribution, and careful handling of allegations.",
+        "voice": "careful case editor",
+        "risk_tolerance": "low",
+        "color_palette": [
+            "#0B0D10",
+            "#1D4ED8",
+            "#F59E0B",
+            "#7F1D1D",
+            "#D1D5DB"
+        ],
+        "creative_personality": "investigative desk, forensic, restrained, suspenseful",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/criminology_archive/criminology_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/criminology_archive/criminology_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/criminology_archive/criminology_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/criminology_archive/criminology_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@CriminologyArchive",
+        "token_file": "youtube_token_truecrime.json"
+    },
     "channels": [
-        "https://www.youtube.com/@CrimeWeeklyPodcast/videos",
+        "https://www.youtube.com/@SoftWhiteUnderbelly/videos",
+        "https://www.youtube.com/@TheEmilyDBaker/videos",
+        "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
+        "https://www.youtube.com/@djvlad/videos",
         "https://www.youtube.com/@rottenmangopod/videos",
         "https://www.youtube.com/@LawAndCrime/videos",
-        "https://www.youtube.com/@KendallRae/videos",
-        "https://www.youtube.com/@StephanieHarlowe/videos",
         "https://www.youtube.com/@CourtTV/videos",
         "https://www.youtube.com/@48hours/videos",
         "https://www.youtube.com/@DatelineNBC/videos",
+        "https://www.youtube.com/@CrimeWeeklyPodcast/videos",
+        "https://www.youtube.com/@KendallRae/videos",
+        "https://www.youtube.com/@StephanieHarlowe/videos",
         "https://www.youtube.com/@EWUCrimeStorytime/videos",
         "https://www.youtube.com/@lawandcrimetrials/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Context-rich true-crime and legal interview moments with careful claim framing.",
+        "source_strategy": "True-crime and legal channels with timestampable case details and strong review gates."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            24,
+            35,
+            45,
+            58
+        ],
+        "min_clip_duration": 20,
+        "max_clip_duration": 60,
+        "default_clip_count": 8,
+        "theme_clip_budget": 12,
+        "theme_candidates_per_video": 6,
+        "min_readiness_score": 0.72,
+        "min_selected_score": 0.32,
+        "max_topic_similarity": 0.5,
+        "candidate_stride_seconds": 5,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": false,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "case_timeline",
+            "courtroom_moment",
+            "evidence_context",
+            "investigator_insight",
+            "victim_context"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "case",
+            "court",
+            "trial",
+            "detective",
+            "evidence",
+            "timeline",
+            "motive"
+        ],
+        "negative_keywords": [],
+        "source_guard": {
+            "positive_keywords": [
+                "crime",
+                "true crime",
+                "case",
+                "court",
+                "trial",
+                "detective",
+                "evidence",
+                "murder",
+                "investigation",
+                "verdict",
+                "law",
+                "lawsuit",
+                "confession",
+                "confessional",
+                "interrogation",
+                "victim",
+                "suspect",
+                "prison",
+                "jail",
+                "undercover",
+                "cartel",
+                "gang",
+                "mafia",
+                "mob",
+                "killer",
+                "police",
+                "cop",
+                "officer",
+                "addiction",
+                "addict",
+                "homeless",
+                "survivor",
+                "trafficking",
+                "abuse",
+                "underworld"
+            ],
+            "negative_keywords": [
+                "nba",
+                "nfl",
+                "soccer",
+                "ronaldo",
+                "physics",
+                "ai",
+                "stock",
+                "market",
+                "fitness",
+                "nutrition",
+                "celebrity dating"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "softwhiteunderbelly",
+                "theemilydbaker",
+                "shawnryanshowofficial",
+                "djvlad",
+                "rottenmangopod",
+                "lawandcrime",
+                "courttv",
+                "48hours",
+                "datelinenbc",
+                "crimeweeklypodcast",
+                "kendallrae",
+                "stephanieharlowe",
+                "ewucrimestorytime",
+                "lawandcrimetrials"
+            ],
+            "negative_override_min_positive_hits": 2
+        },
+        "archetypes": [
+            "case_timeline",
+            "courtroom_moment",
+            "evidence_context",
+            "investigator_insight",
+            "victim_context"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.8,
+        "caption_style": "source_precise",
+        "framing_style": "source_identity",
+        "overlay_style": "fact_context"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Context Behind This Case Detail",
+            "This {archetype} Changes The Timeline",
+            "What {source} Said About {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#truecrime",
+            "#crime",
+            "#law",
+            "#shorts"
+        ],
+        "tags": [
+            "true crime",
+            "crime story",
+            "court",
+            "law",
+            "documentary"
+        ],
+        "topic_tags": {
+            "case": "#case",
+            "court": "#court",
+            "trial": "#trial",
+            "detective": "#detective",
+            "evidence": "#evidence",
+            "timeline": "#timeline",
+            "motive": "#motive"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": true,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "victim-identifying details",
+            "minor-involved cases",
+            "active investigations",
+            "graphic crime details",
+            "crime allegations",
+            "legal accusations",
+            "unverified confessions"
+        ],
+        "manual_review_topics": [
+            "dignity review",
+            "defamation review",
+            "exploitation review",
+            "victim context",
+            "active case context",
+            "claims about named private people",
+            "legal accusations"
+        ],
+        "minimum_transformation_score": 0.7
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.1,
+        "payoff": 0.1,
+        "standalone_context": 0.2,
+        "theme_signal": 0.12,
+        "public_popularity": 0.04,
+        "captionability": 0.06,
+        "visual_quality": 0.04,
+        "pacing": 0.04,
+        "transformation": 0.16,
+        "claim_safety": 0.14
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_label": "crime_legal_confessional",
+    "phase_one_order": 8,
+    "priority_channels": [
+        "https://www.youtube.com/@SoftWhiteUnderbelly/videos",
+        "https://www.youtube.com/@TheEmilyDBaker/videos",
+        "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
+        "https://www.youtube.com/@djvlad/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@rottenmangopod/videos",
+        "https://www.youtube.com/@LawAndCrime/videos",
+        "https://www.youtube.com/@CourtTV/videos",
+        "https://www.youtube.com/@48hours/videos",
+        "https://www.youtube.com/@DatelineNBC/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "The Shawn Ryan Show",
+            "route_to": [
+                "truecrime",
+                "politics"
+            ],
+            "when": "episode is confessional, military, geopolitics, underworld, or legal-adjacent"
+        }
     ]
 }

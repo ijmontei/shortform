@@ -73,6 +73,11 @@ def summarize_clip_review(path):
     topic_counts = {}
     visual_scores = []
     readiness_scores = []
+    theme_signal_scores = []
+    transformation_scores = []
+    reused_content_risks = []
+    analytics_feedback_adjustments = []
+    analytics_feedback_enabled = 0
     readiness_tiers = {}
     dead_frame_ratios = []
     alive_frame_rates = []
@@ -94,7 +99,11 @@ def summarize_clip_review(path):
         visual_score = render_qc.get("visual_quality_score")
         frame_path = _frame_path_for_clip(clip, render_qc)
         readiness_score = clip.get("readiness_score")
+        theme_signal_score = clip.get("theme_signal_score")
+        transformation_score = clip.get("transformation_score")
+        reused_content_risk = clip.get("reused_content_risk")
         readiness_tier = (clip.get("rank_signals") or {}).get("readiness_tier", "")
+        analytics_feedback = (clip.get("rank_signals") or {}).get("analytics_feedback_prior") or {}
         source_title = source_title or clip.get("source_title", "")
         source_video_url = source_video_url or clip.get("source_video_url", "")
 
@@ -108,6 +117,19 @@ def summarize_clip_review(path):
             readiness_scores.append(float(readiness_score or 0.0))
         else:
             readiness_missing_count += 1
+
+        if theme_signal_score is not None:
+            theme_signal_scores.append(float(theme_signal_score or 0.0))
+
+        if transformation_score is not None:
+            transformation_scores.append(float(transformation_score or 0.0))
+
+        if reused_content_risk is not None:
+            reused_content_risks.append(float(reused_content_risk or 0.0))
+
+        if analytics_feedback.get("enabled"):
+            analytics_feedback_enabled += 1
+            analytics_feedback_adjustments.append(float(analytics_feedback.get("score_adjustment") or 0.0))
 
         if readiness_tier:
             readiness_tiers[readiness_tier] = readiness_tiers.get(readiness_tier, 0) + 1
@@ -177,6 +199,23 @@ def summarize_clip_review(path):
             round(sum(readiness_scores) / len(readiness_scores), 4)
             if readiness_scores else None
         ),
+        "avg_theme_signal_score": (
+            round(sum(theme_signal_scores) / len(theme_signal_scores), 4)
+            if theme_signal_scores else None
+        ),
+        "avg_transformation_score": (
+            round(sum(transformation_scores) / len(transformation_scores), 4)
+            if transformation_scores else None
+        ),
+        "avg_reused_content_risk": (
+            round(sum(reused_content_risks) / len(reused_content_risks), 4)
+            if reused_content_risks else None
+        ),
+        "analytics_feedback_enabled_count": analytics_feedback_enabled,
+        "avg_analytics_feedback_adjustment": (
+            round(sum(analytics_feedback_adjustments) / len(analytics_feedback_adjustments), 4)
+            if analytics_feedback_adjustments else None
+        ),
         "readiness_missing_count": readiness_missing_count,
         "readiness_tiers": readiness_tiers,
         "avg_dead_frame_ratio": (
@@ -231,6 +270,8 @@ def summarize_source_dossier(path):
     readiness_distribution = payload.get("readiness_distribution") or {}
     signal_coverage = payload.get("signal_coverage") or {}
     selected_clips = payload.get("selected_clips") or []
+    editorial_decision = payload.get("editorial_decision") or {}
+    processing_metrics = payload.get("processing_metrics") or {}
     elite_count = int(readiness_distribution.get("elite") or 0)
     strong_count = int(readiness_distribution.get("strong") or 0)
     usable_count = int(readiness_distribution.get("usable") or 0)
@@ -310,6 +351,13 @@ def summarize_source_dossier(path):
         "has_public_replay_signal": has_public_replay_signal,
         "external_signal_count": external_signal_count,
         "signal_coverage": signal_coverage,
+        "editorial_decision": editorial_decision,
+        "processing_metrics": processing_metrics,
+        "candidate_window_policy": processing_metrics.get("candidate_window_policy", {}),
+        "runtime_seconds": processing_metrics.get("total_source_workflow_seconds") or processing_metrics.get("scoring_seconds"),
+        "candidate_count": processing_metrics.get("candidate_count", 0),
+        "selected_clips_per_hour_processed": processing_metrics.get("selected_clips_per_hour_processed"),
+        "slow_source_review": bool(processing_metrics.get("slow_source_review")),
         "selected_readiness_distribution": selected_tiers,
         "avg_selected_readiness": round(avg_selected_readiness, 4) if selected_readiness_scores else None,
         "elite_density": round(elite_density, 5),
@@ -363,6 +411,7 @@ def build_source_mining_index(dossier_reports):
             "elite_density": report.get("elite_density"),
             "strong_density": report.get("strong_density"),
             "recommended_batch_clip_count": report.get("batch_plan_total_recommended", 0),
+            "candidate_window_policy": report.get("candidate_window_policy", {}),
             "top_batches": report.get("batch_counts", [])[:5],
             "top_topics": report.get("topic_summary", [])[:8],
             "dossier_file": report.get("file", ""),
@@ -530,6 +579,10 @@ def build_theme_quality_report(theme):
         if visual_review_count else None
     )
     avg_readiness_score = _average_report_metric(review_reports, "avg_readiness_score")
+    avg_theme_signal_score = _average_report_metric(review_reports, "avg_theme_signal_score")
+    avg_transformation_score = _average_report_metric(review_reports, "avg_transformation_score")
+    avg_reused_content_risk = _average_report_metric(review_reports, "avg_reused_content_risk")
+    avg_analytics_feedback_adjustment = _average_report_metric(review_reports, "avg_analytics_feedback_adjustment")
     avg_dead_frame_ratio = _average_report_metric(review_reports, "avg_dead_frame_ratio")
     avg_alive_frame_rate = _average_report_metric(review_reports, "avg_alive_frame_rate")
     avg_face_presence_rate = _average_report_metric(review_reports, "avg_face_presence_rate")
@@ -565,6 +618,24 @@ def build_theme_quality_report(theme):
         tier = source_report.get("mining_tier", "unknown")
         source_mining_tiers[tier] = source_mining_tiers.get(tier, 0) + 1
 
+    slowest_sources = sorted(
+        [
+            {
+                "title": report.get("title", ""),
+                "video_url": report.get("video_url", ""),
+                "runtime_seconds": report.get("runtime_seconds"),
+                "candidate_count": report.get("candidate_count", 0),
+                "selected_clips_per_hour_processed": report.get("selected_clips_per_hour_processed"),
+                "slow_source_review": bool(report.get("slow_source_review")),
+                "file": report.get("file", ""),
+            }
+            for report in dossier_reports
+            if report.get("runtime_seconds") is not None
+        ],
+        key=lambda item: float(item.get("runtime_seconds") or 0.0),
+        reverse=True,
+    )
+
     report = {
         "theme": theme,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -577,6 +648,14 @@ def build_theme_quality_report(theme):
             "recommended_batch_clip_count": batch_total,
             "avg_visual_quality": avg_visual_quality,
             "avg_readiness_score": avg_readiness_score,
+            "avg_theme_signal_score": avg_theme_signal_score,
+            "avg_transformation_score": avg_transformation_score,
+            "avg_reused_content_risk": avg_reused_content_risk,
+            "analytics_feedback_enabled_count": sum(
+                int(report.get("analytics_feedback_enabled_count") or 0)
+                for report in review_reports
+            ),
+            "avg_analytics_feedback_adjustment": avg_analytics_feedback_adjustment,
             "readiness_missing_count": readiness_missing_count,
             "avg_dead_frame_ratio": avg_dead_frame_ratio,
             "avg_alive_frame_rate": avg_alive_frame_rate,
@@ -588,6 +667,8 @@ def build_theme_quality_report(theme):
             "avg_face_plausibility": avg_face_plausibility,
             "avg_dual_stack_frame_rate": avg_dual_stack_frame_rate,
             "source_mining_tiers": source_mining_tiers,
+            "slow_source_review_count": sum(1 for item in slowest_sources if item.get("slow_source_review")),
+            "slowest_sources": slowest_sources[:10],
             "excluded_verification_artifact_count": len(excluded_artifacts),
             "render_strategy_counts": render_strategy_counts,
             "qc_flag_counts": flag_counts,

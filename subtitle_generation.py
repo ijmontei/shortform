@@ -8,11 +8,18 @@ from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
     EXECUTED_FILE,
+    assert_theme_allowed_for_active_run,
     discover_themes,
     ensure_theme,
     load_json_file,
     mark_stage,
     write_json_file,
+)
+from editorial_gates import evaluate_editorial_gates
+from theme_profile import (
+    load_theme_profile,
+    theme_hashtags as configured_theme_hashtags,
+    theme_tags as configured_theme_tags,
 )
 
 
@@ -64,6 +71,107 @@ MAX_WORDS_PER_CAPTION = 4
 MAX_CHARS_PER_CAPTION = 24
 MAX_CAPTION_DURATION = 2.4
 MAX_WORD_GAP = 0.55
+
+CAPTION_STYLE_PROFILES = {
+    "comedy_punchline": {
+        "font_size": 82,
+        "max_words": 3,
+        "max_chars": 22,
+        "max_duration": 1.75,
+        "position_y": 1438,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H0008E0FF",
+        "secondary_highlight": "&H0038D8FF",
+        "outline": 6.2,
+        "shadow": 2.4,
+        "scale_active": 108,
+        "uppercase": True,
+    },
+    "precise_numbers": {
+        "font_size": 66,
+        "max_words": 5,
+        "max_chars": 34,
+        "max_duration": 2.5,
+        "position_y": 1404,
+        "primary": "&H00F7F2DF",
+        "highlight": "&H008AE0FF",
+        "secondary_highlight": "&H00AF8F6F",
+        "outline": 4.6,
+        "shadow": 1.7,
+        "scale_active": 103,
+        "uppercase": False,
+    },
+    "bold_sports": {
+        "font_size": 78,
+        "max_words": 4,
+        "max_chars": 26,
+        "max_duration": 2.05,
+        "position_y": 1428,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H008AE0FF",
+        "secondary_highlight": "&H00B8F4FF",
+        "outline": 5.8,
+        "shadow": 2.2,
+        "scale_active": 106,
+        "uppercase": True,
+    },
+    "calm_takeaway": {
+        "font_size": 64,
+        "max_words": 5,
+        "max_chars": 34,
+        "max_duration": 2.8,
+        "position_y": 1390,
+        "primary": "&H00F7F2DF",
+        "highlight": "&H00C2D7B7",
+        "secondary_highlight": "&H00FFE08A",
+        "outline": 4.4,
+        "shadow": 1.4,
+        "scale_active": 102,
+        "uppercase": False,
+    },
+    "technical_clean": {
+        "font_size": 62,
+        "max_words": 5,
+        "max_chars": 34,
+        "max_duration": 2.7,
+        "position_y": 1384,
+        "primary": "&H00F7F2DF",
+        "highlight": "&H00AF8F6F",
+        "secondary_highlight": "&H008AE0FF",
+        "outline": 4.3,
+        "shadow": 1.5,
+        "scale_active": 102,
+        "uppercase": False,
+    },
+    "source_precise": {
+        "font_size": 60,
+        "max_words": 5,
+        "max_chars": 32,
+        "max_duration": 2.65,
+        "position_y": 1378,
+        "primary": "&H00F7F2DF",
+        "highlight": "&H008AE0FF",
+        "secondary_highlight": "&H00FFE08A",
+        "outline": 4.6,
+        "shadow": 1.5,
+        "scale_active": 102,
+        "uppercase": False,
+    },
+    "clean_emphasis": {
+        "font_size": 70,
+        "max_words": 4,
+        "max_chars": 26,
+        "max_duration": 2.4,
+        "position_y": 1418,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H0038D8FF",
+        "secondary_highlight": "&H004EEBFF",
+        "outline": 5.2,
+        "shadow": 2.0,
+        "scale_active": 104,
+        "uppercase": True,
+    },
+}
 
 IMPACT_WORDS = {
     "ai", "money", "debt", "credit", "loan", "loans", "default", "defaults",
@@ -198,6 +306,41 @@ def escape_ass_text(text):
     return text.strip()
 
 
+def active_caption_profile(clip_metadata=None):
+    clip_metadata = clip_metadata or {}
+    theme_profile = load_theme_profile(CURRENT_THEME or DEFAULT_THEME)
+    packaging = theme_profile.get("packaging") or {}
+    caption_style = (
+        clip_metadata.get("caption_style")
+        or (clip_metadata.get("rank_signals") or {}).get("caption_style")
+        or packaging.get("caption_style")
+        or "clean_emphasis"
+    )
+    profile = dict(CAPTION_STYLE_PROFILES.get(caption_style) or CAPTION_STYLE_PROFILES["clean_emphasis"])
+    profile["name"] = caption_style
+    return profile
+
+
+def caption_impact_words(clip_metadata=None):
+    clip_metadata = clip_metadata or {}
+    theme_profile = load_theme_profile(CURRENT_THEME or DEFAULT_THEME)
+    metadata_style = theme_profile.get("metadata_style") or {}
+    topic_tags = metadata_style.get("topic_tags") or {}
+    terms = set(IMPACT_WORDS)
+
+    for value in list(topic_tags.keys()) + (clip_metadata.get("topic_fingerprint") or []):
+        for word in words_from_text(value):
+            terms.add(word)
+
+    rank_signals = clip_metadata.get("rank_signals") or {}
+
+    for key in ["theme_archetype", "recommended_intro_mode"]:
+        for word in words_from_text(rank_signals.get(key, "")):
+            terms.add(word)
+
+    return terms
+
+
 def ffmpeg_filter_path(path):
     normalized = os.path.abspath(path).replace("\\", "/")
     return normalized.replace(":", "\\:").replace("'", "\\'")
@@ -275,9 +418,13 @@ def transcribe_words(model, video_path):
     return words
 
 
-def split_caption_lines(words):
+def split_caption_lines(words, profile=None):
+    profile = profile or CAPTION_STYLE_PROFILES["clean_emphasis"]
     lines = []
     current = []
+    max_words = int(profile.get("max_words") or MAX_WORDS_PER_CAPTION)
+    max_chars = int(profile.get("max_chars") or MAX_CHARS_PER_CAPTION)
+    max_duration = float(profile.get("max_duration") or MAX_CAPTION_DURATION)
 
     for word in words:
         if current:
@@ -286,9 +433,9 @@ def split_caption_lines(words):
             gap = word["start"] - current[-1]["end"]
 
             should_split = (
-                len(current) >= MAX_WORDS_PER_CAPTION
-                or len(current_text) > MAX_CHARS_PER_CAPTION
-                or current_duration > MAX_CAPTION_DURATION
+                len(current) >= max_words
+                or len(current_text) > max_chars
+                or current_duration > max_duration
                 or gap > MAX_WORD_GAP
             )
 
@@ -304,30 +451,49 @@ def split_caption_lines(words):
     return lines
 
 
-def style_word_for_ass(word, rel_start_ms, rel_end_ms):
+def style_word_for_ass(word, rel_start_ms, rel_end_ms, profile=None, impact_words=None):
+    profile = profile or CAPTION_STYLE_PROFILES["clean_emphasis"]
+    impact_words = impact_words or IMPACT_WORDS
     cleaned = escape_ass_text(word)
 
     if not cleaned:
         return ""
 
     plain = re.sub(r"[^a-zA-Z0-9]", "", cleaned).lower()
+    rendered_word = cleaned.upper() if profile.get("uppercase", True) else cleaned
     rel_start_ms = max(0, int(rel_start_ms))
     rel_end_ms = max(rel_start_ms + 70, int(rel_end_ms))
     active_mid_ms = rel_start_ms + max(35, int((rel_end_ms - rel_start_ms) * 0.45))
-    highlight_color = "&H0038D8FF" if plain in IMPACT_WORDS or re.search(r"\d", cleaned) else "&H004EEBFF"
+    highlight_color = (
+        profile.get("highlight")
+        if plain in impact_words or re.search(r"\d", cleaned)
+        else profile.get("secondary_highlight", profile.get("highlight"))
+    )
+    primary = profile.get("primary", "&H00FFFFFF")
+    outline = float(profile.get("outline", 5.2))
+    shadow = float(profile.get("shadow", 2.0))
+    scale_active = int(profile.get("scale_active", 104))
     active_style = (
         f"\\t({rel_start_ms},{active_mid_ms},"
-        f"\\c{highlight_color}\\fscx104\\fscy104\\bord5.8\\shad2.5)"
+        f"\\c{highlight_color}\\fscx{scale_active}\\fscy{scale_active}\\bord{outline + 0.5:.1f}\\shad{shadow + 0.4:.1f})"
         f"\\t({active_mid_ms},{rel_end_ms},"
-        "\\fscx100\\fscy100\\bord5.2\\shad2.0)"
-        f"\\t({rel_end_ms},{rel_end_ms + 80},\\c&H00FFFFFF)"
+        f"\\fscx100\\fscy100\\bord{outline:.1f}\\shad{shadow:.1f})"
+        f"\\t({rel_end_ms},{rel_end_ms + 80},\\c{primary})"
     )
 
-    return f"{{\\c&H00FFFFFF\\fscx100\\fscy100\\bord5.2\\shad2.0{active_style}}}{cleaned.upper()}"
+    return f"{{\\c{primary}\\fscx100\\fscy100\\bord{outline:.1f}\\shad{shadow:.1f}{active_style}}}{rendered_word}"
 
 
-def build_ass_subtitles(words, ass_path):
-    lines = split_caption_lines(words)
+def build_ass_subtitles(words, ass_path, clip_metadata=None):
+    profile = active_caption_profile(clip_metadata)
+    impact_words = caption_impact_words(clip_metadata)
+    lines = split_caption_lines(words, profile=profile)
+    font_size = int(profile.get("font_size", 70))
+    primary = profile.get("primary", "&H00FFFFFF")
+    highlight = profile.get("highlight", "&H0038D8FF")
+    outline = float(profile.get("outline", 5.2))
+    shadow = float(profile.get("shadow", 2.0))
+    position_y = int(profile.get("position_y", 1418))
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -337,7 +503,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,{CAPTION_FONT_FAMILY},74,&H0038D8FF,&H00FFFFFF,&H00000000,&HAA000000,-1,0,0,0,100,100,0.4,0,1,5.2,2,2,80,80,330,1
+Style: Caption,{CAPTION_FONT_FAMILY},{font_size},{primary},{highlight},&H00000000,&HAA000000,-1,0,0,0,100,100,0.4,0,1,{outline:.1f},{shadow:.1f},2,80,80,330,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -357,6 +523,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 word["word"],
                 rel_start_ms,
                 rel_end_ms,
+                profile=profile,
+                impact_words=impact_words,
             ))
 
         text = " ".join(part for part in line_parts if part)
@@ -364,7 +532,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not text:
             continue
 
-        text = "{\\an2\\pos(540,1455)\\fad(70,70)}" + text
+        text = f"{{\\an2\\pos(540,{position_y})\\fad(70,70)}}" + text
         events.append(
             "Dialogue: 0,"
             f"{format_ass_time(line_start)},"
@@ -562,11 +730,14 @@ def source_is_executed(source_state_key):
 def build_social_package(clip_path, output_path, words, clip_metadata):
     basename = os.path.splitext(os.path.basename(output_path))[0]
     transcript = " ".join(word["word"] for word in words)
+    rank_signals = clip_metadata.get("rank_signals") or {}
+    experiment = clip_metadata.get("experiment") or {}
+    render_qc = clip_metadata.get("render_qc") or {}
     title = clip_metadata.get("suggested_title") or basename.replace("_upload", "").replace("_", " ")
     title = compact_text(title, 95)
     caption = clip_metadata.get("suggested_caption") or title
     caption = compact_text(caption, 160)
-    theme_hashtags = THEME_HASHTAGS.get(CURRENT_THEME, ["#podcast", "#shorts"])
+    theme_hashtags = configured_theme_hashtags(CURRENT_THEME) or THEME_HASHTAGS.get(CURRENT_THEME, ["#podcast", "#shorts"])
     hashtags = unique_sequence((clip_metadata.get("hashtags") or []) + theme_hashtags)[:8]
     description = (
         clip_metadata.get("suggested_description")
@@ -574,7 +745,7 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
     )
     description = compact_text(description, 280)
     plain_hashtag_tags = [tag.lstrip("#") for tag in hashtags if tag.strip("#")]
-    algorithm_tags = THEME_ALGORITHM_TAGS.get(CURRENT_THEME, [])
+    algorithm_tags = configured_theme_tags(CURRENT_THEME) or THEME_ALGORITHM_TAGS.get(CURRENT_THEME, [])
     transcript_tags = extract_keyword_tags(
         " ".join([
             transcript,
@@ -587,14 +758,26 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
     high_level_tags = ["shorts", "podcast", "interview", "viral", CURRENT_THEME.replace("_", " ")]
     all_tags = unique_sequence(algorithm_tags + plain_hashtag_tags + transcript_tags + high_level_tags)[:20]
     platform_caption = build_platform_caption(title, caption, description, hashtags)
+    caption_style = active_caption_profile(clip_metadata).get("name", "clean_emphasis")
 
     package = {
         "theme": CURRENT_THEME,
+        "content_format": "raw_subtitled_clip",
+        "content_has_burned_captions": True,
+        "upload_ready_requires_burned_captions": True,
+        "caption_style": caption_style,
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(clip_path),
         "source_state_key": clip_metadata.get("source_state_key", ""),
         "source_video_url": clip_metadata.get("source_video_url", ""),
+        "source_channel": clip_metadata.get("source_channel", ""),
         "source_title": clip_metadata.get("source_title", ""),
+        "source_tier": clip_metadata.get("source_tier", rank_signals.get("source_tier", "")),
+        "routing_status": clip_metadata.get("routing_status", rank_signals.get("routing_status", "")),
+        "origin_theme": clip_metadata.get("origin_theme", rank_signals.get("origin_theme", "")),
+        "routed_from_theme": clip_metadata.get("routed_from_theme", rank_signals.get("routed_from_theme", "")),
+        "clip_start_time": clip_metadata.get("start_time"),
+        "clip_end_time": clip_metadata.get("end_time"),
         "title": title,
         "caption": caption,
         "hashtags": hashtags,
@@ -603,6 +786,17 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
         "transcript_excerpt": transcript[:500],
         "hook_reason": clip_metadata.get("hook_reason", ""),
         "score": clip_metadata.get("score"),
+        "readiness_score": clip_metadata.get("readiness_score") or rank_signals.get("readiness_score"),
+        "rank_signals": rank_signals,
+        "experiment": experiment,
+        "render_qc": render_qc,
+        "content_signal": {
+            "type": "selected_clip",
+            "theme_archetype": rank_signals.get("theme_archetype", ""),
+            "recommended_intro_mode": rank_signals.get("recommended_intro_mode", ""),
+            "popularity_source": rank_signals.get("popularity_source", ""),
+            "popularity_score": rank_signals.get("popularity_score", 0),
+        },
         "review": {
             "quality_rating": "",
             "approved": False,
@@ -639,6 +833,7 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
             "facebook_reels": {"posted": False, "views": 0, "likes": 0, "comments": 0, "shares": 0},
         },
     }
+    package["editorial_gates"] = evaluate_editorial_gates(CURRENT_THEME, package)
 
     return package
 
@@ -766,19 +961,20 @@ def process_clip(model, clip_path):
     ass_path = os.path.join(SUBTITLE_TEMP_PATH, f"{clean_filename(basename)}.ass")
 
     print(f"Subtitling: {os.path.basename(clip_path)}")
+    metadata_index = load_clip_metadata_index()
+    clip_metadata = metadata_index.get(os.path.basename(clip_path), {})
     words = transcribe_words(model, clip_path)
 
     if not words:
         raise RuntimeError(f"No subtitle words were detected for {clip_path}")
 
-    event_count = build_ass_subtitles(words, ass_path)
+    event_count = build_ass_subtitles(words, ass_path, clip_metadata=clip_metadata)
     burn_subtitles(clip_path, ass_path, output_path)
-    metadata_index = load_clip_metadata_index()
     package = build_social_package(
         clip_path=clip_path,
         output_path=output_path,
         words=words,
-        clip_metadata=metadata_index.get(os.path.basename(clip_path), {}),
+        clip_metadata=clip_metadata,
     )
     metadata_file = write_social_package(output_path, package)
     finalize_source_if_complete(source_prefix, package)
@@ -806,6 +1002,7 @@ def run_subtitle_generation(limit=None, theme=None):
 
 
 def run_subtitle_generation_for_theme(limit=None, theme=DEFAULT_THEME):
+    theme = assert_theme_allowed_for_active_run(theme)
     configure_theme(theme)
     run_start = time.time()
     clip_files = get_video_files()
