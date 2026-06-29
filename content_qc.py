@@ -31,6 +31,7 @@ REPORT_DIR = os.path.join(BASE_DIR, "logs", "content_qc")
 CONTACT_DIR = os.path.join(REPORT_DIR, "contact_sheets")
 LATEST_JSON = os.path.join(REPORT_DIR, "content_qc_latest.json")
 LATEST_MD = os.path.join(REPORT_DIR, "content_qc_latest.md")
+_CLIP_REVIEW_INDEX = None
 
 GENERIC_TITLE_PHRASES = {
     "most popular moment",
@@ -186,6 +187,54 @@ def classify_asset(path):
     return "other"
 
 
+def normalized_path_key(path):
+    return os.path.normcase(os.path.abspath(str(path or "")))
+
+
+def clip_review_index():
+    global _CLIP_REVIEW_INDEX
+
+    if _CLIP_REVIEW_INDEX is not None:
+        return _CLIP_REVIEW_INDEX
+
+    index = {}
+    root = os.path.join(BASE_DIR, "output", "temp")
+
+    if not os.path.isdir(root):
+        _CLIP_REVIEW_INDEX = index
+        return index
+
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if not filename.endswith("_clip_review.json"):
+                continue
+
+            payload = load_json_file(os.path.join(dirpath, filename), {})
+
+            for section in ("selected", "top_candidates", "candidate_inventory"):
+                for clip in payload.get(section) or []:
+                    if not isinstance(clip, dict):
+                        continue
+
+                    output_file = clip.get("output_file", "")
+
+                    if not output_file:
+                        continue
+
+                    index[normalized_path_key(output_file)] = {
+                        "review_file": os.path.join(dirpath, filename),
+                        "review_section": section,
+                        "suggested_title": clip.get("suggested_title", ""),
+                        "readiness_score": clip.get("readiness_score"),
+                        "score": clip.get("score"),
+                        "render_qc": clip.get("render_qc") or {},
+                        "source_title": clip.get("source_title", ""),
+                    }
+
+    _CLIP_REVIEW_INDEX = index
+    return index
+
+
 def discover_assets(themes=None, asset_types=None):
     selected = {clean_theme_name(theme) for theme in themes or []}
     selected_asset_types = set(asset_types or [])
@@ -223,6 +272,7 @@ def discover_assets(themes=None, asset_types=None):
                     "theme": theme,
                     "asset_type": asset_type,
                     "filename": filename,
+                    "clip_review": clip_review_index().get(normalized_path_key(path), {}),
                 })
 
     return sorted(assets, key=lambda item: (item["theme"], item["asset_type"], item["filename"]))
@@ -1268,13 +1318,40 @@ def analyze_asset(asset, interval_seconds=2.0, max_frames=36):
         audio_qc = {"skipped": True, "reason": "countdown intro visual has no standalone audio", "flags": []}
     else:
         audio_qc = {"flags": ["missing audio stream"]}
-    flags = sorted(set(frame_qc.get("flags", []) + audio_qc.get("flags", [])))
+    audio_advisory_flags = []
+
+    if asset["asset_type"] in {"raw_clip", "captioned_source"}:
+        source_audio_flags = []
+
+        for flag in audio_qc.get("flags", []):
+            if flag == "audio starts abruptly at frame zero":
+                audio_advisory_flags.append("source audio starts at frame zero; final intro mix is checked on upload package")
+            else:
+                source_audio_flags.append(flag)
+
+        audio_qc = {
+            **audio_qc,
+            "flags": source_audio_flags,
+            "advisory_flags": sorted(set(audio_advisory_flags)),
+        }
+
+    clip_review = asset.get("clip_review") or {}
+    core_render_qc = clip_review.get("render_qc") or {}
+    core_flags = []
+
+    if core_render_qc and not core_render_qc.get("passed", True):
+        core_flags.append("core renderer rejected source clip")
+
+    flags = sorted(set(frame_qc.get("flags", []) + audio_qc.get("flags", []) + core_flags))
     return {
         **asset,
         "media": media,
         "contact_sheet": contact_sheet,
         "frame_qc": frame_qc,
         "audio_qc": audio_qc,
+        "core_render_qc": core_render_qc,
+        "core_render_review_file": clip_review.get("review_file", ""),
+        "core_render_review_section": clip_review.get("review_section", ""),
         "flags": flags,
     }
 
