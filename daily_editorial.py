@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import argparse
 import re
 import subprocess
 import struct
@@ -27,7 +28,7 @@ except ImportError:
 
 import ytdlp_auth
 from editorial_gates import evaluate_editorial_gates
-from metadata_generation import score_title_quality
+from metadata_generation import score_title_quality, title_passes_publishable_bar
 from theme_config import BASE_DIR, DEFAULT_THEME, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, utc_timestamp, write_json_file
 from theme_profile import load_theme_profile, theme_hashtags, theme_tags
 from popularity_signals import (
@@ -61,7 +62,7 @@ ALLOW_WINDOWS_TTS_FALLBACK = os.getenv("SHORTFORM_ALLOW_WINDOWS_TTS_FALLBACK", "
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", os.getenv("SHORTFORM_ELEVENLABS_API_KEY", "")).strip()
 ELEVENLABS_VOICE_ID = os.getenv(
     "ELEVENLABS_VOICE_ID",
-    os.getenv("SHORTFORM_ELEVENLABS_VOICE_ID", "hnhZe040y4V3QPXXZVDO"),
+    os.getenv("SHORTFORM_ELEVENLABS_VOICE_ID", "HAM2nE4sbHnPgMji6JqB"),
 ).strip()
 ELEVENLABS_FALLBACK_VOICE_IDS = [
     voice_id.strip()
@@ -70,18 +71,20 @@ ELEVENLABS_FALLBACK_VOICE_IDS = [
 ]
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_v3").strip()
 ELEVENLABS_OUTPUT_FORMAT = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_192").strip()
-ELEVENLABS_STABILITY = float(os.getenv("ELEVENLABS_STABILITY", "0.22"))
-ELEVENLABS_SIMILARITY_BOOST = float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.96"))
-ELEVENLABS_STYLE = float(os.getenv("ELEVENLABS_STYLE", "0.88"))
+ELEVENLABS_STABILITY = float(os.getenv("ELEVENLABS_STABILITY", "0.16"))
+ELEVENLABS_SIMILARITY_BOOST = float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.94"))
+ELEVENLABS_STYLE = float(os.getenv("ELEVENLABS_STYLE", "0.98"))
 ELEVENLABS_SPEAKER_BOOST = os.getenv("ELEVENLABS_SPEAKER_BOOST", "1") != "0"
-NARRATION_PITCH = float(os.getenv("SHORTFORM_NARRATION_PITCH", "1.0"))
-NARRATION_BASS_GAIN = float(os.getenv("SHORTFORM_NARRATION_BASS_GAIN", "0.0"))
+NARRATION_PITCH = float(os.getenv("SHORTFORM_NARRATION_PITCH", "0.92"))
+NARRATION_BASS_GAIN = float(os.getenv("SHORTFORM_NARRATION_BASS_GAIN", "3.0"))
 NARRATION_LOUDNESS_I = float(os.getenv("SHORTFORM_NARRATION_LOUDNESS_I", "-16.0"))
-NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "4.45"))
+NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "3.55"))
+NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_IN_SECONDS", "0.20")))
+NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
-EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.0"))
-EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "5.0"))
+EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
+EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
 EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SECONDS", "58.0"))
 EDITORIAL_TRANSITION_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TRANSITION_SECONDS", "0.45"))
 EDITORIAL_RANK_CARD_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_RANK_CARD_SECONDS", "0.0"))
@@ -90,7 +93,20 @@ EDITORIAL_BURN_SOURCE_CAPTIONS = os.getenv("SHORTFORM_EDITORIAL_BURN_SOURCE_CAPT
 EDITORIAL_PERIOD_LABEL = os.getenv("SHORTFORM_EDITORIAL_PERIOD_LABEL", "this week").strip() or "this week"
 EDITORIAL_BOARD_SOURCE_LIMIT = max(5, int(os.getenv("SHORTFORM_EDITORIAL_BOARD_SOURCE_LIMIT", "12")))
 EDITORIAL_HARD_REJECT_BAD_OUTPUTS = os.getenv("SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS", "1") != "0"
-MIN_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY", "0.55"))
+MIN_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY", "0.60"))
+STRICT_EDITORIAL_FACE_GATES = os.getenv("SHORTFORM_STRICT_EDITORIAL_FACE_GATES", "1") != "0"
+MIN_EDITORIAL_SOURCE_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_EDITORIAL_SOURCE_FACE_PRESENCE", "0.42"))
+MAX_EDITORIAL_SOURCE_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_NO_FACE_RUN", "0.30"))
+MAX_EDITORIAL_SOURCE_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_ALIVE_NO_FACE", "0.36"))
+MAX_EDITORIAL_SOURCE_CENTER_OFFSET = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_CENTER_OFFSET", "0.30"))
+MAX_EDITORIAL_SOURCE_MAX_CENTER_OFFSET = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_MAX_CENTER_OFFSET", "0.58"))
+MIN_EDITORIAL_SOURCE_FACE_PLAUSIBILITY = float(os.getenv("SHORTFORM_MIN_EDITORIAL_SOURCE_FACE_PLAUSIBILITY", "0.37"))
+MIN_EDITORIAL_OUTPUT_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_EDITORIAL_OUTPUT_FACE_PRESENCE", "0.46"))
+MAX_EDITORIAL_OUTPUT_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OUTPUT_NO_FACE_RUN", "0.24"))
+MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE", "0.40"))
+YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
+if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
+    YOUTUBE_PRIVACY_STATUS = "public"
 RENDER_POPULAR_SEGMENT_SHORTS = os.getenv("SHORTFORM_RENDER_POPULAR_SEGMENTS", "1") != "0"
 POPULAR_SEGMENTS_PER_THEME = max(0, int(os.getenv("SHORTFORM_POPULAR_SEGMENTS_PER_THEME", "0")))
 POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "0") != "0"
@@ -131,6 +147,65 @@ STYLE_ADJECTIVES = [
     "sharpest",
     "most uncomfortable",
 ]
+THEME_STYLE_ADJECTIVES = {
+    "comedy": [
+        "funniest", "wildest", "strangest", "most unexpected", "sharpest",
+        "most uncomfortable", "most surprising", "most debated", "most revealing",
+        "coolest", "most underrated", "most chaotic", "best timed", "boldest",
+        "most awkward", "biggest", "most quotable", "most savage", "most unfiltered",
+        "most replayable",
+    ],
+    "finance": [
+        "sharpest", "most important", "most revealing", "most useful", "most practical",
+        "most overlooked", "smartest", "most debated", "most surprising", "biggest",
+        "most urgent", "most actionable", "most contrarian", "most data-backed",
+        "most tactical", "riskiest", "most timely", "clearest", "most expensive",
+        "most misunderstood",
+    ],
+    "sports": [
+        "most heated", "most debated", "biggest", "sharpest", "wildest",
+        "most surprising", "most clutch", "most controversial", "most underrated",
+        "most revealing", "most important", "boldest", "most replayable",
+        "most competitive", "most tactical", "most unexpected", "most intense",
+        "coolest", "most uncomfortable", "best",
+    ],
+    "technology_ai": [
+        "sharpest", "most useful", "most surprising", "most important",
+        "most practical", "smartest", "most revealing", "most overlooked",
+        "biggest", "most debated", "most tactical", "most actionable",
+        "most technical", "most futuristic", "most misunderstood", "clearest",
+        "most urgent", "most controversial", "most unexpected", "most data-backed",
+    ],
+    "health_fitness": [
+        "most useful", "most practical", "most important", "most surprising",
+        "most overlooked", "clearest", "smartest", "most actionable",
+        "most revealing", "most debated", "biggest", "most misunderstood",
+        "most urgent", "most evidence-backed", "most tactical", "most relatable",
+        "most unexpected", "sharpest", "most uncomfortable", "most grounded",
+    ],
+    "politics": [
+        "most important", "most revealing", "most debated", "sharpest",
+        "most consequential", "most overlooked", "most controversial",
+        "most urgent", "most surprising", "clearest", "biggest",
+        "most tactical", "most uncomfortable", "most misunderstood",
+        "most timely", "most concrete", "most detailed", "most disputed",
+        "most clarifying", "most serious",
+    ],
+    "popculture": [
+        "wildest", "most surprising", "most revealing", "most debated",
+        "funniest", "strangest", "biggest", "most unexpected", "sharpest",
+        "most awkward", "most quotable", "most replayable", "coolest",
+        "most uncomfortable", "most underrated", "most unfiltered", "boldest",
+        "most interesting", "most viral", "best",
+    ],
+    "truecrime": [
+        "most revealing", "most important", "most disturbing", "most overlooked",
+        "sharpest", "most consequential", "most detailed", "most disputed",
+        "most unexpected", "most clarifying", "most serious", "most unsettling",
+        "most crucial", "most misunderstood", "most documented", "most urgent",
+        "most concrete", "most credible", "most confusing", "biggest",
+    ],
+}
 ADJECTIVE_ROTATION_FILE = os.path.join(BASE_DIR, "src", "adjective_rotation.json")
 
 THEME_TAGS = {
@@ -184,6 +259,58 @@ STOPWORDS = {
     "podcast", "episode", "shorts", "short", "video", "clip", "clips",
 }
 
+WEAK_TOPIC_WORDS = STOPWORDS | {
+    "actually", "almost", "always", "anything", "basically", "better", "came",
+    "coming", "didnt", "doesnt", "dont", "everything", "felt", "gonna",
+    "guess", "happen", "happened", "having", "heard", "kinda", "kind",
+    "little", "maybe", "mean", "means", "messy", "might", "much", "never",
+    "normally", "okay", "pretty", "probably", "said", "saying", "somebody",
+    "someone", "something", "sorry", "sort", "stuff", "talk", "talking",
+    "thought", "totally", "whatever", "whats", "whole", "youve", "spelled",
+    "army", "gut", "educate", "level", "yourself", "there", "really",
+    "bluchu", "called", "especially", "absolutely", "around", "here",
+    "hiding", "quick", "silently", "inside", "context", "behind",
+    "detail", "standout", "moment", "problem",
+    "group", "lesson", "rule", "number", "true", "many", "hours", "days",
+    "year", "years", "attorney", "phone", "college", "budget", "network",
+    "enterprise", "thinking", "scary", "crazy", "sense", "times",
+}
+
+GENERIC_TOPIC_PHRASES = {
+    "clean explanation",
+    "heated exchange",
+    "player comparison",
+    "business breakdown",
+    "health mistake",
+    "case detail",
+    "celebrity moment",
+    "says everything",
+    "got personal",
+    "investors should understand",
+    "silently wrecking",
+    "ai problem behind",
+    "context behind",
+    "standout moment",
+    "locker room story",
+}
+
+MOJIBAKE_REPLACEMENTS = {
+    "вЂ™": "'",
+    "вЂ": "'",
+    "вЂњ": '"',
+    "вЂќ": '"',
+    "вЂ¦": "...",
+    "вЂ\"": "-",
+    "РІР‚в„ў": "'",
+    "РІР‚В": "'",
+    "РІР‚Сљ": '"',
+    "РІР‚Сњ": '"',
+    "РІР‚вЂњ": "-",
+    "РІР‚вЂќ": "-",
+    "РІР‚В¦": "...",
+    "Г‚": "",
+}
+
 
 def run_subprocess(cmd, label):
     result = subprocess.run(
@@ -213,6 +340,762 @@ def compact_text(text, max_length):
         return text
 
     return text[: max(0, max_length - 1)].rstrip(" ,.;:-") + "..."
+
+
+def clean_viewer_text(text):
+    cleaned = str(text or "")
+
+    for bad, replacement in MOJIBAKE_REPLACEMENTS.items():
+        cleaned = cleaned.replace(bad, replacement)
+
+    cleaned = cleaned.replace("\u2018", "'").replace("\u2019", "'")
+    cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"')
+    cleaned = cleaned.replace("\u2026", "...")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:|._")
+    return fix_topic_case(cleaned)
+
+
+SPECIAL_TOPIC_CASE = {
+    "ai": "AI",
+    "ipo": "IPO",
+    "nyc": "NYC",
+    "nfl": "NFL",
+    "nba": "NBA",
+    "ufc": "UFC",
+    "spacex": "SpaceX",
+    "openai": "OpenAI",
+    "nvidia": "NVIDIA",
+    "palantir": "Palantir",
+}
+
+
+def fix_topic_case(text):
+    cleaned = str(text or "")
+
+    for lower, replacement in SPECIAL_TOPIC_CASE.items():
+        cleaned = re.sub(rf"\b{re.escape(lower)}\b", replacement, cleaned, flags=re.I)
+
+    return cleaned
+
+
+def title_words(text):
+    return re.findall(r"[a-zA-Z][a-zA-Z0-9']{1,}|\b\d+[\d,.]*%?\b", str(text or ""))
+
+
+def looks_like_raw_dialogue_topic(text):
+    cleaned = clean_viewer_text(text)
+    lowered = cleaned.lower()
+    words = [word.lower().strip("'") for word in title_words(cleaned)]
+
+    if not cleaned or len(words) < 3:
+        return True
+
+    if any(phrase in lowered for phrase in GENERIC_TOPIC_PHRASES):
+        return True
+
+    if cleaned.endswith("?"):
+        question_start = words[0] if words else ""
+
+        if question_start not in {"why", "how"}:
+            return True
+
+        if {"you", "yourself", "we", "they", "i"} & set(words):
+            return True
+
+    weak_starts = {
+        "i", "you", "we", "they", "he", "she", "it", "that", "this", "so",
+        "and", "but", "then", "more", "sorry", "okay", "yeah", "or", "do",
+        "can",
+    }
+    first_word = words[0] if words else ""
+
+    if first_word in weak_starts and not re.search(r"\b(why|how|what|market|case|policy|story|joke|team|ai)\b", lowered):
+        return True
+
+    pronoun_count = sum(1 for word in words if word in {"i", "you", "we", "they", "he", "she", "it"})
+    filler_hits = sum(
+        1
+        for phrase in ["kind of", "sort of", "you know", "i mean", "i think", "what do you think", "thats kind"]
+        if phrase in lowered
+    )
+
+    if pronoun_count >= 3 or filler_hits >= 1:
+        return True
+
+    if re.search(r"\b(i|you|we|they|he|she)\s+(said|thought|think|mean|guess|dont|didnt)\b", lowered):
+        return True
+
+    meaningful = [
+        word
+        for word in words
+        if word not in WEAK_TOPIC_WORDS and len(word) >= 4
+    ]
+    return len(meaningful) < 2
+
+
+def short_topic_phrase_ok(text):
+    cleaned = clean_viewer_text(text)
+    lowered = cleaned.lower()
+    words = [word.lower().strip("'") for word in title_words(cleaned)]
+
+    if not cleaned or any(phrase in lowered for phrase in GENERIC_TOPIC_PHRASES):
+        return False
+
+    if lowered in SPECIAL_TOPIC_CASE:
+        return True
+
+    if any(phrase in lowered for phrase in ["cash flow", "interest rates", "mortgage rates", "space x"]):
+        return True
+
+    if any(word in {"i", "you", "we", "they", "he", "she", "it"} for word in words):
+        return False
+
+    meaningful = [
+        word
+        for word in words
+        if word not in WEAK_TOPIC_WORDS and len(word) >= 4
+    ]
+    return 1 <= len(meaningful) <= 4 and len(words) <= 5
+
+
+def source_subject_from_title(source_title):
+    source_title = clean_viewer_text(source_title)
+    first_chunk = re.split(r"\s+\|\s+|\s+-\s+|:", source_title, maxsplit=1)[0]
+    first_chunk = re.sub(r"\b(ep|episode|podcast|interview|show)\b\.?\s*#?\d*", " ", first_chunk, flags=re.I)
+    first_chunk = re.sub(r"\s+", " ", first_chunk).strip(" -:|._")
+    words = title_words(first_chunk)
+
+    if 1 <= len(words) <= 5 and len(first_chunk) <= 44:
+        return first_chunk
+
+    return ""
+
+
+SOURCE_TITLE_SHOW_WORDS = {
+    "daybreak", "weekend", "edition", "podcast", "show", "interview",
+    "episode", "bonus", "clips", "clip", "archive", "bloomberg",
+}
+
+
+def source_title_topic(source_title, theme="", limit=7):
+    cleaned = clean_viewer_text(source_title)
+    lower = cleaned.lower()
+
+    if theme == "finance" and "us jobs" in lower and "vietnam eco" in lower:
+        return "US Jobs And Vietnam Economy"
+
+    if theme == "finance" and "new strikes on iran" in lower:
+        return "Iran Strikes And Fed Policy"
+
+    if theme == "finance" and "socialists sweep nyc" in lower:
+        return "NYC Socialists And AI Market Signals"
+
+    if theme == "health_fitness" and "fertility" in lower and "wrecking" in lower:
+        return "Fertility Habits Most People Miss"
+
+    if theme == "health_fitness" and "ben askren" in lower and "brink" in lower:
+        return "Ben Askren's Recovery After The Brink"
+
+    if theme == "health_fitness" and "muscle building exercises" in lower:
+        return "Muscle-Building Exercises People Skip"
+
+    if theme == "health_fitness" and {"depression", "fatigue", "trauma"} <= set(title_words(lower)):
+        return "Depression, Fatigue And Childhood Trauma"
+
+    if theme == "sports" and "rams expectation" in lower:
+        return "The Rams Super Bowl Debate"
+
+    if theme == "sports" and "champ bailey" in lower and "qbs stopped throwing" in lower:
+        return "Why QBs Stopped Testing Champ Bailey"
+
+    if theme == "sports" and "dustin poirier" in lower and "arrest" in lower:
+        return "Dustin Poirier's Plea After Arrest"
+
+    if theme == "sports" and "college locker room" in lower and "shoe collection" in lower:
+        return "Coen Carr's Locker Room Shoe Collection"
+
+    if theme == "technology_ai" and "pre-training" in lower:
+        return "Why Pre-Training Isn't Dead"
+
+    if theme == "technology_ai" and "india's moment" in lower and "global companies" in lower:
+        return "India's Startup Founder Wave"
+
+    if theme == "technology_ai" and "after coding is solved" in lower:
+        return "What Happens After Coding Is Solved"
+
+    if theme == "technology_ai" and "zynga founder" in lower:
+        return "Why Consumer Startups Still Matter"
+
+    if theme == "politics" and "social media advisor" in lower:
+        return "Trump's Social Media Advisor"
+
+    if theme == "politics" and "top admiral" in lower and "troops" in lower:
+        return "Trump's Military Order Controversy"
+
+    if theme == "politics" and "rose garden dinner" in lower and "farmers" in lower:
+        return "Trump's Farm Relief Dinner"
+
+    if theme == "politics" and "nancy guthrie" in lower and "ransom" in lower:
+        return "The Nancy Guthrie Ransom Note Questions"
+
+    if theme == "politics" and "did trump surrender" in lower:
+        return "Did Trump Surrender To Iran"
+
+    if theme == "politics" and "nicholas kristof" in lower and "israel" in lower:
+        return "Nicholas Kristof's Israel Report Defense"
+
+    if theme == "politics" and "warning to israel" in lower:
+        return "JD Vance's Warning To Israel"
+
+    if theme == "politics" and "jd vance" in lower and "impeachment" in lower:
+        return "JD Vance And Impeachment Fear"
+
+    if theme == "politics" and "ro to elon" in lower:
+        return "Ro Khanna's Challenge To Elon"
+
+    if theme == "politics" and "trump melts down" in lower:
+        return "Trump's Bill Meltdown"
+
+    if theme == "popculture" and "fictional dads" in lower:
+        return "The Best Fictional Dads Debate"
+
+    if theme == "popculture" and "aly raisman" in lower:
+        return "Aly Raisman On Dating Again"
+
+    if theme == "popculture" and "markiplier" in lower and "movie" in lower:
+        return "Markiplier's Hollywood Movie Bet"
+
+    if theme == "popculture" and "jackass" in lower and "searched" in lower:
+        return "Jackass Cast's Most Searched Questions"
+
+    if theme == "popculture" and "yunjin" in lower and "pre-debut" in lower:
+        return "Yunjin's Pre-Debut Story"
+
+    if theme == "popculture" and "thierry henry" in lower and "roberto carlos" in lower:
+        return "Thierry Henry And Roberto Carlos"
+
+    if theme == "truecrime" and "matching towel" in lower and "missing gun" in lower:
+        return "The Missing Gun And Mother's Testimony"
+
+    if theme == "truecrime" and "maxwell connection" in lower and "epstein" in lower:
+        return "Robert Maxwell And Epstein's Zorro Ranch"
+
+    if theme == "truecrime" and "dragging officer" in lower and "avoids prison" in lower:
+        return "Woman Drags Officer Case"
+
+    if theme == "truecrime" and "anna kepner" in lower and "cruise" in lower:
+        return "Anna Kepner Cruise Case Details"
+
+    if theme == "truecrime" and "hospital freakouts" in lower:
+        return "Hospital Bodycam Confrontation"
+
+    if theme == "truecrime" and "false prophet" in lower and "sam bateman" in lower:
+        return "Sam Bateman Trial Details"
+
+    if theme == "truecrime" and "football player" in lower and "girlfriend" in lower:
+        return "Cocaine Evidence In The Ex-Football Player Case"
+
+    if theme == "truecrime" and "sinning pastor" in lower:
+        return "Pastor Spell's Neighbor Fight"
+
+    if theme == "truecrime" and "most horrific murder" in lower:
+        return "The Most Horrific Murder Case"
+
+    if theme == "truecrime" and "verdict" in lower:
+        return "The Military Wife Murder Verdict"
+
+    if theme == "truecrime" and "yogurt shop" in lower:
+        return "The Yogurt Shop Exonerations"
+
+    if theme == "truecrime" and "ultimate betrayal" in lower:
+        return "Jacob's Betrayal Case"
+
+    chunks = [
+        re.sub(r"\s+", " ", chunk).strip(" -:._!?")
+        for chunk in re.split(r"\s+\|\s+|:|,", cleaned)
+        if chunk.strip()
+    ]
+
+    if not chunks:
+        return ""
+
+    candidates = []
+
+    for chunk in chunks[:5]:
+        words = [
+            word
+            for word in title_words(chunk)
+            if word.lower().strip("'") not in WEAK_TOPIC_WORDS
+            and word.lower().strip("'") not in SOURCE_TITLE_SHOW_WORDS
+        ]
+
+        if len(words) < 2:
+            continue
+
+        normalized_words = [word.lower().strip("'") for word in words]
+        domain_hits = sum(1 for word in normalized_words if word in {
+            "jobs", "economy", "market", "markets", "company", "brands", "fertility",
+            "depression", "fatigue", "trauma", "trump", "vance", "israel", "iran",
+            "movie", "hollywood", "coach", "quarterback", "trial", "verdict",
+            "testimony", "ai", "coding", "founder", "model",
+        })
+        show_penalty = sum(1 for word in normalized_words if word in SOURCE_TITLE_SHOW_WORDS)
+        score = domain_hits * 3 + min(len(words), limit) - show_penalty * 2
+        candidates.append((score, words[:limit]))
+
+    if not candidates:
+        return ""
+
+    best_words = max(candidates, key=lambda item: item[0])[1]
+    return compact_text(" ".join(best_words).title(), 62)
+
+
+def topic_phrase_is_weak(phrase):
+    if short_topic_phrase_ok(phrase):
+        return False
+
+    words = [word.lower().strip("'") for word in title_words(phrase)]
+
+    if len(words) < 3:
+        return True
+
+    weak_count = sum(1 for word in words if word in WEAK_TOPIC_WORDS)
+
+    if weak_count / max(1, len(words)) >= 0.45:
+        return True
+
+    if words[0] in {"especially", "absolutely", "around", "here", "more", "this", "that"}:
+        return True
+
+    if len(phrase) > 52:
+        return True
+
+    return False
+
+
+def public_editorial_topic_ok(theme, text, topic_terms=None, allow_short_topic=True):
+    cleaned = compact_text(clean_viewer_text(text), 64).strip(" -:|.")
+    lowered = cleaned.lower()
+
+    if not cleaned:
+        return False
+
+    if lowered in {
+        "the standout moment",
+        "standout moment",
+        "the big takeaway",
+        "best moment from the scan",
+        "the moment worth rewatching",
+    }:
+        return False
+
+    if allow_short_topic and short_topic_phrase_ok(cleaned):
+        return True
+
+    if looks_like_raw_dialogue_topic(cleaned) or topic_phrase_is_weak(cleaned):
+        return False
+
+    terms = topic_terms or [cleaned]
+    quality = score_title_quality(theme, cleaned, topic_terms=terms)
+
+    return (
+        quality.get("honesty", 0.0) >= 0.70
+        and not quality.get("generic_title")
+        and not quality.get("raw_dialogue_fragment")
+        and not quality.get("mechanical_title")
+        and not quality.get("repetitive_title")
+        and quality.get("not_clickbait", True)
+        and (quality.get("theme_native_title", True) or len(words_from_text(cleaned)) >= 4)
+    )
+
+
+TOPIC_SUPPORT_ALIASES = {
+    "nascar": {"nascar", "race", "racing", "racer", "cars", "car", "track", "horsepower", "stock"},
+    "racing": {"race", "racing", "racer", "cars", "car", "track", "horsepower", "nascar"},
+    "amino": {"amino", "acid", "acids", "eaa", "eaas", "leucine", "lucine", "protein", "grams"},
+    "acids": {"amino", "acid", "acids", "eaa", "eaas", "leucine", "lucine", "protein", "grams"},
+    "protein": {"protein", "amino", "acid", "acids", "eaa", "eaas", "leucine", "lucine"},
+    "abs": {"abs", "core", "hip", "hips", "flexor", "flexors", "physio", "ball", "range", "motion"},
+    "strength": {"strength", "training", "lift", "lifts", "squat", "bench", "deadlift", "press", "row", "reps"},
+    "lifts": {"strength", "training", "lift", "lifts", "squat", "bench", "deadlift", "press", "row", "reps"},
+}
+
+TOPIC_CONTEXT_WORDS = {
+    "show", "episode", "podcast", "interview", "guest", "channel", "archive",
+    "take", "story", "moment", "detail", "debate", "fight", "room",
+}
+
+THEME_RELEVANCE_WORDS = {
+    "health_fitness": {
+        "health", "fitness", "wellness", "training", "exercise", "workout", "protein",
+        "amino", "acid", "eaa", "leucine", "lucine", "range", "motion", "hip",
+        "hips", "flexor", "physio", "ball", "body", "abs", "core", "muscle",
+        "sleep", "stress", "fertility", "metabolism", "nutrition",
+    },
+    "sports": {
+        "sports", "game", "team", "coach", "athlete", "race", "racing", "nascar",
+        "car", "cars", "track", "horsepower", "titans", "steelers", "pittsburgh",
+        "practice", "practicing", "play", "season", "locker", "nba", "nfl",
+    },
+    "finance": {
+        "market", "markets", "money", "debt", "rates", "inflation", "investor",
+        "investors", "stock", "stocks", "fund", "funds", "hedge", "mutual",
+        "cash", "flow", "revenue", "business", "rental", "rent", "valuation",
+        "economy", "economic", "home", "homes", "house", "housing", "property",
+        "properties", "mortgage", "price", "prices", "median", "affordability",
+        "affordable", "payment", "income",
+    },
+    "technology_ai": {
+        "ai", "agent", "agents", "model", "models", "openai", "claude", "code",
+        "coding", "developer", "developers", "software", "startup", "founder",
+        "product", "data", "machine", "learning", "robot", "chip", "security",
+        "eval", "builder", "tech", "technology", "training", "paradigm",
+    },
+}
+
+CROSS_THEME_MISMATCH_WORDS = {
+    "health_fitness": {
+        "stock", "stocks", "fund", "funds", "hedge", "mutual", "equity",
+        "investor", "investors", "revenue", "market", "markets",
+    },
+    "technology_ai": {
+        "steam", "fortnite", "gta", "dota", "skins", "skin", "gaming", "game",
+        "games", "grand", "theft", "fortnight",
+    },
+}
+
+
+def normalize_support_word(word):
+    word = str(word or "").lower().strip("'")
+    word = word.replace("'s", "").replace("’s", "")
+
+    if len(word) > 3 and word.endswith("s"):
+        word = word[:-1]
+
+    return word
+
+
+def support_words(text):
+    result = set()
+
+    for word in words_from_text(text):
+        normalized = normalize_support_word(word)
+
+        if (
+            not normalized
+            or normalized in WEAK_TOPIC_WORDS
+            or normalized in TOPIC_CONTEXT_WORDS
+            or len(normalized) < 3
+        ):
+            continue
+
+        result.add(normalized)
+
+    return result
+
+
+def topic_support_details(topic, clip):
+    clip = clip or {}
+    topic_words = support_words(topic)
+    transcript_words = support_words(clip.get("transcript_excerpt", ""))
+    source_words = support_words(clip.get("source_title", ""))
+    checked_words = topic_words - source_words or topic_words
+    exact_support = topic_words & transcript_words
+    alias_support = set()
+
+    for word in checked_words:
+        aliases = TOPIC_SUPPORT_ALIASES.get(word, set())
+
+        if aliases and transcript_words & {normalize_support_word(alias) for alias in aliases}:
+            alias_support.add(word)
+
+    supported_words = (exact_support | alias_support) & checked_words
+    support_ratio = len(supported_words) / max(1, len(checked_words))
+
+    return {
+        "topic_words": sorted(topic_words),
+        "transcript_words": sorted(transcript_words),
+        "source_words": sorted(source_words),
+        "checked_words": sorted(checked_words),
+        "exact_support": sorted(exact_support),
+        "alias_support": sorted(alias_support),
+        "support_ratio": float(support_ratio),
+    }
+
+
+def topic_supported_by_clip(topic, clip):
+    cleaned = editorial_title_topic(topic)
+
+    if not cleaned or cleaned == "The Standout Moment":
+        return False
+
+    details = topic_support_details(cleaned, clip)
+    checked_words = set(details["checked_words"])
+
+    if not checked_words:
+        return False
+
+    exact_count = len(details["exact_support"])
+    alias_count = len(details["alias_support"])
+
+    if exact_count >= 2:
+        return True
+
+    if exact_count >= 1 and len(checked_words) <= 3:
+        return True
+
+    if exact_count >= 1 and details["support_ratio"] >= 0.34:
+        return True
+
+    if alias_count >= 1 and exact_count + alias_count >= 2:
+        return True
+
+    return False
+
+
+def clip_has_theme_relevance(theme, clip):
+    theme = str(theme or clip_theme_key(clip)).strip().lower()
+    words = support_words(clip.get("transcript_excerpt", ""))
+    positive_words = THEME_RELEVANCE_WORDS.get(theme, set())
+
+    if not positive_words:
+        return True
+
+    positive_hits = words & positive_words
+    mismatch_hits = words & CROSS_THEME_MISMATCH_WORDS.get(theme, set())
+
+    if len(mismatch_hits) >= 2:
+        if theme == "technology_ai" and positive_hits <= {"machine", "product"}:
+            return False
+        if not positive_hits:
+            return False
+
+    if len(positive_hits) >= 1:
+        return True
+
+    if len(mismatch_hits) >= 2:
+        return False
+
+    return False
+
+
+def transcript_topic_phrase(theme, clip):
+    excerpt = clean_viewer_text(clip.get("transcript_excerpt", ""))
+    lower = excerpt.lower()
+    source_subject = source_subject_from_title(clip.get("source_title", ""))
+
+    if theme == "finance" and "constellation" in lower and "turnaround" in lower:
+        return "Constellation Brands Turnaround"
+
+    if theme == "health_fitness":
+        if re.search(r"\b(eaa|eaas|leucine|lucine)\b", lower):
+            return "EAAs And Leucine Matter"
+
+        if "range of motion" in lower and ("physio ball" in lower or "hip" in lower or "feet" in lower):
+            return "The Range Of Motion People Miss"
+
+        if "female physicians" in lower and "infertility" in lower:
+            return "Female Physicians And Fertility Risk"
+
+        if "five elements" in lower and "acupuncture" in lower:
+            return "Five Elements Acupuncture"
+
+        if "why was i hiding" in lower or "was i hiding" in lower:
+            return "Why Ed O'Brien Was Hiding"
+
+        if "not sustainable" in lower or "relentless" in lower:
+            return "When Success Stops Feeling Sustainable"
+
+    if theme == "sports":
+        if ("cooper flag" in lower or "cooper flagg" in lower) and ("five of 21" in lower or "field" in lower or "debut" in lower):
+            return "Cooper Flagg's Rough Debut"
+
+        if "brandon aiyuk" in lower or ("niners" in lower and ("bad mouthing" in lower or "last rodeo" in lower)):
+            return "Brandon Aiyuk's 49ers Problem"
+
+        if "supplemental draft" in lower or ("bookie" in lower and "nfl" in lower):
+            return "The NFL Supplemental Draft Question"
+
+        if ("mikal" in lower or "mikhail" in lower) and ("knicks" in lower or "championship" in lower):
+            return "Mikal Bridges' Knicks Championship Moment"
+
+        if "titans" in lower and "covid" in lower and re.search(r"\b(practic|positive|pittsburgh|steelers)\b", lower):
+            return "The Titans COVID Practice Problem"
+
+        if "nascar" in lower and ("horsepower" in lower or "stock car" in lower or "dirt track" in lower):
+            return "NASCAR Horsepower Changes The Race"
+
+    if theme == "finance":
+        if "value stock is simply one that looks cheap" in lower:
+            return "What Makes A Stock A Value Stock"
+
+        if "short memories" in lower and ("must-own stock" in lower or "palantir" in lower):
+            return "Investors Forget Must-Own Stocks Fast"
+
+        if "post tax income" in lower and ("save 30%" in lower or "take-home pay" in lower or "saving" in lower):
+            return "The Savings Rate Math People Miss"
+
+        if "corporate stocks" in lower and ("mutual funds" in lower or "hedge funds" in lower):
+            return "Institutional Investors Control The Market"
+
+        if (
+            ("rent" in lower or "rental" in lower)
+            and ("home price" in lower or "median home" in lower or "cash flow" in lower or "afford" in lower)
+        ):
+            return "Home Prices Change The Rental Math"
+
+    if theme == "technology_ai":
+        if any(term in lower for term in ["steam machine", "fortnite", "grand theft", "gta", "dota"]):
+            return ""
+
+        if "pre-training" in lower and "dead" in lower:
+            return "Why Pre-Training Isn't Dead"
+
+        if "coding is solved" in lower:
+            return "What Happens After Coding Is Solved"
+
+    if theme == "comedy":
+        if "embarrassing story" in lower and "sidetrack" in lower:
+            return "The Embarrassing UFC Sidetrack Story"
+
+        if "born in italy" in lower and ("colorado" in lower or "army" in lower or "base" in lower):
+            return "The Italy Childhood Story"
+
+        if ("john benet" in lower or "jonbenet" in lower) and "jazz singer" in lower:
+            return "The JonBenet Jazz Singer Joke"
+
+        if "switch me out" in lower and ("voice" in lower or "trailer" in lower or "animation" in lower):
+            return "Tony Hale's Toy Story Voice Panic"
+
+        if "raw milk" in lower and ("pasteurized" in lower or "homogenized" in lower or "shelf" in lower):
+            return "The Raw Milk Debate Gets Weird"
+
+        if "cleaning lady" in lower:
+            return "Cleaning For The Cleaning Lady"
+
+        if "like a rolling stone" in lower and ("quiz" in lower or "check it out" in lower):
+            return "The Rolling Stone Quiz Bit"
+
+        if "mobbed" in lower and ("ellis" in lower or "kenny" in lower or "larry" in lower):
+            return "Getting Mobbed By Fans"
+
+        if "out into song" in lower or ("singing" in lower and "set-up" in lower):
+            return "Amy Adams' Singing Setup"
+
+        if "banned from the chicago theater" in lower or ("madison square garden" in lower and "ass crack" in lower):
+            return "Thomas Lennon's Banned Theater Story"
+
+    if source_subject and "wardrobe" in source_subject.lower():
+        return "Bobby's Wardrobe Malfunction"
+
+    return ""
+
+
+def clip_topic_terms(clip, limit=5):
+    source_title = clean_viewer_text(clip.get("source_title", ""))
+    source_words = {word.lower() for word in title_words(source_title)}
+    terms = []
+
+    for term in clip.get("topic_fingerprint", []):
+        cleaned = clean_viewer_text(str(term).replace("_", " ")).lower()
+        cleaned = re.sub(r"[^a-z0-9\s%.-]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        if not cleaned:
+            continue
+
+        words = [word for word in cleaned.split() if word not in WEAK_TOPIC_WORDS and len(word) >= 3]
+
+        if not words:
+            continue
+
+        normalized = " ".join(words)
+
+        if normalized in source_words and len(terms) >= 2:
+            continue
+
+        if normalized not in terms:
+            terms.append(normalized)
+
+        if len(terms) >= limit:
+            break
+
+    return terms
+
+
+def phrase_from_topic_terms(theme, clip, terms):
+    term_set = set(terms)
+    source_subject = source_subject_from_title(clip.get("source_title", ""))
+
+    if {"cleaning", "lady"} <= term_set:
+        return "Cleaning For The Cleaning Lady"
+
+    if {"sidetrack", "embarrassing"} <= term_set:
+        return "The Embarrassing UFC Sidetrack Story"
+
+    if {"born", "italy"} <= term_set or {"colorado", "italy"} <= term_set:
+        if source_subject:
+            suffix = "'" if source_subject.lower().endswith("s") else "'s"
+            return f"{source_subject}{suffix} Italy Story"
+
+        return "The Italy Childhood Story"
+
+    if {"cooper", "flag"} <= term_set or {"cooper", "flagg"} <= term_set:
+        return "Cooper Flagg's Rough Debut"
+
+    if {"john", "benet", "jazz"} <= term_set or {"jonbenet", "jazz"} <= term_set:
+        return "The JonBenet Jazz Singer Joke"
+
+    if {"voice", "trailer"} <= term_set or {"voice", "animation"} <= term_set:
+        return "Tony Hale's Toy Story Voice Panic"
+
+    if {"raw", "milk"} <= term_set or {"milk", "pasteurized"} <= term_set:
+        return "The Raw Milk Debate Gets Weird"
+
+    if {"rolling", "stone"} <= term_set:
+        return "The Rolling Stone Quiz Bit"
+
+    if {"brandon", "aiyuk"} <= term_set or {"niners", "team"} <= term_set:
+        return "Brandon Aiyuk's 49ers Problem"
+
+    if {"supplemental", "draft"} <= term_set or {"nfl", "wrong"} <= term_set:
+        return "The NFL Supplemental Draft Question"
+
+    if {"mikal", "championship"} <= term_set or {"mikhail", "championship"} <= term_set:
+        return "Mikal Bridges' Knicks Championship Moment"
+
+    if {"word", "play"} <= term_set or "wordplay" in term_set:
+        return "The Wordplay Backstory"
+
+    if ("actor" in term_set or "acting" in term_set) and ({"reaction", "feeling", "instinct"} & term_set):
+        return "Acting On Instinct"
+
+    if {"singing", "song"} & term_set and {"setup", "set"} & term_set:
+        return "The Singing Setup"
+
+    if "mobbed" in term_set:
+        return "Getting Mobbed By Fans"
+
+    if theme == "comedy" and {"salt", "died"} & term_set and source_subject:
+        return f"{source_subject} Standout Story"
+
+    if not terms:
+        return ""
+
+    if len(terms) >= 3:
+        phrase = " ".join(terms[:3])
+    elif len(terms) == 2:
+        phrase = " ".join(terms)
+    else:
+        subject = source_subject or ""
+        phrase = f"{subject} {terms[0]}".strip()
+
+    phrase = phrase.title()
+
+    if theme == "comedy" and not re.search(r"\b(story|joke|roast|bit|payoff)\b", phrase, flags=re.I):
+        phrase = f"{phrase} Story"
+
+    return compact_text(phrase, 54)
 
 
 def clean_filename(value):
@@ -274,7 +1157,7 @@ def ffmpeg_path(path):
 
 
 def drawtext_text(text):
-    text = compact_text(text, 180)
+    text = compact_text(clean_viewer_text(text), 180)
     text = text.replace("'", "")
     text = text.replace("’", "")
     text = text.replace("‘", "")
@@ -336,11 +1219,19 @@ def theme_profile(theme):
     }
 
 
-def normalized_adjective_queue(queue):
-    cleaned = unique_sequence(queue)
-    cleaned = [item for item in cleaned if item in STYLE_ADJECTIVES]
+def adjective_pool_for_theme(theme):
+    theme_key = str(theme or "").strip().lower()
+    pool = THEME_STYLE_ADJECTIVES.get(theme_key) or STYLE_ADJECTIVES
+    return unique_sequence(pool)
 
-    for adjective in STYLE_ADJECTIVES:
+
+def normalized_adjective_queue(queue, theme=None):
+    allowed = adjective_pool_for_theme(theme)
+    allowed_set = set(allowed)
+    cleaned = unique_sequence(queue)
+    cleaned = [item for item in cleaned if item in allowed_set]
+
+    for adjective in allowed:
         if adjective not in cleaned:
             cleaned.append(adjective)
 
@@ -364,7 +1255,7 @@ def save_adjective_rotation_state(state):
 def take_next_adjectives(theme, count):
     state = load_adjective_rotation_state()
     theme_state = state["themes"].setdefault(theme, {})
-    queue = normalized_adjective_queue(theme_state.get("queue", STYLE_ADJECTIVES))
+    queue = normalized_adjective_queue(theme_state.get("queue", adjective_pool_for_theme(theme)), theme=theme)
     selected = []
 
     for _ in range(max(0, count)):
@@ -478,6 +1369,14 @@ def clip_visual_quality_score(clip):
 
 def clip_is_editorial_usable(clip):
     render_qc = clip_render_qc(clip)
+    theme_key = str(clip.get("theme") or "").strip().lower()
+    state_key = str(clip.get("source_state_key") or "")
+
+    if not theme_key and "|" in state_key:
+        theme_key = state_key.split("|", 1)[0].strip().lower()
+
+    if not clip_has_theme_relevance(theme_key, clip):
+        return False
 
     if not render_qc:
         return True
@@ -492,14 +1391,95 @@ def clip_is_editorial_usable(clip):
         "missing audio",
         "unexpected resolution",
     }
+    frame_path = render_qc.get("frame_path") or {}
+    documentary_non_face_ok = (
+        theme_key in {"politics", "truecrime"}
+        and render_qc.get("documentary_non_face_ok")
+        and clip_visual_quality_score(clip) >= 0.50
+    )
 
     if flags & hard_flags:
         return False
 
-    return clip_visual_quality_score(clip) >= 0.52
+    if documentary_non_face_ok:
+        return True
+
+    if STRICT_EDITORIAL_FACE_GATES:
+        face_presence = float(frame_path.get("face_presence_rate") or 0.0)
+        no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
+        alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
+        center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
+        max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
+        plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
+
+        if face_presence and face_presence < MIN_EDITORIAL_SOURCE_FACE_PRESENCE:
+            return False
+
+        if no_face_run > MAX_EDITORIAL_SOURCE_NO_FACE_RUN:
+            return False
+
+        if alive_no_face > MAX_EDITORIAL_SOURCE_ALIVE_NO_FACE:
+            return False
+
+        if center_offset > 0.42:
+            return False
+
+        if face_presence < 0.90 and center_offset > MAX_EDITORIAL_SOURCE_CENTER_OFFSET:
+            return False
+
+        if max_center_offset > MAX_EDITORIAL_SOURCE_MAX_CENTER_OFFSET:
+            return False
+
+        if "subject off-center in final crop" in flags:
+            return False
+
+        if "unstable final subject position" in flags and (
+            max_center_offset > 0.58 or alive_no_face > 0.30
+        ):
+            return False
+
+        if face_presence < 0.55 and plausibility and plausibility < MIN_EDITORIAL_SOURCE_FACE_PLAUSIBILITY:
+            return False
+
+        if {
+            "low final face presence",
+            "alive frames often miss speaker",
+            "extended no-speaker run in final crop",
+            "weak final face plausibility",
+        } & flags:
+            return False
+
+    return clip_visual_quality_score(clip) >= 0.58
 
 
-def editorial_output_rejection_reasons(frame_qc):
+def clip_is_popular_segment_usable(clip):
+    render_qc = clip_render_qc(clip)
+
+    if render_qc and not render_qc.get("passed", True):
+        frame_path = render_qc.get("frame_path") or {}
+        flags = set(render_qc.get("flags") or [])
+        face_presence = float(frame_path.get("face_presence_rate") or 0.0)
+        alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
+        max_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
+
+        if (
+            face_presence < 0.50
+            or alive_no_face > 0.45
+            or max_offset > 0.70
+            or {
+                "final render has black frames",
+                "final render has low-information frames",
+                "final render has dead visual frames",
+                "alive frames often miss speaker",
+                "extended no-speaker run in final crop",
+            } & flags
+        ):
+            return False
+
+    return clip_is_editorial_usable(clip)
+
+
+def editorial_output_rejection_reasons(frame_qc, theme=""):
     flags = set(frame_qc.get("flags") or [])
     hard_flags = {
         "could not open final render",
@@ -512,10 +1492,61 @@ def editorial_output_rejection_reasons(frame_qc):
     }
     reasons = sorted(flags & hard_flags)
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
+    face_presence = float(frame_qc.get("face_presence_rate") or 0.0)
+    no_face_run = float(frame_qc.get("longest_no_face_run_ratio") or 0.0)
+    alive_no_face = float(frame_qc.get("alive_no_face_frame_ratio") or 0.0)
+    max_center_offset = float(frame_qc.get("max_face_center_offset_ratio") or 0.0)
+    low_information = float(frame_qc.get("low_information_frame_ratio") or 0.0)
+    dead_frames = float(frame_qc.get("dead_frame_ratio") or 0.0)
+    black_frames = float(frame_qc.get("black_frame_ratio") or 0.0)
+    documentary_non_face_ok = (
+        str(theme or "").strip().lower() in {"politics", "truecrime"}
+        and visual_score >= 0.45
+        and low_information <= 0.18
+        and dead_frames <= 0.02
+        and black_frames <= 0.02
+    )
 
-    if visual_score < MIN_EDITORIAL_VISUAL_QUALITY:
+    if visual_score < MIN_EDITORIAL_VISUAL_QUALITY and not documentary_non_face_ok:
         reasons.append(
             f"low editorial visual quality score ({visual_score:.2f} < {MIN_EDITORIAL_VISUAL_QUALITY:.2f})"
+        )
+
+    if not documentary_non_face_ok and face_presence and face_presence < MIN_EDITORIAL_OUTPUT_FACE_PRESENCE:
+        reasons.append(
+            f"low final package face presence ({face_presence:.2f} < {MIN_EDITORIAL_OUTPUT_FACE_PRESENCE:.2f})"
+        )
+
+    if not documentary_non_face_ok and no_face_run > MAX_EDITORIAL_OUTPUT_NO_FACE_RUN:
+        reasons.append(
+            f"long final package no-speaker run ({no_face_run:.2f} > {MAX_EDITORIAL_OUTPUT_NO_FACE_RUN:.2f})"
+        )
+
+    if not documentary_non_face_ok and alive_no_face > MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE:
+        reasons.append(
+            f"alive final package frames often miss speaker ({alive_no_face:.2f} > {MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE:.2f})"
+        )
+
+    if (
+        not documentary_non_face_ok
+        and alive_no_face > 0.34
+        and "alive frames often miss speaker" in flags
+    ):
+        reasons.append(
+            f"alive final package repeatedly misses speaker ({alive_no_face:.2f} > 0.34)"
+        )
+
+    if (
+        not documentary_non_face_ok
+        and alive_no_face > 0.25
+        and max_center_offset > 0.70
+        and (
+            "subject off-center in final crop" in flags
+            or "unstable final subject position" in flags
+        )
+    ):
+        reasons.append(
+            f"final package likely locked to background ({max_center_offset:.2f} max face offset)"
         )
 
     return reasons
@@ -540,7 +1571,7 @@ def finalize_editorial_package(package, label):
             "visual_quality_score": 0.0,
         }
 
-    rejection_reasons = editorial_output_rejection_reasons(frame_qc)
+    rejection_reasons = editorial_output_rejection_reasons(frame_qc, package.get("theme", DEFAULT_THEME))
     package["render_qc"] = {
         "passed": not rejection_reasons,
         "flags": sorted(set(list(frame_qc.get("flags") or []) + rejection_reasons)),
@@ -644,11 +1675,103 @@ def topic_label_from_clip(clip):
     return "The Big Takeaway"
 
 
-def group_clips_by_topic(clips):
+def clip_theme_key(clip):
+    state_key = str(clip.get("source_state_key") or "")
+
+    if "|" in state_key:
+        return state_key.split("|", 1)[0]
+
+    return str(clip.get("theme") or "").strip().lower()
+
+
+def topic_label_from_clip(clip, theme=""):
+    theme = (theme or clip_theme_key(clip)).strip().lower()
+    suggested_title = compact_text(clean_viewer_text(clip.get("suggested_title", "")), 58).strip(" .")
+    terms = clip_topic_terms(clip, limit=10)
+    transcript_phrase = transcript_topic_phrase(theme, clip)
+
+    if (
+        transcript_phrase
+        and topic_supported_by_clip(transcript_phrase, clip)
+        and public_editorial_topic_ok(theme, transcript_phrase, topic_terms=terms)
+    ):
+        return compact_text(transcript_phrase, 54)
+
+    if (
+        suggested_title
+        and len(words_from_text(suggested_title)) >= 4
+        and len(suggested_title) <= 52
+        and public_editorial_topic_ok(
+            theme,
+            suggested_title,
+            topic_terms=clip.get("topic_fingerprint") or [suggested_title],
+            allow_short_topic=False,
+        )
+        and topic_supported_by_clip(suggested_title, clip)
+    ):
+        return suggested_title
+
+    phrase = phrase_from_topic_terms(theme, clip, terms)
+    source_topic = source_title_topic(clip.get("source_title", ""), theme=theme)
+
+    if theme == "comedy" and phrase:
+        if topic_supported_by_clip(phrase, clip) and public_editorial_topic_ok(theme, phrase, topic_terms=terms):
+            return compact_text(phrase, 54)
+
+    if (
+        source_topic
+        and topic_supported_by_clip(source_topic, clip)
+        and public_editorial_topic_ok(theme, source_topic, topic_terms=terms)
+    ):
+        return source_topic
+
+    if phrase:
+        if topic_supported_by_clip(phrase, clip) and public_editorial_topic_ok(theme, phrase, topic_terms=terms):
+            return compact_text(phrase, 54)
+
+    text = clean_viewer_text(clip.get("transcript_excerpt", ""))
+    counts = {}
+
+    for word in words_from_text(text):
+        normalized = word.strip("'").replace("'", "")
+
+        if normalized in WEAK_TOPIC_WORDS or len(normalized) < 4:
+            continue
+
+        counts[normalized] = counts.get(normalized, 0) + 1
+
+    ranked = sorted(counts, key=lambda word: (-counts[word], word))
+
+    if ranked:
+        fallback = compact_text(" ".join(ranked[:3]).title(), 54)
+
+        if topic_supported_by_clip(fallback, clip) and public_editorial_topic_ok(theme, fallback, topic_terms=terms):
+            return fallback
+
+    source_subject = source_subject_from_title(clip.get("source_title", ""))
+
+    if (
+        source_subject
+        and topic_supported_by_clip(source_subject, clip)
+        and public_editorial_topic_ok(theme, source_subject, topic_terms=terms)
+    ):
+        return compact_text(source_subject, 54)
+
+    return "The Standout Moment"
+
+
+def group_clips_by_topic(clips, theme=""):
     groups = {}
 
     for clip in clips:
-        topic = topic_label_from_clip(clip)
+        if not clip_is_editorial_usable(clip):
+            continue
+
+        topic = topic_label_from_clip(clip, theme=theme)
+
+        if topic == "The Standout Moment" or not topic_supported_by_clip(topic, clip):
+            continue
+
         key = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_") or "takeaway"
         groups.setdefault(key, {
             "topic": topic,
@@ -1216,7 +2339,7 @@ def attach_countdown_context(topic_groups, context):
 
 def fallback_countdown_context(theme, paths, topic_item, adjective):
     clips = load_rendered_clip_reviews(paths["metadata_path"])
-    topic_groups = group_clips_by_topic(clips)[:EDITORIAL_COUNTDOWN_SIZE] or [topic_item]
+    topic_groups = group_clips_by_topic(clips, theme=theme)[:EDITORIAL_COUNTDOWN_SIZE] or [topic_item]
     context = build_countdown_context(theme, paths, clips, topic_groups, adjective)
     attach_countdown_context(topic_groups, context)
     return context
@@ -1227,8 +2350,8 @@ def elevenlabs_tts_text(text):
         return text
 
     return (
-        "[engaging social video host, expressive pacing, confident conversational tone, "
-        f"high inflection, natural pauses] {text}"
+        "[fast-paced social video host, deeper voice, high inflection, sharp curiosity, "
+        f"natural pauses, not monotone, confident but conversational] {text}"
     )
 
 
@@ -1240,10 +2363,16 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
     tempo = max(1.0, min(2.0, raw_duration / target_duration))
     output_path = os.path.join(scratch_dir, f"{date_key}_{theme}_{rank:02d}_intro_mastered.wav")
 
-    if abs(pitch - 1.0) < 0.01 and abs(NARRATION_BASS_GAIN) < 0.1 and tempo <= 1.01:
+    needs_intro_pad = NARRATION_LEAD_IN_SECONDS > 0.001 or NARRATION_FADE_IN_SECONDS > 0.001
+
+    if abs(pitch - 1.0) < 0.01 and abs(NARRATION_BASS_GAIN) < 0.1 and tempo <= 1.01 and not needs_intro_pad:
         return input_path
 
     audio_filters = ["aresample=44100"]
+
+    if NARRATION_LEAD_IN_SECONDS > 0.001:
+        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
+        audio_filters.append(f"adelay={delay_ms}:all=1")
 
     if abs(pitch - 1.0) >= 0.01:
         audio_filters.append(f"rubberband=pitch={pitch:.3f}")
@@ -1253,6 +2382,10 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
 
     if abs(NARRATION_BASS_GAIN) >= 0.1:
         audio_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
+
+    if NARRATION_FADE_IN_SECONDS > 0.001:
+        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
+        audio_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
 
     audio_filters.extend([
         "treble=g=-0.6:f=4200:w=0.8",
@@ -1274,7 +2407,44 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
         ], "Narration pitch and mastering")
         return output_path
     except Exception as error:
-        print(f" -> Narration mastering unavailable; using raw voiceover: {error}")
+        print(f" -> Narration pitch filter unavailable; trying fit-and-master fallback: {error}")
+
+    fallback_filters = ["aresample=44100"]
+
+    if NARRATION_LEAD_IN_SECONDS > 0.001:
+        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
+        fallback_filters.append(f"adelay={delay_ms}:all=1")
+
+    if tempo > 1.01:
+        fallback_filters.append(f"atempo={tempo:.3f}")
+
+    if abs(NARRATION_BASS_GAIN) >= 0.1:
+        fallback_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
+
+    if NARRATION_FADE_IN_SECONDS > 0.001:
+        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
+        fallback_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
+
+    fallback_filters.extend([
+        "treble=g=-0.6:f=4200:w=0.8",
+        "alimiter=limit=0.94",
+        f"loudnorm=I={NARRATION_LOUDNESS_I:.1f}:TP=-1.5:LRA=8",
+    ])
+
+    try:
+        run_subprocess([
+            FFMPEG_EXE,
+            "-y",
+            "-i", input_path,
+            "-af", ",".join(fallback_filters),
+            "-ar", "44100",
+            "-ac", "2",
+            "-c:a", "pcm_s16le",
+            output_path,
+        ], "Narration fit and mastering")
+        return output_path
+    except Exception as fallback_error:
+        print(f" -> Narration mastering unavailable; using raw voiceover: {fallback_error}")
         return input_path
 
 
@@ -1407,6 +2577,7 @@ def spoken_topic(topic):
 THEME_TITLE_NOUNS = {
     "comedy": "Comedy",
     "sports": "Sports",
+    "gaming": "Gaming",
     "finance": "Business",
     "technology_ai": "AI",
     "health_fitness": "Wellness",
@@ -1417,8 +2588,368 @@ THEME_TITLE_NOUNS = {
 
 
 def editorial_title_topic(topic):
-    cleaned = compact_text(str(topic or "").strip(" .!?"), 54)
-    return cleaned if cleaned else "The Standout Moment"
+    cleaned = compact_text(clean_viewer_text(topic).strip(" .!?"), 62)
+    cleaned = re.sub(r"^(editor pick|timestamp-backed|viewers replayed)\s*:\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+from\s+[a-zA-Z0-9 ._-]{2,40}$", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^watch\s*:\s*", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^what\s+watch\s*:\s*", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^what\s+(.+?)\s+reveals\s+about\s+the\s+market$", r"\1", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^why\s+investors\s+are\s+watching\s+(.+)$", r"\1", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^the\s+business\s+risk\s+hidden\s+in\s+(.+)$", r"\1", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^what\s+(?=[A-Z])", "", cleaned).strip()
+    cleaned = re.sub(r"\s+reveals(?:\s+market)?$", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"\btold the story behind.*$", "", cleaned, flags=re.I).strip()
+    cleaned = cleaned.replace("'S", "'s").replace("’S", "'s")
+    cleaned = re.sub(r"^(the\s+)?context\s+behind\s+", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^(the\s+)?ai\s+problem\s+behind\s+", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^(the\s+)?health\s+mistake\s+behind\s+", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"^why\s+(.+?)\s+matters(?:\s+for\s+your\s+body)?$", r"\1", cleaned, flags=re.I).strip()
+    cleaned = re.sub(
+        r":\s+the\s+(investor\s+takeaway|health\s+detail(?:\s+to\s+rethink)?|habit\s+to\s+rethink|builder\s+takeaway|builder\s+debate|story\s+people\s+will\s+debate|detail\s+that\s+changes\s+the\s+case|sports\s+debate)$",
+        "",
+        cleaned,
+        flags=re.I,
+    ).strip()
+    cleaned = re.sub(r"\b(And|Or|But|With|For|On|To|From|Into|About|Behind|Inside)$", "", cleaned).strip(" -:,.")
+
+    cleaned = fix_topic_case(cleaned)
+
+    if not cleaned or (looks_like_raw_dialogue_topic(cleaned) and not short_topic_phrase_ok(cleaned)):
+        return "The Standout Moment"
+
+    return cleaned
+
+
+def clean_headline_topic(theme, topic, clip=None, source_title="", channel=""):
+    clip = clip or {}
+    theme_key = str(theme or "").strip().lower()
+    source_title = source_title or clip.get("source_title", "")
+    channel = clean_viewer_text(channel)
+    candidates = [
+        topic,
+        phrase_from_topic_terms(theme, clip, clip_topic_terms(clip)),
+        clean_viewer_text(clip.get("suggested_title", "")),
+        transcript_topic_phrase(theme, clip),
+        source_title_topic(source_title, theme),
+        source_subject_from_title(source_title),
+    ]
+
+    for candidate in candidates:
+        cleaned = editorial_title_topic(candidate)
+
+        if channel:
+            cleaned = re.sub(rf"\s+from\s+{re.escape(channel)}$", "", cleaned, flags=re.I).strip()
+
+        cleaned = compact_text(cleaned.replace("'S", "'s").replace("’S", "'s"), 58)
+
+        if theme_key == "politics":
+            cleaned_l = cleaned.lower()
+
+            if "ai spending" in cleaned_l or ("ai" in cleaned_l and "spending" in cleaned_l):
+                return "AI Spending Becomes A Policy Fight"
+
+        if (
+            cleaned
+            and cleaned != "The Standout Moment"
+            and (not clip or topic_supported_by_clip(cleaned, clip))
+            and public_editorial_topic_ok(
+                theme,
+                cleaned,
+                topic_terms=clip.get("topic_fingerprint") or [cleaned],
+            )
+        ):
+            return cleaned
+
+    return "The Standout Moment"
+
+
+def theme_specific_direct_title(theme_key, topic):
+    topic = editorial_title_topic(topic)
+    lower = topic.lower()
+
+    if not topic or topic.lower() in {"the standout moment", "standout moment"}:
+        return ""
+
+    if theme_key == "comedy":
+        if "magnus" in lower and "rivalry" in lower:
+            return "Magnus Carlsen's Rivalry Story"
+        if "magnus" in lower:
+            return "Magnus Carlsen's Chess Story"
+
+    if theme_key == "sports":
+        if "kyle larson" in lower or "nascar" in lower:
+            return "Kyle Larson's NASCAR Take"
+        return topic if public_editorial_topic_ok("sports", topic, topic_terms=[topic], allow_short_topic=False) else ""
+
+    if theme_key == "gaming":
+        if "optic" in lower:
+            return "OpTic's Gaming Room Take"
+        if "valorant" in lower:
+            return "The Valorant Take Players Will Debate"
+        if "cod" in lower or "call of duty" in lower:
+            return "The COD Take That Split The Desk"
+        if public_editorial_topic_ok("gaming", topic, topic_terms=[topic], allow_short_topic=False):
+            return topic
+
+    if theme_key == "finance":
+        if "rental cash flow" in lower:
+            return "Rental Cash Flow Still Has A Catch"
+        if "inflation floor" in lower:
+            return "Inflation Floor Is Back In Focus"
+        if "debt" in lower and "rates" in lower:
+            return "Debt And Rates Are Back In Focus"
+        if "spacex" in lower:
+            return "The SpaceX IPO Question"
+
+    if theme_key == "technology_ai":
+        if "steam machine" in lower:
+            return "Steam Machine Splits The Builder Room"
+        if "data black hole" in lower:
+            return "The AI Data Black Hole"
+
+    if theme_key == "health_fitness":
+        if "aging slower" in lower:
+            return "Aging Slower Habits Worth Knowing"
+        if "amino" in lower:
+            return "Essential Amino Acids Are The Missing Detail"
+        if "strength training" in lower or "lifts" in lower:
+            return "Strength Training Lifts Worth Rethinking"
+        if "abs" in lower:
+            return "The Abs Mistake Worth Rethinking"
+        if "fertility" in lower:
+            return "Fertility Warning Signs Worth Hearing"
+
+    if theme_key == "popculture":
+        if "jackass" in lower and "movie" in lower:
+            return "Jackass Cast Debate The Movie"
+        if public_editorial_topic_ok("popculture", topic, topic_terms=[topic], allow_short_topic=False):
+            return topic
+
+    if theme_key == "truecrime":
+        if public_editorial_topic_ok("truecrime", topic, topic_terms=[topic], allow_short_topic=False):
+            return topic
+
+    if public_editorial_topic_ok(theme_key, topic, topic_terms=[topic], allow_short_topic=False):
+        quality = score_title_quality(theme_key, topic, topic_terms=[topic])
+
+        if (
+            quality.get("length_ok")
+            and quality.get("honesty", 0.0) >= 0.70
+            and quality.get("specificity", 0.0) >= 0.44
+            and not quality.get("generic_title")
+            and not quality.get("mechanical_title")
+            and quality.get("theme_native_title", True)
+            and quality.get("not_clickbait", True)
+        ):
+            return topic
+
+    return ""
+
+
+def build_social_title(theme, topic, content_format="countdown", signal_source=""):
+    topic = editorial_title_topic(topic)
+    theme_key = str(theme or "").strip().lower()
+    popular = content_format == "popular"
+    signal_is_external = signal_source and signal_source != "internal_quality_fallback"
+    topic_words = title_words(topic)
+    topic_terms = [topic]
+    topic_l = topic.lower()
+
+    if theme_key == "politics" and ("ai spending" in topic_l or ("ai" in topic_l and "spending" in topic_l)):
+        return "AI Spending Becomes A Policy Fight"
+
+    direct_title = theme_specific_direct_title(theme_key, topic)
+
+    if direct_title:
+        return compact_text(direct_title, 92)
+
+    topic_quality = score_title_quality(theme, topic, topic_terms=topic_terms)
+
+    if (
+        len(topic_words) >= 3
+        and public_editorial_topic_ok(theme, topic, topic_terms=topic_terms, allow_short_topic=False)
+        and title_passes_publishable_bar(theme, topic, topic_terms=topic_terms, min_specificity=0.40)
+        and topic_quality.get("honesty", 0.0) >= 0.72
+        and not topic_quality.get("generic_title")
+        and not topic_quality.get("mechanical_title")
+        and not topic_quality.get("repetitive_title")
+        and topic_quality.get("theme_native_title", True)
+    ):
+        return compact_text(topic, 92)
+
+    if (
+        theme_key == "finance"
+        and len(topic_words) >= 4
+        and re.search(r"\b(are|is|was|were|will|can|could|has|have)\b", topic, flags=re.I)
+        and title_passes_publishable_bar(theme, topic, topic_terms=topic_terms, min_specificity=0.38)
+    ):
+        return compact_text(topic, 92)
+
+    patterns = {
+        "comedy": [
+            "{topic} Is The Joke That Stuck",
+            "The Funny Part Inside {topic}",
+        ],
+        "sports": [
+            "{topic} Split The Room",
+            "The Take Inside {topic}",
+        ],
+        "gaming": [
+            "{topic} Split The Gaming Room",
+            "The Creator Take Inside {topic}",
+        ],
+        "finance": [
+            "{topic} Is The Market Detail",
+            "The Investor Catch Inside {topic}",
+        ],
+        "technology_ai": [
+            "{topic}: The Builder Takeaway",
+            "The AI Question Inside {topic}",
+        ],
+        "health_fitness": [
+            "{topic}: The Habit To Rethink",
+            "The Health Warning Inside {topic}",
+        ],
+        "politics": [
+            "{topic}: The Policy Fight",
+            "The Debate Inside {topic}",
+        ],
+        "truecrime": [
+            "{topic}: The Detail That Changes The Case",
+            "The Case Moment Inside {topic}",
+        ],
+        "popculture": [
+            "The Pop Culture Detail Inside {topic}",
+            "Why {topic} Took Over The Conversation",
+        ],
+    }
+    template_pool = patterns.get(theme_key, ["The Moment Inside {topic}"])
+
+    if popular and signal_is_external:
+        external_patterns = {
+            "sports": "The Clip Fans Replayed: {topic}",
+            "finance": "{topic}: The Clip Viewers Replayed",
+            "gaming": "The Gaming Clip People Replayed: {topic}",
+            "technology_ai": "The Builder Clip People Replayed: {topic}",
+            "truecrime": "The Case Clip People Replayed: {topic}",
+        }
+        template = external_patterns.get(theme_key)
+
+        if template:
+            title = compact_text(template.format(topic=topic), 92)
+
+            if title_passes_publishable_bar(theme, title, topic_terms=topic_terms, min_specificity=0.38):
+                return title
+
+    for template in template_pool:
+        if "{topic} {topic}" in template:
+            continue
+
+        title = compact_text(template.format(topic=topic), 92)
+
+        if topic.lower() in {"the standout moment", "standout moment"}:
+            continue
+
+        if (
+            not re.search(r"\b(split the room)\b.*\b(split the room)\b", title, flags=re.I)
+            and title_passes_publishable_bar(theme, title, topic_terms=topic_terms, min_specificity=0.38)
+        ):
+            return title
+
+    if public_editorial_topic_ok(theme, topic, topic_terms=topic_terms, allow_short_topic=False):
+        return compact_text(topic, 92)
+
+    theme_fallbacks = {
+        "comedy": "The Joke That Actually Landed",
+        "sports": "The Sports Debate That Split The Room",
+        "gaming": "The Gaming Take People Are Arguing About",
+        "finance": "The Market Detail Investors Should Watch",
+        "technology_ai": "The AI Detail Builders Are Debating",
+        "health_fitness": "The Health Habit Worth Rethinking",
+        "politics": "The Debate Clip With Real Context",
+        "truecrime": "The Evidence Detail Worth Rechecking",
+        "popculture": "The Pop Culture Detail People Missed",
+    }
+    return theme_fallbacks.get(theme_key, "The Interview Moment Worth Watching")
+
+
+def build_social_caption(theme_label, topic, adjective="", countdown_slot=None, content_format="countdown", source_title=""):
+    topic = editorial_title_topic(topic)
+
+    if content_format == "popular":
+        return compact_text(
+            f"The part people kept circling back to: {topic}.",
+            160,
+        )
+
+    slot_text = f"Number {countdown_slot}: " if countdown_slot else ""
+    caption_patterns = [
+        f"{slot_text}{topic}. The moment that made the cut.",
+        f"{slot_text}{topic}. Short setup, real payoff.",
+        f"{slot_text}{topic}. The clip says more than the headline.",
+    ]
+    return compact_text(caption_patterns[title_variant_index(theme_label, topic, countdown_slot, count=len(caption_patterns))], 160)
+
+
+def countdown_heading(theme, adjective, total_count):
+    adjective_text = str(adjective or "best").replace("_", " ").upper()
+
+    if int(total_count or 0) <= 1:
+        theme_key = str(theme or "").strip().lower()
+        theme_noun = THEME_TITLE_NOUNS.get(theme_key, theme_key.replace("_", " ").title() or "Interview")
+        return compact_text(f"THE {adjective_text} {theme_noun.upper()} MOMENT THIS WEEK", 96)
+
+    return compact_text(f"TOP {int(total_count)} {adjective_text} MOMENTS THIS WEEK", 96)
+
+
+def normalized_topic_words(topic):
+    cleaned = editorial_title_topic(topic)
+    return {
+        word
+        for word in words_from_text(cleaned)
+        if len(word) >= 4 and word not in WEAK_TOPIC_WORDS
+    }
+
+
+def topics_overlap(left, right):
+    left_words = normalized_topic_words(left)
+    right_words = normalized_topic_words(right)
+
+    if not left_words or not right_words:
+        return False
+
+    overlap = left_words & right_words
+    needed = 1 if min(len(left_words), len(right_words)) <= 2 else 2
+    return len(overlap) >= needed
+
+
+def popular_item_duplicates_countdown(theme, item, countdown_packages):
+    clip = item.get("clip") or {}
+    source_url = clip.get("source_video_url") or item.get("source_video_url") or ""
+    item_topic = clean_headline_topic(
+        theme,
+        clip.get("suggested_title") or clip_summary(clip, item.get("source_title") or ""),
+        clip=clip,
+        source_title=item.get("source_title", ""),
+        channel=item.get("channel_label", ""),
+    )
+
+    for package in countdown_packages:
+        package_url = package.get("source_video_url") or ""
+
+        if source_url and package_url and source_url != package_url:
+            continue
+
+        package_topic = (
+            (package.get("content_signal") or {}).get("topic")
+            or package.get("title")
+            or ""
+        )
+
+        if topics_overlap(item_topic, package_topic):
+            return True
+
+    return False
 
 
 def title_variant_index(*values, count=1):
@@ -1430,6 +2961,7 @@ def build_theme_native_editorial_title(theme, topic, adjective, countdown_slot, 
     theme_key = str(theme or "").strip().lower()
     theme_noun = THEME_TITLE_NOUNS.get(theme_key, theme_key.replace("_", " ").title() or "Interview")
     topic_text = editorial_title_topic(topic)
+    topic_text = re.sub(r"^the\s+", "", topic_text, flags=re.I)
     adjective_text = str(adjective or "best").replace("_", " ").title()
     period_text = period_label().title()
 
@@ -1472,61 +3004,114 @@ def build_theme_native_editorial_title(theme, topic, adjective, countdown_slot, 
         template = template_pool[title_variant_index(theme, adjective, period_text, count=len(template_pool))]
         return compact_text(template.format(theme=theme_noun, adjective=adjective_text, period=period_text), 96)
 
-    patterns = {
+    return build_social_title(theme, topic_text, content_format="countdown")
+
+
+def spoken_hook_topic(topic, clip=None):
+    clip = clip or {}
+    candidate = (
+        topic
+        or clip.get("suggested_title")
+        or clip.get("topic")
+        or clip_summary(clip, clip.get("source_title") or "this moment")
+    )
+    candidate = editorial_title_topic(candidate)
+    candidate = re.sub(
+        r"^[A-Z][A-Za-z0-9'.-]+(?:\s+[A-Z][A-Za-z0-9'.-]+){0,3}\s+"
+        r"(tells|explains|reveals|shares|breaks down|admits|describes|questions)\s+",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = re.sub(r"^(the|a|an)\s+", "", candidate, flags=re.I).strip()
+    return compact_text(candidate, 44).strip(" .") or "this moment"
+
+
+def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source=""):
+    theme_key = str(theme or "").strip().lower()
+    hook_topic = spoken_hook_topic(topic, clip)
+    if re.match(r"^(why|how|what|when|where)\b", hook_topic, flags=re.I):
+        hook_topic = hook_topic[0].lower() + hook_topic[1:]
+
+    if re.match(r"^(wildest|funniest|weirdest|strangest|biggest|best|worst|most)\b", hook_topic, flags=re.I):
+        hook_topic = f"the {hook_topic}"
+    adjective_text = compact_text(str(adjective or "best").replace("most ", ""), 22).lower()
+    signal_source = str(signal_source or "").strip().lower()
+
+    theme_templates = {
         "comedy": [
-            "{topic} Became #{slot} In The Comedy Countdown",
-            "The Joke That Put {topic} At #{slot}",
-        ],
-        "sports": [
-            "{topic} Put #{slot} On The Sports Board",
-            "The {theme} Debate Behind #{slot}: {topic}",
+            "Wait for the turn in {topic}. It gets ridiculous fast.",
+            "This starts with {topic}. Then it goes completely sideways.",
+            "The funniest part is not the first line. It is the turn after it.",
         ],
         "finance": [
-            "{topic} Became #{slot} On The Business Board",
-            "The Operator Signal Behind #{slot}: {topic}",
-        ],
-        "technology_ai": [
-            "{topic} Became #{slot} In The AI Builder List",
-            "The AI Tradeoff Behind #{slot}: {topic}",
+            "This money moment looks simple, then the catch shows up.",
+            "Here is the part of {topic} that changes the take.",
+            "Here is the catch inside {topic}.",
         ],
         "health_fitness": [
-            "{topic} Became #{slot} In The Wellness List",
-            "The Practical Health Signal At #{slot}: {topic}",
+            "This detail about {topic} is the part people skip.",
+            "The useful part is tiny, but it changes the whole takeaway.",
+            "This sounds basic until the health detail clicks.",
         ],
         "politics": [
-            "{topic} Became #{slot} In The Politics Board",
-            "The Context Behind #{slot}: {topic}",
-        ],
-        "truecrime": [
-            "{topic} Became #{slot} In The Case Board",
-            "The Testimony Signal Behind #{slot}: {topic}",
+            "This is where the {topic} argument gets uncomfortable.",
+            "The policy point is simple. The implication is not.",
+            "Listen to the part that makes this debate messy.",
         ],
         "popculture": [
-            "{topic} Became #{slot} In The Culture List",
-            "The Guest Reveal Behind #{slot}: {topic}",
+            "This {topic} moment gets awkward fast.",
+            "The celebrity answer sounds safe, then it swerves.",
+            "This is the part fans are going to replay.",
+        ],
+        "sports": [
+            "This take on {topic} gets competitive fast.",
+            "The sports debate starts calm, then the edge shows up.",
+            "This is the part that makes the locker room argument real.",
+        ],
+        "gaming": [
+            "This take on {topic} is exactly what gamers argue about.",
+            "The gaming desk sounds calm here, but the take has teeth.",
+            "This starts as creator talk, then turns into the real gaming debate.",
+        ],
+        "technology_ai": [
+            "This take on {topic} is where the builder room splits.",
+            "The tech point sounds small, then the bigger problem appears.",
+            "This is the AI detail people are going to argue about.",
+        ],
+        "truecrime": [
+            "This detail changes how the whole story feels.",
+            "The case sounds one way, until this part lands.",
+            "This is the moment that makes the timeline feel different.",
         ],
     }
-    template_pool = patterns.get(theme_key, ["{topic} Became #{slot} In The {theme} List"])
-    template = template_pool[title_variant_index(theme, topic_text, countdown_slot, count=len(template_pool))]
-    title = template.format(
-        topic=topic_text,
-        slot=countdown_slot,
-        total=total_count,
-        theme=theme_noun,
-        adjective=adjective_text,
-    )
-    return compact_text(title, 96)
+
+    if signal_source == "youtube_heatmap":
+        templates = [
+            "People kept replaying this part: {topic}. Watch the turn.",
+            "This is the replay spike, and the reason is obvious in a second.",
+            "Viewers came back to this moment for a reason.",
+        ]
+    elif signal_source in {"timestamp_mentions", "chapters", "public_popularity_signal"}:
+        templates = [
+            "This timestamp kept showing up: {topic}.",
+            "This is the part people pointed to first.",
+            "The audience kept circling this moment.",
+        ]
+    else:
+        templates = theme_templates.get(theme_key) or [
+            "This {adjective} moment is the part that earns the replay.",
+            "The setup sounds simple, then the real point lands.",
+            "This is the moment that stood out.",
+        ]
+
+    template = templates[title_variant_index(theme_key, hook_topic, adjective_text, signal_source, count=len(templates))]
+    script = template.format(topic=hook_topic, adjective=adjective_text).strip()
+    return compact_text(script, 118).rstrip(".") + "."
 
 
 def build_editorial_intro(theme, topic, rank, total_count, adjective, clip):
-    theme_label = theme_profile(theme)["label"]
-    context = clip.get("_countdown_context") or {}
-    hours_phrase = format_hours_phrase(context.get("watched_hours", 0))
-
-    return (
-        f"I watched {hours_phrase} of {theme_label}. "
-        f"Top {total_count} {adjective} moments."
-    )
+    return build_moment_hook_script(theme, topic, adjective, clip)
 
 
 def build_output_package(theme, output_path, source_clip, topic_item, rank, adjective, date_key, is_recap=False):
@@ -1535,10 +3120,16 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
     caption_style = profile.get("caption_style", "")
     overlay_style = profile.get("overlay_style", "")
     framing_style = profile.get("framing_style", "")
-    topic = topic_item["topic"]
+    best_clip = topic_item["clips"][0]
+    topic = clean_headline_topic(
+        theme,
+        topic_item["topic"],
+        clip=best_clip,
+        source_title=best_clip.get("source_title", ""),
+        channel=best_clip.get("source_channel", ""),
+    )
     total_count = int(topic_item.get("_total_count") or DAILY_TOPIC_COUNT)
     countdown_slot = int(topic_item.get("_countdown_slot") or countdown_slot_for_rank(rank, total_count))
-    best_clip = topic_item["clips"][0]
     title = build_theme_native_editorial_title(
         theme,
         topic,
@@ -1547,9 +3138,12 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
         total_count,
         is_recap=is_recap,
     )
-    description = (
-        f"Ranking the {adjective} moments from {period_label()} {theme_label} podcasts. "
-        f"Number {countdown_slot} is about {topic}."
+    description = build_social_caption(
+        theme_label,
+        topic,
+        adjective=adjective,
+        countdown_slot=countdown_slot,
+        content_format="countdown",
     )
     hashtags = unique_sequence(profile["hashtags"] + ["#podcastscan", "#recap", "#shorts"])[:8]
     tags = unique_sequence(profile["tags"] + [
@@ -1633,7 +3227,7 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
                 "title": title[:100],
                 "description": f"{description}\n\n{' '.join(hashtags)}",
                 "tags": tags,
-                "privacy_status": "private",
+                "privacy_status": YOUTUBE_PRIVACY_STATUS,
             }
         },
         "posting_status": {
@@ -1648,75 +3242,75 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
 
 THEME_VISUAL_STYLES = {
     "comedy": {
-        "accent": "0xFFE08A",
-        "accent2": "0xFF4B5C",
+        "accent": "0xFFD166",
+        "accent2": "0xFF2E88",
         "cream": "0xFFF4B8",
-        "mint": "0xB7D7C2",
-        "blue": "0x6F8FAF",
+        "mint": "0x4DE1FF",
+        "blue": "0xB7FF5A",
         "dark": "0x20151E",
         "name": "comedy_arcade_countdown",
     },
     "sports": {
-        "accent": "0x7CFF6B",
-        "accent2": "0x4BA3FF",
-        "cream": "0xF4FFE8",
-        "mint": "0xBDEFD1",
-        "blue": "0x4BA3FF",
-        "dark": "0x162016",
+        "accent": "0xB7FF5A",
+        "accent2": "0x23A6FF",
+        "cream": "0xF8FFE8",
+        "mint": "0x62FFD0",
+        "blue": "0x23A6FF",
+        "dark": "0x0F1D22",
         "name": "sports_scoreboard_countdown",
     },
     "finance": {
-        "accent": "0xD6F36A",
-        "accent2": "0x59C3A5",
-        "cream": "0xF3F7D7",
-        "mint": "0xB7D7C2",
-        "blue": "0x6F8FAF",
-        "dark": "0x14211E",
+        "accent": "0xD8FF65",
+        "accent2": "0x00D6A3",
+        "cream": "0xF5FFD0",
+        "mint": "0x9BE7C7",
+        "blue": "0x43B5FF",
+        "dark": "0x101C1A",
         "name": "operator_notebook_countdown",
     },
     "technology_ai": {
-        "accent": "0x8CF7FF",
-        "accent2": "0x9B8CFF",
+        "accent": "0x61F7FF",
+        "accent2": "0xA45CFF",
         "cream": "0xE7FBFF",
-        "mint": "0xB7D7FF",
-        "blue": "0x6F8FAF",
-        "dark": "0x101927",
+        "mint": "0xAEFFCB",
+        "blue": "0x4D7DFF",
+        "dark": "0x0D1324",
         "name": "builder_brief_countdown",
     },
     "health_fitness": {
-        "accent": "0xB7D7C2",
-        "accent2": "0xFFE08A",
-        "cream": "0xFFF4B8",
-        "mint": "0xCDE8D6",
-        "blue": "0x6F8FAF",
-        "dark": "0x18251F",
+        "accent": "0x7CFFB2",
+        "accent2": "0xFFE85C",
+        "cream": "0xFFF7C5",
+        "mint": "0xB7FFD7",
+        "blue": "0x5AD7FF",
+        "dark": "0x10231B",
         "name": "wellness_takeaway_countdown",
     },
     "politics": {
-        "accent": "0xE6EDF7",
-        "accent2": "0xC94C4C",
-        "cream": "0xF4F0E8",
-        "mint": "0xA9C4D8",
-        "blue": "0x6F8FAF",
-        "dark": "0x171B24",
+        "accent": "0xF5F7FF",
+        "accent2": "0xFF4D5F",
+        "cream": "0xFFF1D6",
+        "mint": "0x90D6FF",
+        "blue": "0x527BFF",
+        "dark": "0x121827",
         "name": "civic_context_countdown",
     },
     "truecrime": {
-        "accent": "0xD8C7A1",
-        "accent2": "0xA54343",
-        "cream": "0xF2E8D2",
-        "mint": "0xAFC4B8",
-        "blue": "0x6F8FAF",
-        "dark": "0x171412",
+        "accent": "0xFFD08A",
+        "accent2": "0xFF3D3D",
+        "cream": "0xFFF0D2",
+        "mint": "0xA8C7BA",
+        "blue": "0x6EA9FF",
+        "dark": "0x161112",
         "name": "case_file_countdown",
     },
     "popculture": {
-        "accent": "0xFFB7D5",
-        "accent2": "0xFFE08A",
-        "cream": "0xFFF4B8",
-        "mint": "0xB7D7C2",
-        "blue": "0x8EB6FF",
-        "dark": "0x201622",
+        "accent": "0xFF71C8",
+        "accent2": "0xFFE85C",
+        "cream": "0xFFF3B0",
+        "mint": "0x7FFFD4",
+        "blue": "0x9EB6FF",
+        "dark": "0x1B1224",
         "name": "culture_spotlight_countdown",
     },
 }
@@ -1993,9 +3587,15 @@ def font_path_or_fallback(path, fallback):
     return r"C:\Windows\Fonts\arial.ttf"
 
 
-def editorial_intro_duration():
+def editorial_intro_duration(audio_path=None):
     target = min(EDITORIAL_INTRO_TARGET_SECONDS, EDITORIAL_INTRO_MAX_SECONDS)
-    return max(3.25, min(5.25, target))
+
+    if audio_path:
+        audio_duration = get_duration(audio_path)
+        if audio_duration > 0:
+            target = max(target, audio_duration + 0.45)
+
+    return max(3.25, min(EDITORIAL_INTRO_MAX_SECONDS, target))
 
 
 def pil_font(path, size):
@@ -2346,8 +3946,8 @@ def card_morph_layer(source_card, final_card, width, height, progress):
     layer = Image.new("RGBA", (max(1, int(width)), max(1, int(height))), (0, 0, 0, 0))
     source = source_card.resize(layer.size, Image.Resampling.LANCZOS)
     final = final_card.resize(layer.size, Image.Resampling.LANCZOS)
-    source_alpha = max(0.0, 1.0 - ease_in_out_cubic((progress - 0.78) / 0.22))
-    final_alpha = ease_in_out_cubic((progress - 0.74) / 0.22)
+    source_alpha = max(0.0, 1.0 - ease_in_out_cubic((progress - 0.86) / 0.14))
+    final_alpha = ease_in_out_cubic((progress - 0.62) / 0.28)
 
     if progress >= 0.96:
         layer.alpha_composite(final)
@@ -2700,7 +4300,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     elif lock_progress > 0:
                         alpha *= max(0.46, 1 - wheel_exit_progress * 0.36)
 
-                    if key in display_keys and display_morph_progress > 0.01:
+                    if key in display_keys and display_morph_progress > 0.44:
                         continue
 
                     if lock_progress > 0 and key not in display_keys:
@@ -2764,7 +4364,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     alpha = min(1.0, start_pose["alpha"] + card_progress * 0.34)
                     glow_alpha = int(95 * card_progress * (0.6 + 0.4 * math.sin(t * 9 + index)))
 
-                    if card_progress > 0.88:
+                    if card_progress > 0.94:
                         draw.rounded_rectangle(
                             (42, target_y - 12, 1038, target_y + 188),
                             radius=12,
@@ -2826,12 +4426,18 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
 
     best_clip = topic_clips[0]
     source_clip = best_clip["output_file"]
-    topic = topic_item["topic"]
+    topic = clean_headline_topic(
+        theme,
+        topic_item["topic"],
+        clip=best_clip,
+        source_title=best_clip.get("source_title", ""),
+        channel=best_clip.get("source_channel", ""),
+    )
     total_count = int(topic_item.get("_total_count") or DAILY_TOPIC_COUNT)
     countdown_slot = int(topic_item.get("_countdown_slot") or countdown_slot_for_rank(rank, total_count))
     script = build_editorial_intro(theme, topic, rank, total_count, adjective, best_clip)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, rank)
-    intro_duration = max(2.4, min(EDITORIAL_INTRO_MAX_SECONDS, get_duration(intro_audio) + 0.2))
+    intro_duration = editorial_intro_duration(intro_audio)
     transition_duration = max(1.0, EDITORIAL_TRANSITION_SECONDS) if len(topic_clips) > 1 else 0.0
     available_clip_time = max(
         len(topic_clips) * EDITORIAL_CLIP_MIN_SECONDS,
@@ -2849,7 +4455,7 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
     period_upper = period_label().upper()
     output_filename = clean_filename(f"{date_key}_{theme}_countdown_{countdown_slot:02d}_{topic}") + "_upload.mp4"
     output_path = os.path.join(output_dir, output_filename)
-    ranking_title = f"RANKING THE {adjective.upper()} MOMENTS"
+    ranking_title = countdown_heading(theme, adjective, total_count)
     ranking_subtitle = f"FROM {period_upper} {theme_label_upper} PODCASTS"
     moment_label = f"#{countdown_slot}"
     topic_text = compact_text(topic.upper(), 90)
@@ -3065,7 +4671,13 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
     best_clip = topic_clips[0]
     best_clip["_countdown_context"] = context
     source_clip = best_clip["output_file"]
-    topic = topic_item["topic"]
+    topic = clean_headline_topic(
+        theme,
+        topic_item["topic"],
+        clip=best_clip,
+        source_title=best_clip.get("source_title", ""),
+        channel=best_clip.get("source_channel", ""),
+    )
     total_count = int(topic_item.get("_total_count") or len(context.get("top_entries", [])) or EDITORIAL_COUNTDOWN_SIZE)
     countdown_slot = int(topic_item.get("_countdown_slot") or countdown_slot_for_rank(rank, total_count))
     current_entry = topic_item.get("_countdown_entry") or {
@@ -3077,7 +4689,7 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
     }
     script = build_editorial_intro(theme, topic, rank, total_count, reel_adjective, best_clip)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, rank)
-    intro_duration = editorial_intro_duration()
+    intro_duration = editorial_intro_duration(intro_audio)
     rank_card_duration = max(0.0, min(0.7, EDITORIAL_RANK_CARD_SECONDS))
     transition_duration = EDITORIAL_TRANSITION_SECONDS if len(topic_clips) > 1 else 0.0
     fixed_visual_time = intro_duration + rank_card_duration + (transition_duration * (len(topic_clips) - 1))
@@ -3095,11 +4707,18 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
     theme_label = context.get("theme_label") or theme_profile(theme)["label"]
     output_filename = clean_filename(f"{date_key}_{theme}_countdown_{countdown_slot:02d}_{topic}") + "_upload.mp4"
     output_path = os.path.join(output_dir, output_filename)
-    ranking_title = f"TOP {total_count} {reel_adjective.upper()} MOMENTS THIS WEEK"
+    ranking_title = countdown_heading(theme, reel_adjective, total_count)
     ranking_subtitle = watched_header_text(context)
     moment_label = f"#{countdown_slot}"
     number_label = f"NUMBER {countdown_slot}"
-    topic_text = compact_text((current_entry.get("topic") or topic).upper(), 90)
+    current_topic = clean_headline_topic(
+        theme,
+        current_entry.get("topic") or topic,
+        clip=best_clip,
+        source_title=best_clip.get("source_title", ""),
+        channel=best_clip.get("source_channel", ""),
+    )
+    topic_text = compact_text(current_topic.upper(), 90)
     topic_font_size = fitted_topic_font_size(topic_text)
     source_texts = [
         compact_text(clip.get("source_title") or "source episode", 64)
@@ -3375,16 +4994,10 @@ def popular_segment_labels(item):
 
 
 def build_popular_segment_script(theme, item):
-    channel = item.get("channel_label") or "this podcast"
+    clip = item.get("clip") or {}
+    topic = editorial_title_topic(clip.get("suggested_title") or clip_summary(clip, item.get("source_title") or "this moment"))
     source = popular_segment_signal_source(item)
-
-    if source == "youtube_heatmap":
-        return f"Most replayed moment from {channel}. This is the part people kept coming back to."
-
-    if source in {"timestamp_mentions", "chapters", "public_popularity_signal"}:
-        return f"Most popular moment from {channel}. This is the part worth watching."
-
-    return f"Best moment from {channel}. This is the part that stood out."
+    return build_moment_hook_script(theme, topic, "standout", clip, signal_source=source)
 
 
 def build_popular_output_package(theme, output_path, item, index, date_key, script, intro_audio, intro_duration, clip_duration):
@@ -3396,13 +5009,21 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
     clip = item["clip"]
     source_title = item.get("source_title") or clip.get("source_title") or "Podcast interview"
     channel = item.get("channel_label") or "Podcast Channel"
-    topic = clip_summary(clip, source_title)
+    raw_topic = clip.get("suggested_title") or clip_summary(clip, source_title)
+    topic = clean_headline_topic(
+        theme,
+        raw_topic,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+    )
     signal_source = popular_segment_signal_source(item)
-    title_prefix = "Most Replayed" if signal_source == "youtube_heatmap" else ("Most Popular" if signal_source != "internal_quality_fallback" else "Best Moment")
-    title = compact_text(f"{title_prefix}: {topic} From {channel}", 96)
-    description = (
-        f"The most replayed/popular segment from {source_title}. "
-        f"This moment is about {topic}."
+    title = build_social_title(theme, topic, content_format="popular", signal_source=signal_source)
+    description = build_social_caption(
+        theme_label,
+        topic,
+        content_format="popular",
+        source_title=source_title,
     )
     hashtags = unique_sequence(profile["hashtags"] + ["#mostreplayed", "#podcastclip", "#shorts"])[:8]
     tags = unique_sequence(profile["tags"] + [
@@ -3485,7 +5106,7 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
                 "title": title[:100],
                 "description": f"{description}\n\n{' '.join(hashtags)}",
                 "tags": tags,
-                "privacy_status": "private",
+                "privacy_status": YOUTUBE_PRIVACY_STATUS,
             }
         },
         "posting_status": {
@@ -3512,7 +5133,10 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
 
     source_title = compact_text(item.get("source_title") or clip.get("source_title") or "Podcast interview", 76)
     channel = compact_text(item.get("channel_label") or "Podcast Channel", 42)
-    topic = compact_text(clip_summary(clip, source_title), 82)
+    topic = compact_text(
+        clean_headline_topic(theme, clip_summary(clip, source_title), clip=clip, source_title=source_title, channel=channel),
+        72,
+    )
     style = visual_style(index, theme)
     accent = style["accent"]
     accent2 = style["accent2"]
@@ -3524,12 +5148,15 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     signal_label, popularity_label, detail_label = popular_segment_labels(item)
     script = build_popular_segment_script(theme, item)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, 1000 + index)
-    intro_duration = max(2.2, min(4.0, POPULAR_SEGMENT_INTRO_SECONDS))
+    intro_duration = max(
+        POPULAR_SEGMENT_INTRO_SECONDS,
+        min(EDITORIAL_INTRO_MAX_SECONDS, get_duration(intro_audio) + 0.45),
+    )
     clip_duration = clip_play_duration_for(source_clip, max(POPULAR_SEGMENT_MAX_SECONDS - intro_duration, EDITORIAL_CLIP_MIN_SECONDS))
     output_filename = clean_filename(f"{date_key}_{theme}_popular_{index:02d}_{source_title}") + "_upload.mp4"
     output_path = os.path.join(output_dir, output_filename)
     source_title_size = fitted_label_font_size(source_title, max_width=860, max_size=44, min_size=28)
-    topic_size = fitted_label_font_size(topic, max_width=770, max_size=40, min_size=27)
+    topic_size = fitted_label_font_size(topic, max_width=780, max_size=48, min_size=34)
     channel_size = fitted_label_font_size(channel, max_width=560, max_size=31, min_size=22)
     font_bold = ffmpeg_path(font_path_or_fallback(FONT_BOLD_FILE, FONT_FILE))
     font_meta = ffmpeg_path(font_path_or_fallback(FONT_META_FILE, FONT_FILE))
@@ -3567,11 +5194,11 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
         f"drawbox=x=640:y=42:w=386:h=78:color={mint}@0.58:t=2,"
         f"drawtext=fontfile='{font_meta}':text='{drawtext_text(archive_label)}':x=664:y=57:fontsize=27:fontcolor={cream},"
         f"drawtext=fontfile='{font_meta}':text='{drawtext_text(channel.upper())}':x=664:y=88:fontsize=20:fontcolor=white@0.70,"
-        f"drawbox=x=74:y=1600:w=870:h=166:color=black@0.73:t=fill,"
-        f"drawbox=x=74:y=1600:w=870:h=166:color={mint}@0.62:t=2,"
-        f"drawbox=x=74:y=1600:w=14:h=166:color={accent}@0.96:t=fill,"
-        f"drawtext=fontfile='{font_bold}':text='{drawtext_text(topic.upper())}':x=108:y=1628:fontsize={topic_size}:fontcolor=white:shadowcolor=black@0.48:shadowx=2:shadowy=2,"
-        f"drawtext=fontfile='{font_meta}':text='{drawtext_text(source_title)}':x=110:y=1708:fontsize=25:fontcolor={cream}@0.88,"
+        f"drawbox=x=82:y=1622:w=778:h=134:color=black@0.82:t=fill,"
+        f"drawbox=x=82:y=1622:w=778:h=134:color={mint}@0.66:t=2,"
+        f"drawbox=x=82:y=1622:w=14:h=134:color={accent}@0.96:t=fill,"
+        f"drawtext=fontfile='{font_bold}':text='{drawtext_text(topic.upper())}':x=118:y=1646:fontsize={topic_size}:fontcolor=white:shadowcolor=black@0.52:shadowx=2:shadowy=2,"
+        f"drawtext=fontfile='{font_meta}':text='{drawtext_text(channel.upper())}':x=120:y=1714:fontsize=24:fontcolor={cream}@0.88,"
         f"drawbox=x=74:y=1848:w=932:h=7:color=black@0.52:t=fill,"
         f"drawbox=x=74:y=1848:w='932*t/{clip_duration:.3f}':h=7:color={accent}@0.98:t=fill,"
         f"drawbox=x=74:y=1861:w='932*t/{clip_duration:.3f}':h=3:color={mint}@0.78:t=fill,"
@@ -3749,7 +5376,7 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
         return 0
 
     countdown_count = min(DAILY_TOPIC_COUNT, EDITORIAL_COUNTDOWN_SIZE)
-    topic_groups = group_clips_by_topic(rendered_clips)[:countdown_count]
+    topic_groups = group_clips_by_topic(rendered_clips, theme=theme)[:countdown_count]
 
     if not topic_groups:
         print("No topic groups found for editorial generation.\n")
@@ -3760,6 +5387,7 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
     brief_items = []
     popular_brief_items = []
     rejected_items = []
+    visually_rejected_countdown_sources = set()
     reel_adjective = take_next_adjectives(theme, 1)[0]
     context = build_countdown_context(theme, paths, rendered_clips, topic_groups, reel_adjective)
     attach_countdown_context(topic_groups, context)
@@ -3781,13 +5409,25 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
         )
 
         if not package_is_upload_ready(package):
+            gate_flags = (package.get("editorial_gates") or {}).get("flags", [])
+            render_reasons = (package.get("render_qc") or {}).get("rejection_reasons", [])
+            rejection_reasons = list(render_reasons) + [f"editorial gate: {flag}" for flag in gate_flags]
             rejected_items.append({
                 "type": "countdown",
                 "countdown_slot": topic_item["_countdown_slot"],
                 "topic": topic_item["topic"],
-                "rejection_reasons": (package.get("render_qc") or {}).get("rejection_reasons", []),
+                "rejection_reasons": rejection_reasons,
             })
-            print(f"Skipping rejected countdown short #{topic_item['_countdown_slot']} from upload metadata.")
+
+            if any(
+                re.search(r"(background|misses speaker|no-speaker|off-center|render_qc_failed)", reason, flags=re.I)
+                for reason in rejection_reasons
+            ):
+                for clip in topic_item.get("clips") or []:
+                    visually_rejected_countdown_sources.add(clip_state_key(theme, clip))
+
+            reason_text = "; ".join(rejection_reasons) or "package did not pass upload-ready checks"
+            print(f"Skipping rejected countdown short #{topic_item['_countdown_slot']} from upload metadata: {reason_text}")
             continue
 
         packages.append(package)
@@ -3796,7 +5436,9 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             "rank": index,
             "countdown_slot": topic_item["_countdown_slot"],
             "adjective": adjective,
-            "topic": topic_item["topic"],
+            "topic": package.get("content_signal", {}).get("topic") or editorial_title_topic(topic_item["topic"]),
+            "title": package.get("title", ""),
+            "caption": package.get("caption", ""),
             "score": topic_item.get("score"),
             "sources": sorted(topic_item.get("sources", []))[:5],
             "output_file": package["video_file"],
@@ -3822,7 +5464,47 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             print("Skipping rejected daily recap from upload metadata.")
 
     if RENDER_POPULAR_SEGMENT_SHORTS:
-        popular_items = popular_segment_items(theme, paths, rendered_clips)
+        raw_popular_items = popular_segment_items(theme, paths, rendered_clips)
+        popular_items = []
+
+        for item in raw_popular_items:
+            if item.get("source_state_key") in visually_rejected_countdown_sources:
+                rejected_items.append({
+                    "type": "popular_segment",
+                    "source_title": item.get("source_title", ""),
+                    "rejection_reasons": ["source already failed countdown visual/background-lock QC"],
+                })
+                print(
+                    "Skipping popular segment source already rejected by visual QC: "
+                    f"{item.get('source_title', '')}"
+                )
+                continue
+
+            if popular_item_duplicates_countdown(theme, item, countdown_packages):
+                rejected_items.append({
+                    "type": "popular_segment",
+                    "source_title": item.get("source_title", ""),
+                    "rejection_reasons": ["popular segment duplicates countdown source/topic"],
+                })
+                print(
+                    "Skipping duplicate popular segment already covered by countdown: "
+                    f"{item.get('source_title', '')}"
+                )
+                continue
+
+            if clip_is_popular_segment_usable(item.get("clip") or {}):
+                popular_items.append(item)
+                continue
+
+            rejected_items.append({
+                "type": "popular_segment",
+                "source_title": item.get("source_title", ""),
+                "rejection_reasons": ["source clip failed strict popular-segment visual QC"],
+            })
+            print(
+                "Skipping popular segment source with weak visual QC: "
+                f"{item.get('source_title', '')}"
+            )
 
         if popular_items:
             print(f"Rendering {len(popular_items)} most replayed/popular segment shorts...")
@@ -3841,13 +5523,17 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             )
 
             if not package_is_upload_ready(package):
+                gate_flags = (package.get("editorial_gates") or {}).get("flags", [])
+                render_reasons = (package.get("render_qc") or {}).get("rejection_reasons", [])
+                rejection_reasons = list(render_reasons) + [f"editorial gate: {flag}" for flag in gate_flags]
                 rejected_items.append({
                     "type": "popular_segment",
                     "rank": index,
                     "source_title": item.get("source_title", ""),
-                    "rejection_reasons": (package.get("render_qc") or {}).get("rejection_reasons", []),
+                    "rejection_reasons": rejection_reasons,
                 })
-                print(f"Skipping rejected popular segment #{index} from upload metadata.")
+                reason_text = "; ".join(rejection_reasons) or "package did not pass upload-ready checks"
+                print(f"Skipping rejected popular segment #{index} from upload metadata: {reason_text}")
                 continue
 
             packages.append(package)
@@ -3858,6 +5544,8 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
                 "source_video_url": item.get("source_video_url", ""),
                 "popularity_score": item.get("popularity_score", 0),
                 "output_file": package["video_file"],
+                "title": package.get("title", ""),
+                "caption": package.get("caption", ""),
                 "script": package.get("editorial_script", ""),
                 "content_signal": package.get("content_signal", {}),
             })
@@ -3919,4 +5607,7 @@ def run_daily_editorial(theme=None):
 
 
 if __name__ == "__main__":
-    run_daily_editorial()
+    parser = argparse.ArgumentParser(description="Generate ranked editorial shorts.")
+    parser.add_argument("--theme", help="Optional theme to generate. Omit to run every active theme.")
+    args = parser.parse_args()
+    run_daily_editorial(theme=args.theme)

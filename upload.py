@@ -38,6 +38,7 @@ THEME_TOKEN_FILES = {
     "politics": os.path.join(BASE_DIR, "youtube_token_politics.json"),
     "popculture": os.path.join(BASE_DIR, "youtube_token_popculture.json"),
     "sports": os.path.join(BASE_DIR, "youtube_token_sports.json"),
+    "gaming": os.path.join(BASE_DIR, "youtube_token_gaming.json"),
     "technology_ai": os.path.join(BASE_DIR, "youtube_token_technology_ai.json"),
     "truecrime": os.path.join(BASE_DIR, "youtube_token_truecrime.json"),
 }
@@ -48,12 +49,13 @@ THEME_CHANNEL_HANDLES = {
     "politics": "@CivicsArchive",
     "popculture": "@MainstreamArchive",
     "sports": "@SportsAthelticsArchive",
+    "gaming": "@VideoGamerArchive",
     "technology_ai": "@TechAIArchive",
     "truecrime": "@CriminologyArchive",
 }
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
-DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
+DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "0"))
 
 CURRENT_THEME = None
 UPLOAD_PATH = None
@@ -225,7 +227,15 @@ def get_authenticated_service():
         else:
             flow = InstalledAppFlow.from_client_config(client_config, YOUTUBE_SCOPES)
 
-        credentials = flow.run_local_server(port=0, prompt="consent")
+        credentials = flow.run_local_server(
+            port=0,
+            prompt="consent",
+            authorization_prompt_message=(
+                "\nOpen this URL and choose the expected YouTube channel:\n{url}\n"
+            ),
+            success_message="YouTube authorization complete. You can close this tab.",
+            open_browser=True,
+        )
 
     with open(token_file, "w", encoding="utf-8") as token_handle:
         token_handle.write(credentials.to_json())
@@ -277,7 +287,7 @@ def validate_authenticated_channel(youtube):
             f"{channel_label(authenticated_channel)}. Delete {os.path.basename(get_token_file())} and authorize the correct channel."
         )
 
-    print(f"Authenticated YouTube channel for '{CURRENT_THEME}': {channel_label(authenticated_channel)}")
+    print(f"Authenticated YouTube channel for '{CURRENT_THEME}': {channel_label(authenticated_channel)}", flush=True)
 
 
 def clip_already_uploaded(package):
@@ -326,6 +336,7 @@ MOJIBAKE_REPLACEMENTS = {
 PUBLIC_THEME_LABELS = {
     "comedy": "Comedy",
     "finance": "Finance",
+    "gaming": "Gaming",
     "health_fitness": "Health & Fitness",
     "politics": "Politics",
     "popculture": "Pop Culture",
@@ -831,12 +842,12 @@ def authorize_youtube_for_theme(theme_name=DEFAULT_THEME):
         )
 
     token_file = get_token_file()
-    print(f"Authorizing YouTube channel for theme '{CURRENT_THEME}'.")
-    print(f"Expected channel: {get_expected_channel_handle()}")
-    print(f"Token file: {token_file}")
+    print(f"Authorizing YouTube channel for theme '{CURRENT_THEME}'.", flush=True)
+    print(f"Expected channel: {get_expected_channel_handle()}", flush=True)
+    print(f"Token file: {token_file}", flush=True)
     youtube = get_authenticated_service()
     validate_authenticated_channel(youtube)
-    print(f"YouTube token ready: {token_file}")
+    print(f"YouTube token ready: {token_file}", flush=True)
     return token_file
 
 
@@ -862,7 +873,7 @@ def upload_youtube(theme=None, limit=None, force=False, all_themes=False):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Upload shortform clips to YouTube as private drafts.")
+    parser = argparse.ArgumentParser(description="Upload shortform clips to YouTube with each theme's configured privacy.")
     parser.add_argument("--theme", help="Optional theme to upload.")
     parser.add_argument("--all", action="store_true", help="Upload every discovered theme.")
     parser.add_argument("--limit", type=int, help="Optional max number of clips to upload per theme.")

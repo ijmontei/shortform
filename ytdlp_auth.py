@@ -1,5 +1,6 @@
 import os
 import argparse
+import configparser
 import csv
 import json
 import socket
@@ -387,6 +388,286 @@ def cookie_file_diagnostics_text(cookiefile=None):
     )
 
 
+def browser_user_data_root(browser):
+    browser = str(browser or "").strip().lower()
+    local_app_data = os.getenv("LOCALAPPDATA", "")
+    app_data = os.getenv("APPDATA", "")
+
+    if browser == "chrome":
+        return os.path.join(local_app_data, "Google", "Chrome", "User Data")
+
+    if browser == "edge":
+        return os.path.join(local_app_data, "Microsoft", "Edge", "User Data")
+
+    if browser == "firefox":
+        return os.path.join(app_data, "Mozilla", "Firefox")
+
+    return ""
+
+
+def browser_executable(browser):
+    browser = str(browser or "").strip().lower()
+    local_app_data = os.getenv("LOCALAPPDATA", "")
+    program_files = [os.getenv("PROGRAMFILES", ""), os.getenv("PROGRAMFILES(X86)", "")]
+
+    if browser == "chrome":
+        candidates = [
+            os.path.join(path, "Google", "Chrome", "Application", "chrome.exe")
+            for path in program_files
+            if path
+        ]
+        candidates.append(os.path.join(local_app_data, "Google", "Chrome", "Application", "chrome.exe"))
+    elif browser == "edge":
+        candidates = [
+            os.path.join(path, "Microsoft", "Edge", "Application", "msedge.exe")
+            for path in program_files
+            if path
+        ]
+        candidates.append(os.path.join(local_app_data, "Microsoft", "Edge", "Application", "msedge.exe"))
+    elif browser == "firefox":
+        candidates = [
+            os.path.join(path, "Mozilla Firefox", "firefox.exe")
+            for path in program_files
+            if path
+        ]
+        candidates.append(os.path.join(local_app_data, "Mozilla Firefox", "firefox.exe"))
+    else:
+        candidates = []
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+
+    return ""
+
+
+def browser_profile_cookie_db(root, profile):
+    return os.path.join(root, profile, "Network", "Cookies")
+
+
+def firefox_profile_entries(root):
+    profiles_ini = os.path.join(root, "profiles.ini")
+
+    if not os.path.exists(profiles_ini):
+        return []
+
+    parser = configparser.RawConfigParser()
+    parser.read(profiles_ini, encoding="utf-8")
+    entries = []
+
+    for section in parser.sections():
+        if not section.lower().startswith("profile"):
+            continue
+
+        name = parser.get(section, "Name", fallback="")
+        path_value = parser.get(section, "Path", fallback="")
+
+        if not path_value:
+            continue
+
+        is_relative = parser.get(section, "IsRelative", fallback="1") == "1"
+        profile_path = os.path.join(root, path_value) if is_relative else os.path.abspath(path_value)
+        profile_folder = os.path.basename(profile_path.rstrip("\\/"))
+        cookie_db = os.path.join(profile_path, "cookies.sqlite")
+        entries.append({
+            "browser": "firefox",
+            "profile": profile_folder,
+            "name": name,
+            "gaia_name": "",
+            "user_name": "",
+            "hosted_domain": "",
+            "path": profile_path,
+            "cookie_db": cookie_db,
+            "cookie_db_exists": os.path.exists(cookie_db),
+            "candidate": f"firefox:{profile_folder}",
+            "profile_ini_path": path_value,
+            "default": parser.get(section, "Default", fallback="0") == "1",
+        })
+
+    return entries
+
+
+def list_browser_profiles(browser="chrome"):
+    browser = str(browser or "chrome").strip().lower()
+    root = browser_user_data_root(browser)
+
+    if not root or not os.path.isdir(root):
+        return []
+
+    if browser == "firefox":
+        return firefox_profile_entries(root)
+
+    info_cache = {}
+    local_state = os.path.join(root, "Local State")
+
+    if os.path.exists(local_state):
+        try:
+            with open(local_state, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            info_cache = ((data.get("profile") or {}).get("info_cache") or {})
+        except (OSError, json.JSONDecodeError):
+            info_cache = {}
+
+    profile_names = set(info_cache.keys())
+    profile_names.update(["Default"] + [f"Profile {index}" for index in range(1, 25)])
+    profiles = []
+
+    for profile in sorted(profile_names, key=lambda item: (item != "Default", item)):
+        profile_path = os.path.join(root, profile)
+        cookie_db = browser_profile_cookie_db(root, profile)
+
+        if not os.path.isdir(profile_path) and not os.path.exists(cookie_db):
+            continue
+
+        meta = info_cache.get(profile) or {}
+        profiles.append({
+            "browser": browser,
+            "profile": profile,
+            "name": meta.get("name", ""),
+            "gaia_name": meta.get("gaia_name", ""),
+            "user_name": meta.get("user_name", ""),
+            "hosted_domain": meta.get("hosted_domain", ""),
+            "path": profile_path,
+            "cookie_db": cookie_db,
+            "cookie_db_exists": os.path.exists(cookie_db),
+            "candidate": f"{browser}:{profile}",
+        })
+
+    return profiles
+
+
+def browser_profile_summary(profile):
+    identity = profile.get("user_name") or profile.get("gaia_name") or profile.get("name") or "unknown"
+    hosted_domain = profile.get("hosted_domain") or ""
+    hosted_suffix = f", domain={hosted_domain}" if hosted_domain else ""
+    cookie_status = "cookies=yes" if profile.get("cookie_db_exists") else "cookies=no"
+    return (
+        f"{profile.get('candidate', '')}: "
+        f"name={profile.get('name') or '-'}, user={identity}{hosted_suffix}, "
+        f"{cookie_status}, path={profile.get('path')}"
+    )
+
+
+def resolve_browser_profile(identifier, browser="chrome"):
+    identifier = str(identifier or "").strip()
+
+    if not identifier:
+        raise ValueError("browser profile identifier is required")
+
+    profiles = list_browser_profiles(browser)
+    lowered = identifier.lower()
+
+    for profile in profiles:
+        values = [
+            profile.get("profile", ""),
+            profile.get("candidate", ""),
+            profile.get("user_name", ""),
+            profile.get("name", ""),
+            profile.get("gaia_name", ""),
+            profile.get("path", ""),
+        ]
+
+        if any(str(value or "").lower() == lowered for value in values):
+            return profile
+
+    matches = [
+        profile for profile in profiles
+        if any(
+            lowered in str(value or "").lower()
+            for value in [
+                profile.get("profile", ""),
+                profile.get("candidate", ""),
+                profile.get("user_name", ""),
+                profile.get("name", ""),
+                profile.get("gaia_name", ""),
+                profile.get("path", ""),
+            ]
+        )
+    ]
+
+    if len(matches) == 1:
+        return matches[0]
+
+    if matches:
+        options = "\n".join(f"- {browser_profile_summary(profile)}" for profile in matches[:8])
+        raise ValueError(f"browser profile identifier matched multiple profiles:\n{options}")
+
+    available = "\n".join(f"- {browser_profile_summary(profile)}" for profile in profiles[:12]) or "- none"
+    raise ValueError(f"browser profile not found for {identifier!r}. Available profiles:\n{available}")
+
+
+def open_browser_profile(identifier, browser="chrome", url=None):
+    profile = resolve_browser_profile(identifier, browser=browser)
+    executable = browser_executable(profile["browser"])
+
+    if not executable:
+        raise FileNotFoundError(f"could not find {profile['browser']} executable")
+
+    launch_url = url or DEFAULT_AUTH_TEST_URL
+
+    if profile["browser"] == "firefox":
+        command = [
+            executable,
+            "-no-remote",
+            "-profile",
+            profile["path"],
+            launch_url,
+        ]
+    else:
+        command = [
+            executable,
+            f"--profile-directory={profile['profile']}",
+            launch_url,
+        ]
+    subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+    return {
+        "profile": profile,
+        "command": command,
+        "url": launch_url,
+    }
+
+
+def requested_browser_profile_candidate():
+    browser = os.getenv(
+        "SHORTFORM_YTDLP_COOKIES_BROWSER_NAME",
+        os.getenv("SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_BROWSER", "firefox"),
+    ).strip().lower() or "firefox"
+    profile_identifier = (
+        os.getenv("SHORTFORM_YTDLP_COOKIES_PROFILE")
+        or os.getenv("SHORTFORM_YTDLP_COOKIES_PROFILE_EMAIL")
+        or os.getenv("SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_PROFILE")
+        or ""
+    ).strip()
+
+    if not profile_identifier:
+        return ""
+
+    try:
+        return resolve_browser_profile(profile_identifier, browser=browser)["candidate"]
+    except Exception:
+        return f"{browser}:{profile_identifier}"
+
+
+def normalize_browser_cookie_candidate(candidate):
+    browser_tuple = cookie_browser_to_tuple(candidate)
+    browser = browser_tuple[0].strip().lower() if browser_tuple else ""
+
+    if browser not in {"chrome", "edge", "firefox"} or len(browser_tuple) < 2:
+        return candidate
+
+    profile_identifier = browser_tuple[1].strip()
+
+    try:
+        return resolve_browser_profile(profile_identifier, browser=browser)["candidate"]
+    except Exception:
+        return candidate
+
+
 def write_auth_report(status, video_url=None, result=None, errors=None):
     diagnostics = cookie_file_diagnostics()
     payload = {
@@ -597,19 +878,36 @@ def get_cookie_browser_candidates():
         return []
 
     requested = os.getenv("SHORTFORM_YTDLP_COOKIES_BROWSER", "").strip()
+    requested_profile = requested_browser_profile_candidate()
 
     if requested:
-        candidates = [browser.strip() for browser in requested.split(",") if browser.strip()]
-    else:
         candidates = [
-            "chrome:Profile 2",
-            "chrome:Default",
-            "chrome",
-            "edge:Default",
-            "edge",
-            "firefox",
+            normalize_browser_cookie_candidate(browser.strip())
+            for browser in requested.split(",")
+            if browser.strip()
         ]
-        candidates.extend(discover_browser_profile_candidates())
+    elif requested_profile:
+        candidates = [requested_profile]
+    else:
+        preferred_browser = os.getenv("SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_BROWSER", "firefox").strip().lower()
+        preferred_candidates = [
+            profile["candidate"]
+            for profile in list_browser_profiles(preferred_browser)
+            if profile.get("cookie_db_exists")
+        ]
+
+        if preferred_candidates:
+            candidates = preferred_candidates
+        else:
+            candidates = [
+                "firefox",
+                "chrome:Profile 2",
+                "chrome:Default",
+                "chrome",
+                "edge:Default",
+                "edge",
+            ]
+            candidates.extend(discover_browser_profile_candidates())
 
     seen = set()
     unique = []
@@ -627,7 +925,7 @@ def get_cookie_browser_candidates():
 
 
 def browser_cookie_fallback_enabled():
-    return os.getenv("SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK", "0").strip().lower() in {
+    return os.getenv("SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK", "1").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -635,23 +933,37 @@ def browser_cookie_fallback_enabled():
     }
 
 
-def discover_browser_profile_candidates():
-    profile_candidates = []
-    local_app_data = os.getenv("LOCALAPPDATA", "")
-    browser_roots = [
-        ("chrome", os.path.join(local_app_data, "Google", "Chrome", "User Data")),
-        ("edge", os.path.join(local_app_data, "Microsoft", "Edge", "User Data")),
-    ]
+def auth_source_order():
+    raw = os.getenv("SHORTFORM_YTDLP_AUTH_SOURCE_ORDER", "browser,cookiefile")
+    order = []
 
-    for browser, root in browser_roots:
-        if not root or not os.path.isdir(root):
+    for item in raw.split(","):
+        key = item.strip().lower().replace("-", "_")
+
+        if key in {"browser", "browser_cookie", "browser_cookies", "cookiesfrombrowser"}:
+            key = "browser"
+        elif key in {"file", "cookie_file", "cookiefile", "cookies_txt", "cookies"}:
+            key = "cookiefile"
+        else:
             continue
 
-        for profile_name in ["Default"] + [f"Profile {index}" for index in range(1, 12)]:
-            cookie_db = os.path.join(root, profile_name, "Network", "Cookies")
+        if key not in order:
+            order.append(key)
 
-            if os.path.exists(cookie_db):
-                profile_candidates.append(f"{browser}:{profile_name}")
+    for key in ["browser", "cookiefile"]:
+        if key not in order:
+            order.append(key)
+
+    return order
+
+
+def discover_browser_profile_candidates():
+    profile_candidates = []
+
+    for browser in ["firefox", "chrome", "edge"]:
+        for profile in list_browser_profiles(browser):
+            if profile.get("cookie_db_exists"):
+                profile_candidates.append(profile["candidate"])
 
     return profile_candidates
 
@@ -664,6 +976,49 @@ def cookie_browser_to_tuple(candidate):
         return (browser,)
 
     return (browser, parts[1].strip())
+
+
+def browser_process_name(browser):
+    browser = str(browser or "").strip().lower()
+
+    if browser == "chrome":
+        return "chrome.exe"
+
+    if browser == "edge":
+        return "msedge.exe"
+
+    if browser == "firefox":
+        return "firefox.exe"
+
+    return ""
+
+
+def browser_cookie_candidate_browsers():
+    browsers = []
+
+    for candidate in get_cookie_browser_candidates():
+        browser = cookie_browser_to_tuple(candidate)[0].strip().lower()
+
+        if browser in {"chrome", "edge", "firefox"} and browser not in browsers:
+            browsers.append(browser)
+
+    return browsers
+
+
+def browser_cookie_fallback_blockers():
+    blockers = []
+
+    for browser in browser_cookie_candidate_browsers():
+        process_name = browser_process_name(browser)
+
+        if process_name and process_running(process_name):
+            blockers.append(process_name)
+
+    return blockers
+
+
+def browser_cookie_fallback_ready():
+    return not browser_cookie_fallback_blockers()
 
 
 def is_cookie_load_error(error):
@@ -770,13 +1125,21 @@ def opts_with_readonly_cookiefile(ydl_opts):
 def cookie_sources(include_browser=True):
     sources = []
     cookiefile = youtube_cookie_file()
+    cookiefile_source = None
+    browser_sources = []
 
     if cookiefile and os.path.exists(cookiefile) and os.path.getsize(cookiefile) > 0:
-        sources.append(("cookiefile", cookiefile))
+        cookiefile_source = ("cookiefile", cookiefile)
 
     if include_browser:
         for browser in get_cookie_browser_candidates():
-            sources.append(("browser", browser))
+            browser_sources.append(("browser", browser))
+
+    for source_type in auth_source_order():
+        if source_type == "browser":
+            sources.extend(browser_sources)
+        elif source_type == "cookiefile" and cookiefile_source:
+            sources.append(cookiefile_source)
 
     return sources
 
@@ -821,20 +1184,28 @@ def process_running(image_name):
 
 
 def browser_lock_hint():
+    blockers = browser_cookie_fallback_blockers()
+
+    if not blockers:
+        browsers = browser_cookie_candidate_browsers()
+        target = "/".join(browser.capitalize() for browser in browsers) or "configured browser"
+        return f"{target} browser-cookie profile does not appear to be locked."
+
     running = []
 
-    if process_running("chrome.exe"):
+    if "chrome.exe" in blockers:
         running.append("Chrome")
 
-    if process_running("msedge.exe"):
+    if "msedge.exe" in blockers:
         running.append("Edge")
 
-    if not running:
-        return "Chrome/Edge do not appear to be running; re-export cookies.txt if auth still fails."
+    if "firefox.exe" in blockers:
+        running.append("Firefox")
 
+    verb = "appear" if len(running) > 1 else "appears"
     return (
-        f"{' and '.join(running)} currently appears to be running. "
-        "Close every browser window and background process before relying on browser-cookie fallback, "
+        f"{' and '.join(running)} currently {verb} to be running. "
+        "Close that browser's windows and background processes before relying on browser-cookie fallback, "
         "or export a fresh signed-in cookies.txt instead."
     )
 
@@ -842,7 +1213,7 @@ def browser_lock_hint():
 def browser_lock_status():
     processes = []
 
-    for image_name in ["chrome.exe", "msedge.exe"]:
+    for image_name in ["chrome.exe", "msedge.exe", "firefox.exe"]:
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/V", "/FO", "CSV"],
@@ -869,13 +1240,22 @@ def browser_lock_status():
                 "window_title": (row.get("Window Title") or "").strip(),
             })
 
-    blocking = sorted({item["image_name"] for item in processes})
+    candidate_blockers = set(browser_cookie_fallback_blockers())
+    blocking = sorted(candidate_blockers)
+    target_processes = [
+        item for item in processes
+        if item["image_name"].lower() in {name.lower() for name in candidate_blockers}
+    ]
     return {
         "chrome_running": any(item["image_name"].lower() == "chrome.exe" for item in processes),
         "edge_running": any(item["image_name"].lower() == "msedge.exe" for item in processes),
+        "firefox_running": any(item["image_name"].lower() == "firefox.exe" for item in processes),
+        "observed_browsers": sorted({item["image_name"] for item in processes}),
         "blocking_browsers": blocking,
         "process_count": len(processes),
+        "blocking_process_count": len(target_processes),
         "processes": processes,
+        "blocking_processes": target_processes,
         "hint": browser_lock_hint(),
     }
 
@@ -883,6 +1263,8 @@ def browser_lock_status():
 def auth_help_message(errors=None, include_browser_fallback=True, browser_fallback_armed=False):
     cookiefile = youtube_cookie_file()
     gated_video = os.getenv("SHORTFORM_YTDLP_AUTH_TEST_URL", DEFAULT_AUTH_TEST_URL)
+    target_browsers = browser_cookie_candidate_browsers()
+    target_label = "/".join(browser.capitalize() for browser in target_browsers) or "the configured browser"
     gate_instructions = (
         f" Open {gated_video} in the same signed-in browser account, click the "
         "sensitive/age-restricted Proceed button, confirm the video actually plays, "
@@ -892,7 +1274,7 @@ def auth_help_message(errors=None, include_browser_fallback=True, browser_fallba
         message = (
             "YouTube authentication is required for restricted videos, but no available cookie source "
             "unlocked the video. Export a fresh signed-in, age-verified YouTube cookie file to "
-            f"{cookiefile}, or close Chrome fully and allow browser-cookie access. Then run "
+            f"{cookiefile}, or close {target_label} fully and allow browser-cookie access. Then run "
             "`python ytdlp_auth.py` to verify before running the full pipeline."
             f"{gate_instructions}"
         )
@@ -908,16 +1290,15 @@ def auth_help_message(errors=None, include_browser_fallback=True, browser_fallba
 
     if not include_browser_fallback and browser_fallback_armed:
         message += (
-            "\nBrowser-cookie fallback is armed, but Chrome/Edge still appears to be running. "
-            "Close every browser window and background process, then retry with "
+            f"\nBrowser-cookie fallback is armed, but {target_label} still appears to be running. "
+            "Close that browser's windows and background processes, then retry with "
             "--allow-browser-cookie-fallback."
         )
     elif not include_browser_fallback:
         message += (
-            "\nBrowser-cookie fallback is disabled by default for deterministic production runs. "
-            "After closing Chrome/Edge, pass --allow-browser-cookie-fallback to run.py or "
-            "ytdlp_auth.py, or set SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=1, if you "
-            "intentionally want yt-dlp to try browser profiles."
+            "\nBrowser-cookie fallback is enabled by default for production runs. "
+            f"After closing {target_label}, run `python ytdlp_auth.py` without --cookie-file "
+            "so the helper can try the Firefox profile first and cookies.txt as backup."
         )
 
     if errors:
@@ -1139,7 +1520,30 @@ def parse_args():
     parser.add_argument(
         "--browser-lock-status",
         action="store_true",
-        help="Print Chrome/Edge processes that currently block browser-cookie fallback, then exit.",
+        help="Print browser processes that currently block browser-cookie fallback, then exit.",
+    )
+    parser.add_argument(
+        "--list-browser-profiles",
+        action="store_true",
+        help="List Firefox/Chrome/Edge profiles discovered on this machine, including visible account emails when available.",
+    )
+    parser.add_argument(
+        "--open-browser-profile",
+        help="Open the auth test URL in a browser profile by email, profile folder, or profile name.",
+    )
+    parser.add_argument(
+        "--open-browser",
+        choices=["chrome", "edge", "firefox"],
+        default=os.getenv(
+            "SHORTFORM_YTDLP_COOKIES_BROWSER_NAME",
+            os.getenv("SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_BROWSER", "firefox"),
+        ).strip().lower() or "firefox",
+        help="Browser to use with --open-browser-profile. Defaults to Firefox.",
+    )
+    parser.add_argument(
+        "--open-url",
+        default=os.getenv("SHORTFORM_YTDLP_AUTH_TEST_URL", DEFAULT_AUTH_TEST_URL),
+        help="URL to open with --open-browser-profile. Defaults to the restricted auth test URL.",
     )
     parser.add_argument(
         "--install-cookie-export",
@@ -1172,7 +1576,7 @@ def parse_args():
         action="store_true",
         help=(
             "When verifying the configured project cookie source, also try browser cookie profiles. "
-            "Close Chrome/Edge first so the browser cookie database is readable."
+            "Browser fallback is enabled by default unless SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=0."
         ),
     )
     return parser.parse_args()
@@ -1195,6 +1599,50 @@ def main():
         print(status.get("hint", ""))
         print(json.dumps(status, indent=2))
         return 1 if status.get("blocking_browsers") else 0
+
+    if args.list_browser_profiles:
+        profiles = []
+
+        for browser in ["firefox", "chrome", "edge"]:
+            profiles.extend(list_browser_profiles(browser))
+
+        print(f"Browser profiles discovered: {len(profiles)}")
+
+        for profile in profiles:
+            print(f"- {browser_profile_summary(profile)}")
+
+        if profiles:
+            example_candidate = next(
+                (
+                    profile["candidate"]
+                    for profile in profiles
+                    if profile.get("browser") == "firefox" and profile.get("cookie_db_exists")
+                ),
+                profiles[0]["candidate"],
+            )
+            print(
+                "\nTo prioritize one for yt-dlp browser cookies, run for example:\n"
+                f"$env:SHORTFORM_YTDLP_COOKIES_BROWSER=\"{example_candidate}\"\n"
+                "$env:SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=\"1\""
+            )
+
+        return 0
+
+    if args.open_browser_profile:
+        opened = open_browser_profile(
+            args.open_browser_profile,
+            browser=args.open_browser,
+            url=args.open_url,
+        )
+        profile = opened["profile"]
+        print("Opened browser profile for YouTube auth confirmation")
+        print(browser_profile_summary(profile))
+        print(f"URL: {opened['url']}")
+        print(
+            "After the video plays in this profile, close that browser fully before "
+            "testing browser-cookie fallback."
+        )
+        return 0
 
     if args.scan_cookie_exports is not None:
         search_dirs = args.scan_cookie_exports or default_cookie_export_search_dirs()
@@ -1268,22 +1716,29 @@ def main():
                 browser_fallback_armed=args.allow_browser_cookie_fallback,
             )
         else:
-            if args.allow_browser_cookie_fallback:
-                print("Browser-cookie fallback enabled. Close Chrome/Edge fully before relying on this path.")
-
-            browser_fallback_ready = (
+            browser_fallback_requested = (
                 args.allow_browser_cookie_fallback
-                and not process_running("chrome.exe")
-                and not process_running("msedge.exe")
+                or browser_cookie_fallback_enabled()
             )
 
-            if args.allow_browser_cookie_fallback and not browser_fallback_ready:
-                print("Browser-cookie fallback armed, but Chrome/Edge still appears to be running.")
+            if browser_fallback_requested:
+                target_browsers = browser_cookie_candidate_browsers()
+                target_label = "/".join(browser.capitalize() for browser in target_browsers) or "the target browser"
+                print(f"Browser-cookie fallback enabled. Close {target_label} fully before relying on this path.")
+
+            browser_fallback_ready = (
+                browser_fallback_requested
+                and browser_cookie_fallback_ready()
+            )
+
+            if browser_fallback_requested and not browser_fallback_ready:
+                blockers = ", ".join(browser_cookie_fallback_blockers()) or "target browser"
+                print(f"Browser-cookie fallback armed, but {blockers} still appears to be running.")
 
             result = verify_youtube_auth(
                 video_url=args.test_url,
                 include_browser_fallback=browser_fallback_ready,
-                browser_fallback_armed=args.allow_browser_cookie_fallback,
+                browser_fallback_armed=browser_fallback_requested,
             )
 
         print("YouTube restricted-video auth OK")

@@ -87,10 +87,13 @@ Collect YouTube Analytics metrics for uploaded videos and build experiment repor
 
 ## Quality And Speed Controls
 
-- `yt-dlp` fetches channel metadata without cookies for speed. Media downloads are authenticated by default so age-restricted videos do not get treated as ordinary skips. Use an exported, signed-in, age-verified YouTube cookie file for the most reliable age-gated downloads:
+- `yt-dlp` fetches channel metadata without cookies for speed. Media downloads are authenticated by default so age-restricted videos do not get treated as ordinary skips. Firefox browser cookies are the default primary auth source; keep an exported, signed-in, age-verified `cookies.txt` only as the backup path when browser-cookie access is blocked. The local `.env` should pin the working Firefox profile and keep the cookie file as the second source:
 
 ```powershell
-$env:SHORTFORM_YTDLP_COOKIES="C:\Users\Admin\Desktop\shortform\cookies.txt"
+$env:SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK="1"
+$env:SHORTFORM_YTDLP_AUTH_SOURCE_ORDER="browser,cookiefile"
+$env:SHORTFORM_YTDLP_COOKIES_BROWSER="firefox:fPGLp4j9.Profile 1"
+$env:SHORTFORM_YTDLP_COOKIES="C:\Users\Admin\Desktop\shortform\cookies.txt"  # backup only
 ```
 
 Verify restricted-video access before a full run:
@@ -116,13 +119,13 @@ You can also let the helper find the newest valid export in Downloads. It will o
 
 `--cookie-file` and `--install-cookie-export` now prove that exact file unlocks the age-restricted test video. They do not silently pass because a browser-cookie fallback happened to work. `run.py --doctor` reports the strict project `cookies.txt` result and lists browser profiles for awareness. The pipeline reads the cookie file through a temporary copy and does not rewrite `cookies.txt`.
 
-If the auth check still says `Sign in to confirm your age`, export a broader signed-in cookie file. A YouTube-only export can contain `SID`/`PSID` cookies and still fail age-gated videos; the most reliable export includes cookies for `youtube.com`, `google.com`, and `accounts.google.com` from the same signed-in, age-verified browser session. Browser-cookie fallback is disabled by default so production uses the known project cookie file deterministically. If you intentionally want to rely on `--cookies-from-browser` fallback, fully close Chrome/Edge first, then set:
+If the auth check still says `Sign in to confirm your age`, first make sure the selected Firefox profile can play the restricted test video and close Firefox fully before the run. If Firefox browser-cookie access is blocked, export a broader signed-in cookie file. A YouTube-only export can contain `SID`/`PSID` cookies and still fail age-gated videos; the most reliable export includes cookies for `youtube.com`, `google.com`, and `accounts.google.com` from the same signed-in, age-verified browser session. The project `cookies.txt` is the backup. The pipeline reads `cookies.txt` through a temporary copy and does not rewrite it. To disable browser-cookie access and use only the project cookie file, set:
 
 ```powershell
-$env:SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK="1"
+$env:SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK="0"
 ```
 
-Do not run raw `yt-dlp --cookies .\cookies.txt` against the project cookie file during debugging; yt-dlp may rewrite the file. Use `ytdlp_auth.py --cookie-file ...` or copy the cookie file to `%TEMP%` first.
+If you want a specific Firefox profile, set `SHORTFORM_YTDLP_COOKIES_BROWSER` to the full candidate shown by `.\venv_313\Scripts\python.exe .\ytdlp_auth.py --list-browser-profiles`, for example `firefox:fPGLp4j9.Profile 1`. You can also set `SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_PROFILE` to just the profile folder name. Do not run raw `yt-dlp --cookies .\cookies.txt` against the project cookie file during debugging; yt-dlp may rewrite the file. Use `ytdlp_auth.py --cookie-file ...` or copy the cookie file to `%TEMP%` first.
 
 Video downloads may also require a YouTube PO-token provider. The pipeline auto-starts a local bgutil provider when this checkout exists:
 
@@ -154,13 +157,13 @@ Restricted media auth is checked before a production run cleans or downloads any
 
 Media downloads default to `SHORTFORM_MEDIA_AUTH_POLICY=on_demand`: the run verifies age-gated cookie access first, then downloads public videos without cookies and retries with cookies only if YouTube asks for sign-in or returns an auth-like 403. This reduces authenticated request volume and helps preserve the session. Set `SHORTFORM_MEDIA_AUTH_POLICY=always` only if you intentionally want every media download to use cookies.
 
-If you want to start the run before closing Chrome, let the preflight wait instead of failing immediately:
+If you want to start the run before closing Firefox or installing a fresh backup cookie file, let the preflight wait instead of failing immediately:
 
 ```powershell
 .\venv_313\Scripts\python.exe .\run.py --clean-slate --skip-youtube --wait-for-media-auth 900
 ```
 
-The run will keep retrying restricted-video auth during that window. Close every Chrome/Edge window and background process, or install a stricter cookie export, and the same run will continue once the age-gated auth check passes.
+The run will keep retrying restricted-video auth during that window. Close Firefox if the selected profile is locked, or install a stricter cookie export, and the same run will continue once the age-gated auth check passes.
 
 If you want the run itself to watch Downloads for a fresh export while it waits, add `--watch-cookie-exports`:
 
@@ -171,6 +174,10 @@ If you want the run itself to watch Downloads for a fresh export while it waits,
 For Visual Studio or other launchers that do not inherit PowerShell `$env:` values, add the setting to a local `.env` file:
 
 ```text
+SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=1
+SHORTFORM_YTDLP_AUTH_SOURCE_ORDER=browser,cookiefile
+SHORTFORM_YTDLP_DEFAULT_BROWSER_COOKIE_BROWSER=firefox
+SHORTFORM_YTDLP_COOKIES_BROWSER="firefox:fPGLp4j9.Profile 1"
 SHORTFORM_YTDLP_COOKIES=C:\Users\Admin\Desktop\shortform\cookies.txt
 SHORTFORM_REQUIRE_YOUTUBE_AUTH_FOR_MEDIA=1
 ```

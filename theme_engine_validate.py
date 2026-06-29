@@ -102,6 +102,20 @@ SOURCE_GUARD_EXPECTATIONS = {
             "channel_url": "https://www.youtube.com/@newheightshow/videos",
         },
     ],
+    "gaming": [
+        {
+            "expect": "pass",
+            "title": "Nadeshot explains why esports orgs are changing creator strategy",
+            "source_tier": "priority",
+            "channel_url": "https://www.youtube.com/@Nadeshot/videos",
+        },
+        {
+            "expect": "block",
+            "title": "Is The Fed Panic Already Fading? | Weekly Roundup",
+            "source_tier": "secondary",
+            "channel_url": "https://www.youtube.com/@TheCompoundNews/videos",
+        },
+    ],
     "finance": [
         {
             "expect": "pass",

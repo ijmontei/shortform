@@ -2,18 +2,19 @@
 
 ## Launch Scope
 
-The live production slate is intentionally limited to eight YouTube-native, interview-led themes:
+The live production slate is intentionally limited to nine YouTube-native, interview-led themes:
 
 1. `comedy`
 2. `sports`
-3. `finance`
-4. `technology_ai`
-5. `health_fitness`
-6. `politics`
-7. `truecrime`
-8. `popculture`
+3. `gaming`
+4. `finance`
+5. `technology_ai`
+6. `health_fitness`
+7. `politics`
+8. `truecrime`
+9. `popculture`
 
-All other theme configs under `src/themes/` are phase-two inventory only. They are kept so the engine can grow later, but they are not active publishing priorities and should not be included in default production runs. Agriculture, gaming, lifestyle, travel, religion, and general education are examples of future-compatible configs, not phase-one themes.
+All other theme configs under `src/themes/` are phase-two inventory only. They are kept so the engine can grow later, but they are not active publishing priorities and should not be included in default production runs. Agriculture, lifestyle, travel, religion, and general education are examples of future-compatible configs, not phase-one themes.
 
 ## Platform Constraints
 

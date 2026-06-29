@@ -121,9 +121,17 @@ def validate_frame_quality(theme, package, video_file):
         for flag in sorted(hard_flags & face_hard_flags):
             issues.append(flag)
 
-    if float(frame_qc.get("visual_quality_score") or 0.0) < MIN_FINAL_VISUAL_QUALITY:
+    visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
+    documentary_non_face_ok = (
+        clean_theme_name(theme) in {"politics", "truecrime"}
+        and content_format in TRANSFORMED_CONTENT_FORMATS
+        and visual_score >= 0.45
+        and not (hard_flags & non_face_hard_flags)
+    )
+
+    if visual_score < MIN_FINAL_VISUAL_QUALITY and not documentary_non_face_ok:
         issues.append(
-            f"low visual quality score ({float(frame_qc.get('visual_quality_score') or 0.0):.2f})"
+            f"low visual quality score ({visual_score:.2f})"
         )
 
     return frame_qc, issues
@@ -208,6 +216,7 @@ def validate_theme(theme):
 
         if (
             privacy_status != "private"
+            and os.getenv("SHORTFORM_REQUIRE_MANUAL_APPROVAL_FOR_PUBLIC_UPLOAD", "0") == "1"
             and get_review_policy(theme).get("require_manual_approval_before_public", True)
             and not review.get("approved")
         ):

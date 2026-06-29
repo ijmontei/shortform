@@ -8,6 +8,10 @@ import traceback as traceback_module
 
 import ytdlp_auth
 from clip_generation import run_clip_generation
+from clip_generation import run_audio_prefetch
+from clip_generation import run_clip_scoring
+from clip_generation import run_selected_clip_render
+from clip_generation import run_selected_video_prefetch
 from daily_editorial import run_daily_editorial
 from pipeline_doctor import run_doctor
 from reconcile_editorial_gates import reconcile_theme
@@ -22,8 +26,10 @@ RUNS_LOG_PATH = os.path.join(LOGS_PATH, "runs")
 LATEST_LOG_FILE = os.path.join(LOGS_PATH, "run_latest.log")
 LATEST_SUMMARY_FILE = os.path.join(LOGS_PATH, "run_latest_summary.json")
 MEDIA_AUTH_WAIT_STATUS_FILE = os.path.join(LOGS_PATH, "media_auth_wait_latest.json")
-DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
-PIPELINE_STAGES = ["pull", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload"]
+DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "0"))
+DEFAULT_PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "editorial", "subtitle", "reconcile", "manifest", "upload"]
+PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload"]
+SUMMARY_LABELS = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload", "total"]
 
 
 class TeeStream:
@@ -366,12 +372,28 @@ def reset_funnel_state_for_themes(themes):
     pulled = load_json_file(pulled_file, {})
     stage_keys = [
         "stages",
+        "audio_prefetched_at",
+        "clips_scored_at",
+        "clips_selected_at",
+        "clips_ranked_not_selected_at",
+        "video_sections_prefetched_at",
+        "clips_generated_at",
         "clips_created_at",
+        "subtitled_at",
         "upload_ready_at",
         "uploaded_at",
         "executed_at",
+        "funnel_status",
+        "clip_prefix",
+        "candidate_count",
+        "theme_ranked_candidate_count",
+        "selected_clips_count",
+        "selected_video_sections_count",
+        "clips_generated_count",
         "subtitle_status",
         "upload_status",
+        "last_clip_generation_attempt_at",
+        "last_clip_generation_error_type",
     ]
 
     if isinstance(pulled, dict):
@@ -549,9 +571,11 @@ def run_restricted_media_auth_preflight(
     print("Checking YouTube restricted-video authentication...")
 
     if allow_browser_cookie_fallback:
+        target_browsers = ytdlp_auth.browser_cookie_candidate_browsers()
+        target_label = "/".join(browser.capitalize() for browser in target_browsers) or "the target browser"
         print(
             "Browser-cookie fallback is enabled for this run. "
-            "Close Chrome/Edge fully so yt-dlp can read the browser cookie store."
+            f"{target_label} must be closed or unlocked so yt-dlp can read the browser cookie store."
         )
 
     start_wait = time.time()
@@ -589,12 +613,12 @@ def run_restricted_media_auth_preflight(
             try:
                 browser_fallback_ready = (
                     allow_browser_cookie_fallback
-                    and not ytdlp_auth.process_running("chrome.exe")
-                    and not ytdlp_auth.process_running("msedge.exe")
+                    and ytdlp_auth.browser_cookie_fallback_ready()
                 )
 
                 if allow_browser_cookie_fallback and not browser_fallback_ready:
-                    print("Browser-cookie fallback armed, but Chrome/Edge still appears to be running.")
+                    blockers = ", ".join(ytdlp_auth.browser_cookie_fallback_blockers()) or "target browser"
+                    print(f"Browser-cookie fallback armed, but {blockers} still appears to be running.")
 
                 result = ytdlp_auth.verify_youtube_auth(
                     include_browser_fallback=browser_fallback_ready,
@@ -618,8 +642,7 @@ def run_restricted_media_auth_preflight(
                 if not wait_seconds or time.time() - start_wait >= wait_seconds:
                     browser_fallback_ready = (
                         allow_browser_cookie_fallback
-                        and not ytdlp_auth.process_running("chrome.exe")
-                        and not ytdlp_auth.process_running("msedge.exe")
+                        and ytdlp_auth.browser_cookie_fallback_ready()
                     )
                     write_media_auth_wait_status(
                         "failed",
@@ -648,13 +671,12 @@ def run_restricted_media_auth_preflight(
                     print("Restricted-video auth still waiting; no new valid cookie export detected.")
 
                 print(
-                    "Close Chrome/Edge fully or install a broader cookie export; "
+                    "Close the selected browser fully or install a broader cookie export; "
                     f"retrying in {retry_interval}s ({remaining}s left, attempt {attempt})."
                 )
                 browser_fallback_ready = (
                     allow_browser_cookie_fallback
-                    and not ytdlp_auth.process_running("chrome.exe")
-                    and not ytdlp_auth.process_running("msedge.exe")
+                    and ytdlp_auth.browser_cookie_fallback_ready()
                 )
                 write_media_auth_wait_status(
                     "waiting",
@@ -684,22 +706,31 @@ def run_youtube_auth_preflight():
 
 
 def empty_theme_summary():
-    summary = {stage: 0.0 for stage in PIPELINE_STAGES}
+    summary = {stage: 0.0 for stage in SUMMARY_LABELS}
     summary["total"] = 0.0
     return summary
 
 
-def selected_pipeline_stages(args):
-    stages = list(PIPELINE_STAGES)
+def normalized_stage_boundary(stage, *, is_start):
+    if stage == "clip":
+        return "score" if is_start else "render"
 
+    return stage
+
+
+def selected_pipeline_stages(args):
     if args.only_stage:
         return [args.only_stage]
 
+    stages = list(DEFAULT_PIPELINE_STAGES)
+
     if args.start_at_stage:
-        stages = stages[stages.index(args.start_at_stage):]
+        start_stage = normalized_stage_boundary(args.start_at_stage, is_start=True)
+        stages = stages[stages.index(start_stage):]
 
     if args.stop_after_stage:
-        stages = stages[:stages.index(args.stop_after_stage) + 1]
+        stop_stage = normalized_stage_boundary(args.stop_after_stage, is_start=False)
+        stages = stages[:stages.index(stop_stage) + 1]
 
     return stages
 
@@ -717,6 +748,26 @@ def reconcile_stage_for_theme(theme):
 def run_stage_for_theme(theme, stage, args, summary):
     if stage == "pull":
         timed_stage(summary, "pull", lambda: run_video_fetch(theme=theme))
+        return True
+
+    if stage == "audio":
+        print(f"prefetching audio packages for {theme}")
+        timed_stage(summary, "audio", lambda: run_audio_prefetch(theme=theme))
+        return True
+
+    if stage == "score":
+        print(f"scoring and ranking clip candidates for {theme}")
+        timed_stage(summary, "score", lambda: run_clip_scoring(theme=theme))
+        return True
+
+    if stage == "video":
+        print(f"prefetching selected video sections for {theme}")
+        timed_stage(summary, "video", lambda: run_selected_video_prefetch(theme=theme))
+        return True
+
+    if stage == "render":
+        print(f"rendering selected clips for {theme}")
+        timed_stage(summary, "render", lambda: run_selected_clip_render(theme=theme))
         return True
 
     if stage == "clip":
@@ -767,7 +818,7 @@ def run_stage_for_theme(theme, stage, args, summary):
             )
             return True
 
-        print(f"starting YouTube private draft upload for {theme}")
+        print(f"starting YouTube upload for {theme}")
         from upload import YouTubeUploadHalted, upload_youtube
 
         try:
@@ -892,7 +943,7 @@ def run_pipeline_by_theme(themes, args):
 def print_theme_summary(theme, summary):
     print(f"--- Timing summary for {theme} ---")
 
-    for label in ["pull", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload", "total"]:
+    for label in SUMMARY_LABELS:
         if label in summary:
             print(f"{label}: {format_duration(summary[label])}")
 
@@ -900,7 +951,7 @@ def print_theme_summary(theme, summary):
 
 
 def print_overall_summary(theme_summaries):
-    totals = {"pull": 0.0, "clip": 0.0, "editorial": 0.0, "subtitle": 0.0, "reconcile": 0.0, "manifest": 0.0, "upload": 0.0, "total": 0.0}
+    totals = {label: 0.0 for label in SUMMARY_LABELS}
 
     for summary in theme_summaries.values():
         for label in totals:
@@ -912,6 +963,10 @@ def print_overall_summary(theme_summaries):
         print(
             f"{theme}: total={format_duration(summary.get('total', 0.0))}, "
             f"pull={format_duration(summary.get('pull', 0.0))}, "
+            f"audio={format_duration(summary.get('audio', 0.0))}, "
+            f"score={format_duration(summary.get('score', 0.0))}, "
+            f"video={format_duration(summary.get('video', 0.0))}, "
+            f"render={format_duration(summary.get('render', 0.0))}, "
             f"clip={format_duration(summary.get('clip', 0.0))}, "
             f"editorial={format_duration(summary.get('editorial', 0.0))}, "
             f"subtitle={format_duration(summary.get('subtitle', 0.0))}, "
@@ -924,6 +979,10 @@ def print_overall_summary(theme_summaries):
         "all themes: "
         f"total={format_duration(totals['total'])}, "
         f"pull={format_duration(totals['pull'])}, "
+        f"audio={format_duration(totals['audio'])}, "
+        f"score={format_duration(totals['score'])}, "
+        f"video={format_duration(totals['video'])}, "
+        f"render={format_duration(totals['render'])}, "
         f"clip={format_duration(totals['clip'])}, "
         f"editorial={format_duration(totals['editorial'])}, "
         f"subtitle={format_duration(totals['subtitle'])}, "
@@ -975,7 +1034,7 @@ def parse_args():
     parser.add_argument(
         "--clean-slate-only",
         action="store_true",
-        help="Perform --clean-slate and exit without running fetch/clip/editorial/upload stages.",
+        help="Perform --clean-slate and exit without running production stages.",
     )
     parser.add_argument(
         "--keep-inactive-output",
@@ -1004,7 +1063,7 @@ def parse_args():
         metavar="SECONDS",
         help=(
             "Keep retrying restricted-video media auth for this many seconds before production. "
-            "Useful when you need time to close Chrome or install a fresh cookies.txt."
+            "Useful when you need time to close Firefox or install a fresh cookies.txt."
         ),
     )
     parser.add_argument(
@@ -1027,8 +1086,8 @@ def parse_args():
         "--allow-browser-cookie-fallback",
         action="store_true",
         help=(
-            "During media-auth preflight, allow yt-dlp to try browser cookie profiles after cookies.txt. "
-            "Close Chrome/Edge fully first; browser databases are usually locked while the browser is open."
+            "During media-auth preflight, allow yt-dlp to try browser cookie profiles. "
+            "Firefox browser cookies are enabled by default unless SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=0."
         ),
     )
     parser.add_argument(
@@ -1044,7 +1103,7 @@ def parse_args():
     parser.add_argument(
         "--youtube-upload-limit",
         type=int,
-        help="Optional max number of YouTube uploads per theme for this run.",
+        help="Optional max number of YouTube uploads per theme for this run. Default is unlimited.",
     )
     parser.add_argument(
         "--doctor",
@@ -1144,7 +1203,10 @@ def main():
         raise SystemExit("--only-stage cannot be combined with --start-at-stage or --stop-after-stage.")
 
     if args.start_at_stage and args.stop_after_stage:
-        if PIPELINE_STAGES.index(args.start_at_stage) > PIPELINE_STAGES.index(args.stop_after_stage):
+        start_stage = normalized_stage_boundary(args.start_at_stage, is_start=True)
+        stop_stage = normalized_stage_boundary(args.stop_after_stage, is_start=False)
+
+        if DEFAULT_PIPELINE_STAGES.index(start_stage) > DEFAULT_PIPELINE_STAGES.index(stop_stage):
             raise SystemExit("--start-at-stage cannot come after --stop-after-stage.")
 
     theme = clean_theme_name(args.theme) if args.theme else None
@@ -1310,7 +1372,10 @@ def main():
                 wait_seconds=max(0, int(args.wait_for_media_auth or 0)),
                 retry_interval=max(1, int(args.media_auth_retry_interval or 20)),
                 cookie_export_dirs=args.watch_cookie_exports,
-                allow_browser_cookie_fallback=bool(args.allow_browser_cookie_fallback),
+                allow_browser_cookie_fallback=(
+                    bool(args.allow_browser_cookie_fallback)
+                    or ytdlp_auth.browser_cookie_fallback_enabled()
+                ),
             )
 
         if args.clean_slate:

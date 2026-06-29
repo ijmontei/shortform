@@ -28,20 +28,44 @@
         "token_file": "youtube_token_truecrime.json"
     },
     "channels": [
+        "https://www.youtube.com/@RottenMango/videos",
         "https://www.youtube.com/@SoftWhiteUnderbelly/videos",
+        "https://www.youtube.com/@EmilyDBaker/videos",
+        "https://www.youtube.com/@ShawnRyanShow/videos",
+        "https://www.youtube.com/@VladTV/videos",
+        "https://www.youtube.com/@LawAndCrime/videos",
+        "https://www.youtube.com/@48hours/videos",
+        "https://www.youtube.com/@CoffeehouseCrime/videos",
+        "https://www.youtube.com/@JCS/videos",
+        "https://www.youtube.com/@ExploreWithUs/videos",
+        "https://www.youtube.com/@ThatChapter/videos",
+        "https://www.youtube.com/@MattOrchardCrimeandSociety/videos",
+        "https://www.youtube.com/@EWUCrimeStorytime/videos",
+        "https://www.youtube.com/@CourtTV/videos",
+        "https://www.youtube.com/@ABC2020/videos",
+        "https://www.youtube.com/@DatelineNBC/videos",
+        "https://www.youtube.com/@TrueCrimeDaily/videos",
+        "https://www.youtube.com/@InsideEdition/videos",
+        "https://www.youtube.com/@10toLIFE/videos",
+        "https://www.youtube.com/@StephanieHarlowe/videos",
+        "https://www.youtube.com/@KendallRae/videos",
+        "https://www.youtube.com/@dreadingCAP/videos",
+        "https://www.youtube.com/@TheBehaviorPanel/videos",
+        "https://www.youtube.com/@CriminallyListed/videos",
+        "https://www.youtube.com/@MrBallen/videos",
+        "https://www.youtube.com/@MurderWithMyHusbandPodcast/videos",
+        "https://www.youtube.com/@LawyerYouKnow/videos",
+        "https://www.youtube.com/@LegalBytesMedia/videos",
+        "https://www.youtube.com/@HiddenTrueCrime/videos",
+        "https://www.youtube.com/@SurvivingTheSurvivor/videos",
         "https://www.youtube.com/@TheEmilyDBaker/videos",
         "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
         "https://www.youtube.com/@djvlad/videos",
         "https://www.youtube.com/@rottenmangopod/videos",
-        "https://www.youtube.com/@LawAndCrime/videos",
-        "https://www.youtube.com/@CourtTV/videos",
-        "https://www.youtube.com/@48hours/videos",
-        "https://www.youtube.com/@DatelineNBC/videos",
         "https://www.youtube.com/@CrimeWeeklyPodcast/videos",
-        "https://www.youtube.com/@KendallRae/videos",
-        "https://www.youtube.com/@StephanieHarlowe/videos",
-        "https://www.youtube.com/@EWUCrimeStorytime/videos",
-        "https://www.youtube.com/@lawandcrimetrials/videos"
+        "https://www.youtube.com/@lawandcrimetrials/videos",
+        "https://www.youtube.com/@RedTreeStories/videos",
+        "https://www.youtube.com/@PoliceActivity/videos"
     ],
     "research": {
         "priority": "high",
@@ -140,6 +164,20 @@
                 "nutrition",
                 "celebrity dating"
             ],
+            "hard_negative_keywords": [
+                "courttv",
+                "court tv",
+                "lawandcrimetrials",
+                "law and crime trials",
+                "bodycam",
+                "caught on bodycam",
+                "full trial",
+                "entire trial",
+                "sentencing",
+                "dateline episode trailer",
+                "48 hours",
+                "48 hours full episodes"
+            ],
             "min_positive_hits_by_tier": {
                 "priority": 1,
                 "secondary": 1,
@@ -187,9 +225,9 @@
     "metadata_style": {
         "title_style": "specific_curiosity",
         "title_templates": [
-            "The Context Behind This Case Detail",
-            "This {archetype} Changes The Timeline",
-            "What {source} Said About {topic}"
+            "{topic}: The Detail That Changes The Case",
+            "The Evidence Question Around {topic}",
+            "Why {topic} Matters To The Timeline"
         ],
         "description_style": "source_plus_context",
         "hashtags": [

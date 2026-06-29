@@ -1,15 +1,418 @@
 {
     "theme": "gaming",
+    "profile": "gaming",
+    "brand": {
+        "channel_name": "VideoGamerArchive",
+        "positioning": "The sharpest gaming creator, esports, developer, and industry interview moments clipped with context.",
+        "audience": "Gaming fans who follow creators, esports teams, studios, launches, and the business behind games.",
+        "viewer_promise": "Creator stories, esports drama, developer insight, and game-industry debates without filler.",
+        "voice": "plugged-in gaming desk",
+        "risk_tolerance": "medium",
+        "color_palette": [
+            "#050914",
+            "#00F5D4",
+            "#FF2E63",
+            "#FEE440",
+            "#7B2CBF"
+        ],
+        "creative_personality": "neon arcade broadcast, esports desk, kinetic, playful but sharp",
+        "channel_brand_assets": {
+            "logo_800": "assets/channel_brands/videogamer_archive/videogamer_archive_logo_800.png",
+            "logo_1024": "assets/channel_brands/videogamer_archive/videogamer_archive_logo_1024.png",
+            "youtube_banner_2560x1440": "assets/channel_brands/videogamer_archive/videogamer_archive_youtube_banner_2560x1440.png",
+            "description": "assets/channel_brands/videogamer_archive/videogamer_archive_description.md"
+        }
+    },
+    "youtube": {
+        "channel_handle": "@VideoGamerArchive",
+        "token_file": "youtube_token_gaming.json"
+    },
     "channels": [
+        "https://www.youtube.com/@OpTicAudioNetwork/videos",
+        "https://www.youtube.com/@H3CZ/videos",
+        "https://www.youtube.com/@Nadeshot/videos",
+        "https://www.youtube.com/@CouRageJD/videos",
+        "https://www.youtube.com/@100ThievesCast/videos",
+        "https://www.youtube.com/@100Thieves/videos",
+        "https://www.youtube.com/@Scump/videos",
+        "https://www.youtube.com/@Methodz/videos",
+        "https://www.youtube.com/@TheFlank/videos",
+        "https://www.youtube.com/@BreakingPointGG/videos",
+        "https://www.youtube.com/@CODLeague/videos",
+        "https://www.youtube.com/@TheYardPodcast/videos",
+        "https://www.youtube.com/@FearAndPodcast/videos",
+        "https://www.youtube.com/@WineAboutItPodcast/videos",
+        "https://www.youtube.com/@OfflineTVPodcast/videos",
+        "https://www.youtube.com/@OfflineTV/videos",
+        "https://www.youtube.com/@TrashTaste/videos",
+        "https://www.youtube.com/@ChuckleSandwich/videos",
+        "https://www.youtube.com/@OfficialPodcast/videos",
+        "https://www.youtube.com/@SomeOrdinaryPodcast/videos",
+        "https://www.youtube.com/@TheCreateUnknown/videos",
+        "https://www.youtube.com/@LemonadeStandShow/videos",
+        "https://www.youtube.com/@Dexerto/videos",
+        "https://www.youtube.com/@JakeSucky/videos",
+        "https://www.youtube.com/@TravisGafford/videos",
+        "https://www.youtube.com/@LastFreeNation/videos",
+        "https://www.youtube.com/@Thooorin/videos",
+        "https://www.youtube.com/@RichardLewisReports/videos",
+        "https://www.youtube.com/@HLTVorg/videos",
+        "https://www.youtube.com/@VALORANTEsports/videos",
+        "https://www.youtube.com/@ValorantAmericas/videos",
+        "https://www.youtube.com/@LCS/videos",
+        "https://www.youtube.com/@LoLEsports/videos",
+        "https://www.youtube.com/@RiotGames/videos",
+        "https://www.youtube.com/@TeamLiquid/videos",
+        "https://www.youtube.com/@Cloud9/videos",
+        "https://www.youtube.com/@Sentinels/videos",
+        "https://www.youtube.com/@G2Esports/videos",
+        "https://www.youtube.com/@FaZeClan/videos",
+        "https://www.youtube.com/@Fnatic/videos",
+        "https://www.youtube.com/@TSM/videos",
+        "https://www.youtube.com/@GamertagRadio/videos",
+        "https://www.youtube.com/@SpawnOnMePodcast/videos",
+        "https://www.youtube.com/@IronLordsPodcast/videos",
+        "https://www.youtube.com/@XboxEra/videos",
+        "https://www.youtube.com/@LastStandMedia/videos",
         "https://www.youtube.com/@KindaFunnyGames/videos",
-        "https://www.youtube.com/playlist?list=PLbcyJSeTLtlwyCd8BWh0iFvhJzmn9B6NN",
-        "https://www.youtube.com/channel/UCiUhKqsBH-Is2VeC2sykEfg/videos",
-        "https://www.youtube.com/@GiantBomb/videos",
+        "https://www.youtube.com/@MinnMaxShow/videos",
+        "https://www.youtube.com/@FriendsPerSecond/videos",
         "https://www.youtube.com/@EasyAllies/videos",
-        "https://www.youtube.com/@SpawnOnMe/videos",
-        "https://www.youtube.com/@NoclipDocs/videos",
-        "https://www.youtube.com/channel/UCR9R2ARN74dCebn1kv06UhA/videos",
-        "https://www.youtube.com/channel/UCt9BGe6i2lJepl-B_zwX6VA/videos",
-        "https://www.youtube.com/@HealthyGamerGG/videos"
+        "https://www.youtube.com/@giantbomb/videos",
+        "https://www.youtube.com/@Nextlander/videos",
+        "https://www.youtube.com/@RemapRadio/videos",
+        "https://www.youtube.com/@NoClipDocs/videos",
+        "https://www.youtube.com/@OfficialAIAS/videos",
+        "https://www.youtube.com/@Gdconf/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Gaming clips perform best when they feel like insider context: creator stories, esports stakes, studio decisions, launch fallout, and culture debates.",
+        "source_strategy": "Gaming podcasts, esports desks, creator-led channels, game-industry shows, developer conference interviews, and documentary-style game channels."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            20,
+            32,
+            45,
+            58
+        ],
+        "min_clip_duration": 16,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 15,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "developer_insight",
+            "industry_debate",
+            "creator_lesson",
+            "game_design",
+            "esports_moment",
+            "launch_postmortem"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "game",
+            "gaming",
+            "developer",
+            "studio",
+            "esports",
+            "console",
+            "design",
+            "player",
+            "launch",
+            "cod",
+            "valorant",
+            "league",
+            "tournament",
+            "team",
+            "streamer",
+            "creator",
+            "patch",
+            "ranked",
+            "controller",
+            "pc",
+            "xbox",
+            "playstation",
+            "nintendo",
+            "riot",
+            "optic",
+            "100 thieves"
+        ],
+        "negative_keywords": [
+            "stock market",
+            "fed panic",
+            "mortgage",
+            "murder trial",
+            "true crime",
+            "supreme court",
+            "election",
+            "fitness protocol",
+            "nutrition"
+        ],
+        "archetypes": [
+            "developer_insight",
+            "industry_debate",
+            "creator_lesson",
+            "game_design",
+            "esports_moment",
+            "launch_postmortem"
+        ],
+        "penalize_missing_theme_signal": true,
+        "source_guard": {
+            "positive_keywords": [
+                "gaming",
+                "game",
+                "games",
+                "video games",
+                "esports",
+                "developer",
+                "studio",
+                "valorant",
+                "league",
+                "cod",
+                "call of duty",
+                "xbox",
+                "playstation",
+                "nintendo",
+                "optic",
+                "100 thieves",
+                "riot",
+                "lcs",
+                "hltv",
+                "gdc",
+                "kinda funny games",
+                "giant bomb",
+                "noclip",
+                "spawn on me",
+                "easy allies"
+            ],
+            "negative_keywords": [
+                "stock market",
+                "fed panic",
+                "rental properties",
+                "murder trial",
+                "true crime",
+                "supreme court",
+                "fitness protocol",
+                "nutrition",
+                "red carpet",
+                "movie premiere"
+            ],
+            "min_positive_hits_by_tier": {
+                "priority": 1,
+                "secondary": 1,
+                "legacy": 1
+            },
+            "trusted_source_terms": [
+                "opticaudionetwork",
+                "h3cz",
+                "nadeshot",
+                "couragejd",
+                "100thieves",
+                "scump",
+                "methodz",
+                "theflank",
+                "breakingpointgg",
+                "codleague",
+                "theyardpodcast",
+                "offlinetv",
+                "trashtaste",
+                "dexerto",
+                "jakesucky",
+                "travisgafford",
+                "lastfreenation",
+                "thooorin",
+                "richardlewisreports",
+                "hltvorg",
+                "valorantesports",
+                "lolesports",
+                "riotgames",
+                "teamliquid",
+                "cloud9",
+                "sentinels",
+                "g2esports",
+                "fazeclan",
+                "fnatic",
+                "tsm",
+                "gamertagradio",
+                "spawnonmepodcast",
+                "ironlordspodcast",
+                "xboxera",
+                "laststandmedia",
+                "kindafunnygames",
+                "minnmaxshow",
+                "friendspersecond",
+                "easyallies",
+                "giantbomb",
+                "nextlander",
+                "remapradio",
+                "noclipdocs",
+                "officialaias",
+                "gdconf"
+            ],
+            "negative_override_min_positive_hits": 2
+        }
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.3,
+        "caption_style": "kinetic_gaming",
+        "framing_style": "debate_reaction",
+        "overlay_style": "neon_arcade"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "Why {topic} Split The Lobby",
+            "The Creator Take Behind {topic}",
+            "The Game Industry Bet On {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#gaming",
+            "#videogames",
+            "#esports",
+            "#gamingnews",
+            "#shorts"
+        ],
+        "tags": [
+            "gaming",
+            "video games",
+            "gaming podcast",
+            "game developer",
+            "esports",
+            "gaming shorts",
+            "creator clips",
+            "gaming news",
+            "game industry"
+        ],
+        "topic_tags": {
+            "game": "#gaming",
+            "developer": "#gamedev",
+            "studio": "#gamedev",
+            "esports": "#esports",
+            "console": "#console",
+            "design": "#gamedesign",
+            "player": "#gaming",
+            "launch": "#gamingnews",
+            "valorant": "#valorant",
+            "league": "#leagueoflegends",
+            "cod": "#callofduty"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "security exploit detail",
+            "privacy-invasive advice",
+            "unsupported model capability claims"
+        ],
+        "manual_review_topics": [
+            "security",
+            "privacy",
+            "AI stock hype"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_one",
+    "phase_one_active": true,
+    "phase_one_order": 3,
+    "priority_channels": [
+        "https://www.youtube.com/@OpTicAudioNetwork/videos",
+        "https://www.youtube.com/@Nadeshot/videos",
+        "https://www.youtube.com/@TheYardPodcast/videos",
+        "https://www.youtube.com/@KindaFunnyGames/videos",
+        "https://www.youtube.com/@NoClipDocs/videos"
+    ],
+    "secondary_channels": [
+        "https://www.youtube.com/@H3CZ/videos",
+        "https://www.youtube.com/@Scump/videos",
+        "https://www.youtube.com/@TheFlank/videos",
+        "https://www.youtube.com/@BreakingPointGG/videos",
+        "https://www.youtube.com/@OfflineTVPodcast/videos",
+        "https://www.youtube.com/@Dexerto/videos",
+        "https://www.youtube.com/@JakeSucky/videos",
+        "https://www.youtube.com/@LastFreeNation/videos",
+        "https://www.youtube.com/@VALORANTEsports/videos",
+        "https://www.youtube.com/@LoLEsports/videos"
+    ],
+    "episode_routing_override": [
+        {
+            "source": "OfflineTV",
+            "route_to": [
+                "gaming",
+                "popculture"
+            ],
+            "when": "episode is creator-culture led but still anchored in gaming communities"
+        },
+        {
+            "source": "The Yard",
+            "route_to": [
+                "gaming",
+                "popculture"
+            ],
+            "when": "episode is streamer/creator culture rather than game-specific analysis"
+        }
     ]
 }

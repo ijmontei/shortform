@@ -41,7 +41,13 @@ def build_ytdl_opts(extra_opts=None, use_cookies=False):
     cookie_browsers = get_cookie_browser_candidates()
 
     if use_cookies:
-        if os.path.exists(cookies_file):
+        if (
+            ytdlp_auth.browser_cookie_fallback_enabled()
+            and cookie_browsers
+            and ytdlp_auth.browser_cookie_fallback_ready()
+        ):
+            opts["cookiesfrombrowser"] = cookie_browser_to_tuple(cookie_browsers[0])
+        elif os.path.exists(cookies_file):
             opts["cookiefile"] = cookies_file
         elif cookie_browsers:
             opts["cookiesfrombrowser"] = cookie_browser_to_tuple(cookie_browsers[0])

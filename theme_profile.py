@@ -198,6 +198,32 @@ PROFILE_PRESETS = {
                 "cash flow", "investing", "valuation", "market", "inflation",
                 "interest rate", "recession", "founder", "margin", "debt",
             ],
+            "negative_keywords": [
+                "democratic nominee", "republican super pac", "mike lawler",
+                "dsa candidates", "wimbledon", "movie premiere", "red carpet",
+            ],
+            "source_guard": {
+                "hard_negative_keywords": [
+                    "democratic nominee", "republican super pac", "mike lawler",
+                    "dsa candidates", "socialists sweep", "wimbledon",
+                ],
+                "negative_keywords": [
+                    "movie premiere", "red carpet", "fitness protocol",
+                    "murder trial", "true crime",
+                ],
+                "positive_keywords": [
+                    "finance", "money", "market", "markets", "investing",
+                    "investor", "cash flow", "valuation", "interest rate",
+                    "interest rates", "rates", "fed", "inflation", "debt", "recession", "business", "economy",
+                    "economic", "founder", "startup", "revenue", "profit",
+                ],
+                "min_positive_hits_by_tier": {
+                    "priority": 1,
+                    "secondary": 1,
+                    "legacy": 1,
+                },
+                "negative_override_min_positive_hits": 2,
+            },
             "keyword_weights": {
                 "cash flow": 2.1,
                 "valuation": 2.0,
@@ -1015,6 +1041,41 @@ def normalized_string_list(values):
     return normalized
 
 
+def channel_trusted_terms(channel_url):
+    text = str(channel_url or "").strip()
+    if not text:
+        return []
+
+    text = re.sub(r"^https?://(www\.)?youtube\.com/", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"/videos/?$", "", text, flags=re.IGNORECASE).strip("/")
+    terms = []
+
+    if text.startswith("@"):
+        handle = text[1:]
+        terms.extend([handle, f"@{handle}"])
+    elif text:
+        terms.append(text)
+
+    cleaned = re.sub(r"[^a-z0-9]+", "", text.lower())
+    if cleaned:
+        terms.append(cleaned)
+
+    return normalized_string_list(terms)
+
+
+def profile_channel_trusted_terms(profile):
+    terms = []
+
+    for channel in (
+        normalized_string_list(profile.get("priority_channels") or [])
+        + normalized_string_list(profile.get("secondary_channels") or [])
+        + normalized_string_list(profile.get("channels") or [])
+    ):
+        terms.extend(channel_trusted_terms(channel))
+
+    return normalized_string_list(terms)
+
+
 def normalized_route_override_items(items):
     routes = []
 
@@ -1140,6 +1201,7 @@ def source_guard_disqualification(profile, source_record):
     source_record = source_record or {}
     signal_config = profile.get("theme_signals") or {}
     source_guard = signal_config.get("source_guard") or {}
+    hard_negative_keywords = list(source_guard.get("hard_negative_keywords") or [])
     negative_keywords = list(signal_config.get("negative_keywords") or [])
     negative_keywords.extend(source_guard.get("negative_keywords") or [])
     source_text = " ".join(
@@ -1153,6 +1215,11 @@ def source_guard_disqualification(profile, source_record):
             "video_url",
         )
     )
+    hard_hits = [keyword for keyword in hard_negative_keywords if keyword_in_text(source_text, keyword)]
+
+    if hard_hits:
+        return True, hard_hits[:6]
+
     hits = [keyword for keyword in negative_keywords if keyword_in_text(source_text, keyword)]
     positive_keywords = list(signal_config.get("positive_keywords") or [])
     positive_keywords.extend(source_guard.get("positive_keywords") or [])
@@ -1172,10 +1239,10 @@ def source_guard_disqualification(profile, source_record):
     if source_tier in tier_minimums:
         min_positive_hits = int(tier_minimums.get(source_tier) or 0)
 
-    trusted_terms = source_guard.get("trusted_source_terms") or []
-    trusted_source = any(keyword_in_text(source_text, term) for term in trusted_terms)
+    explicit_trusted_terms = normalized_string_list(source_guard.get("trusted_source_terms") or [])
+    explicit_trusted_source = any(keyword_in_text(source_text, term) for term in explicit_trusted_terms)
 
-    if min_positive_hits and not trusted_source and len(positive_hits) < min_positive_hits:
+    if min_positive_hits and not explicit_trusted_source and len(positive_hits) < min_positive_hits:
         return True, [f"missing_source_positive_signal:{len(positive_hits)}/{min_positive_hits}"]
 
     return False, hits[:6]

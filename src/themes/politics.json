@@ -31,13 +31,36 @@
         "https://www.youtube.com/@breakingpoints/videos",
         "https://www.youtube.com/@MegynKelly/videos",
         "https://www.youtube.com/@MeidasTouch/videos",
-        "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
-        "https://www.youtube.com/@PiersMorganUncensored/videos",
+        "https://www.youtube.com/@BenShapiro/videos",
+        "https://www.youtube.com/@TheYoungTurks/videos",
+        "https://www.youtube.com/@CandaceOwensPodcast/videos",
         "https://www.youtube.com/@PodSaveAmerica/videos",
+        "https://www.youtube.com/@RealTime/videos",
+        "https://www.youtube.com/@TheDailyShow/videos",
+        "https://www.youtube.com/@TuckerCarlson/videos",
+        "https://www.youtube.com/@ShawnRyanShow/videos",
+        "https://www.youtube.com/@TheCharlieKirkShow/videos",
+        "https://www.youtube.com/@TimcastIRL/videos",
+        "https://www.youtube.com/@DailyWirePlus/videos",
+        "https://www.youtube.com/@SecularTalk/videos",
+        "https://www.youtube.com/@TheMajorityReport/videos",
         "https://www.youtube.com/@TheBulwark/videos",
         "https://www.youtube.com/@TheFreePress/videos",
+        "https://www.youtube.com/@TheDispatch/videos",
+        "https://www.youtube.com/@UnHerd/videos",
+        "https://www.youtube.com/@triggerpod/videos",
+        "https://www.youtube.com/@TheRestIsPolitics/videos",
+        "https://www.youtube.com/@TheRestIsPoliticsUS/videos",
+        "https://www.youtube.com/@PiersMorganUncensored/videos",
+        "https://www.youtube.com/@JordanBPeterson/videos",
+        "https://www.youtube.com/@lexfridman/videos",
+        "https://www.youtube.com/@FiringLine/videos",
+        "https://www.youtube.com/@HooverInstitution/videos",
+        "https://www.youtube.com/@SystemUpdate/videos",
+        "https://www.youtube.com/@AmanpourPBS/videos",
+        "https://www.youtube.com/@ShawnRyanShowOfficial/videos",
         "https://www.youtube.com/@PBSNewsHour/videos",
-        "https://www.youtube.com/@TuckerCarlson/videos"
+        "https://www.youtube.com/@dwnews/videos"
     ],
     "research": {
         "priority": "high",
@@ -128,6 +151,14 @@
                 "nba",
                 "nfl"
             ],
+            "hard_negative_keywords": [
+                "meidastouch",
+                "meidas touch",
+                "twitter",
+                "tweet",
+                "posted",
+                "social media post"
+            ],
             "min_positive_hits_by_tier": {
                 "priority": 0,
                 "secondary": 1,
@@ -170,9 +201,9 @@
     "metadata_style": {
         "title_style": "specific_curiosity",
         "title_templates": [
-            "What {source} Said About {topic}",
             "The Context Behind {topic}",
-            "This {archetype} Needed More Context"
+            "What {topic} Changes In The Debate",
+            "Why {topic} Became The Debate"
         ],
         "description_style": "source_plus_context",
         "hashtags": [

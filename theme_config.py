@@ -17,6 +17,7 @@ DEFAULT_THEME = "comedy"
 PHASE_ONE_ACTIVE_THEMES = [
     "comedy",
     "sports",
+    "gaming",
     "finance",
     "technology_ai",
     "health_fitness",

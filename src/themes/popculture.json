@@ -30,16 +30,38 @@
     "channels": [
         "https://www.youtube.com/@FirstWeFeast/videos",
         "https://www.youtube.com/@callherdaddy/videos",
-        "https://www.youtube.com/@AmeliaDimoldenberg/videos",
+        "https://www.youtube.com/@chickenshopdate/videos",
         "https://www.youtube.com/@BreakfastClubPower1051FM/videos",
-        "https://www.youtube.com/@SmartLess/videos",
-        "https://www.youtube.com/@Variety/videos",
-        "https://www.youtube.com/@VanityFair/videos",
+        "https://www.youtube.com/@Vogue/videos",
         "https://www.youtube.com/@GQVideos/videos",
-        "https://www.youtube.com/@WIRED/videos",
         "https://www.youtube.com/@Complex/videos",
+        "https://www.youtube.com/@nardwuar/videos",
+        "https://www.youtube.com/@TeamCoco/videos",
+        "https://www.youtube.com/@SmartLess/videos",
+        "https://www.youtube.com/@ArmchairExpertPod/videos",
+        "https://www.youtube.com/@WIRED/videos",
+        "https://www.youtube.com/@VanityFair/videos",
+        "https://www.youtube.com/@Variety/videos",
+        "https://www.youtube.com/@SiriusXM/videos",
+        "https://www.youtube.com/@TheTonightShow/videos",
+        "https://www.youtube.com/@LateNightSeth/videos",
+        "https://www.youtube.com/@JimmyKimmelLive/videos",
+        "https://www.youtube.com/@ColbertLateShow/videos",
+        "https://www.youtube.com/@TheKellyClarksonShow/videos",
+        "https://www.youtube.com/@TheDrewBarrymoreShow/videos",
+        "https://www.youtube.com/@TheHollywoodReporter/videos",
+        "https://www.youtube.com/@People/videos",
+        "https://www.youtube.com/@EntertainmentTonight/videos",
+        "https://www.youtube.com/@eentertainment/videos",
+        "https://www.youtube.com/@zachangshow/videos",
+        "https://www.youtube.com/@AppleMusic/videos",
+        "https://www.youtube.com/@ClubShayShay/videos",
+        "https://www.youtube.com/@TheShopUN/videos",
+        "https://www.youtube.com/@HotOnes/videos",
+        "https://www.youtube.com/@AmeliaDimoldenberg/videos",
         "https://www.youtube.com/hollywoodreporter/videos",
-        "https://www.youtube.com/@Vogue/videos"
+        "https://www.youtube.com/@PowerfulJRE/videos",
+        "https://www.youtube.com/@TheHowardSternShow/videos"
     ],
     "research": {
         "priority": "high",
@@ -171,9 +193,9 @@
     "metadata_style": {
         "title_style": "specific_curiosity",
         "title_templates": [
-            "{source} Told The Story Behind {topic}",
-            "This Celebrity Moment Says Everything",
-            "The {archetype} Behind {topic}"
+            "The Pop Culture Detail Inside {topic}",
+            "Why {topic} Took Over The Conversation",
+            "Why {topic} Became The Moment"
         ],
         "description_style": "source_plus_context",
         "hashtags": [

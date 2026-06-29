@@ -30,16 +30,38 @@
     "channels": [
         "https://www.youtube.com/@lexfridman/videos",
         "https://www.youtube.com/@DwarkeshPatel/videos",
-        "https://www.youtube.com/@Waveform/videos",
         "https://www.youtube.com/@TBPN/videos",
         "https://www.youtube.com/@ycombinator/videos",
         "https://www.youtube.com/@a16z/videos",
-        "https://www.youtube.com/@LennysPodcast/videos",
+        "https://www.youtube.com/@LennyRachitsky/videos",
         "https://www.youtube.com/@NoPriorsPodcast/videos",
         "https://www.youtube.com/@LatentSpacePod/videos",
+        "https://www.youtube.com/@EveryInc/videos",
+        "https://www.youtube.com/@Waveform/videos",
+        "https://www.youtube.com/@ThisWeekInStartups/videos",
         "https://www.youtube.com/@AcquiredFM/videos",
-        "https://www.youtube.com/@ThisWeekinStartups/videos",
-        "https://www.youtube.com/@PracticalAIFM/videos"
+        "https://www.youtube.com/@allin/videos",
+        "https://www.youtube.com/@MyFirstMillionPod/videos",
+        "https://www.youtube.com/@JohnCooganPlus/videos",
+        "https://www.youtube.com/@20VCwithHarryStebbings/videos",
+        "https://www.youtube.com/@BG2Pod/videos",
+        "https://www.youtube.com/@InvestLikeTheBest/videos",
+        "https://www.youtube.com/@SoftwareEngineeringDaily/videos",
+        "https://www.youtube.com/@BigTechnologyPodcast/videos",
+        "https://www.youtube.com/@DecoderPodcast/videos",
+        "https://www.youtube.com/@GreylockVC/videos",
+        "https://www.youtube.com/@SequoiaCapital/videos",
+        "https://www.youtube.com/@StanfordHAI/videos",
+        "https://www.youtube.com/@GoogleDeepMind/videos",
+        "https://www.youtube.com/@MicrosoftResearch/videos",
+        "https://www.youtube.com/@TEDAIShow/videos",
+        "https://www.youtube.com/@SourceryVC/videos",
+        "https://www.youtube.com/@Stratechery/videos",
+        "https://www.youtube.com/@TheKnowledgeProject/videos",
+        "https://www.youtube.com/@LennysPodcast/videos",
+        "https://www.youtube.com/@PracticalAIFM/videos",
+        "https://www.youtube.com/@OpenAI/videos",
+        "https://www.youtube.com/@AndrejKarpathy/videos"
     ],
     "research": {
         "priority": "high",
@@ -110,8 +132,16 @@
                 "builder",
                 "tech",
                 "technology",
-                "steam machine",
                 "training paradigm"
+            ],
+            "hard_negative_keywords": [
+                "steam machine",
+                "fortnite",
+                "grand theft",
+                "gta",
+                "dota",
+                "gaming skin",
+                "video game skin"
             ],
             "negative_keywords": [
                 "physics",
@@ -178,9 +208,9 @@
     "metadata_style": {
         "title_style": "specific_curiosity",
         "title_templates": [
-            "The AI Problem Behind {topic}",
-            "Why {topic} Is Harder Than The Demo",
-            "This Builder Explains {topic}"
+            "{topic}: The AI Detail Builders Are Watching",
+            "The Builder Takeaway On {topic}",
+            "Why {topic} Is Harder Than It Looks"
         ],
         "description_style": "source_plus_context",
         "hashtags": [

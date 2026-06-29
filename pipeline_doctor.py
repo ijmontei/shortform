@@ -142,6 +142,7 @@ def check_auth():
     ))
 
     cookie_file = ytdlp_auth.youtube_cookie_file()
+    browser_fallback_enabled = ytdlp_auth.browser_cookie_fallback_enabled()
     strict_result = None
     strict_error = None
 
@@ -160,9 +161,13 @@ def check_auth():
         except Exception as error:
             strict_error = error
             checks.append(status_line(
-                False,
+                browser_fallback_enabled,
                 "YouTube cookie file restricted auth",
-                str(error).splitlines()[0],
+                (
+                    str(error).splitlines()[0] + "; browser fallback will be tested"
+                    if browser_fallback_enabled
+                    else str(error).splitlines()[0]
+                ),
             ))
     else:
         checks.append(status_line(False, "YouTube cookie file", f"missing at {cookie_file}"))
@@ -185,25 +190,27 @@ def check_auth():
 
     if blockers:
         browser_detail.append(f"blocking={','.join(blockers)}")
-        browser_detail.append(f"processes={browser_lock.get('process_count', 0)}")
+        browser_detail.append(f"blocking_processes={browser_lock.get('blocking_process_count', 0)}")
 
         if visible_titles:
             browser_detail.append(f"visible_tab={visible_titles[0]}")
     else:
-        browser_detail.append("Chrome/Edge not running")
+        observed = ",".join(browser_lock.get("observed_browsers") or [])
+        browser_detail.append("configured browser not locked")
+        if observed:
+            browser_detail.append(f"other_browsers_running={observed}")
 
     checks.append(status_line(
         True,
         "Browser cookie lock status",
-        "; ".join(browser_detail) + "; close every browser window/background process before using browser-cookie fallback",
+        "; ".join(browser_detail),
     ))
 
-    browser_fallback_enabled = ytdlp_auth.browser_cookie_fallback_enabled()
     checks.append(status_line(
         True,
         "Browser cookie fallback",
         (
-            "enabled by SHORTFORM_ALLOW_BROWSER_COOKIE_FALLBACK=1"
+            "enabled; Firefox browser cookies are primary unless overridden"
             if browser_fallback_enabled
             else "disabled for deterministic production runs"
         ),
@@ -255,7 +262,7 @@ def check_auth():
     except Exception as error:
         first_line = str(error).splitlines()[0]
         if "copy chrome cookie database" in str(error).lower() or "cookie database" in str(error).lower():
-            first_line += " (browser profile may be locked; close Chrome/Edge fully or re-export cookies.txt)"
+            first_line += " (browser profile may be locked; close the selected browser fully or re-export cookies.txt)"
         checks.append(status_line(False, "Restricted-video auth", first_line))
         checks.append(status_line(
             os.path.exists(ytdlp_auth.AUTH_REPORT_FILE),

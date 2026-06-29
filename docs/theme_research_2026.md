@@ -4,12 +4,13 @@ This memo is the launch-scope source of truth for the current Shortform theme en
 
 ## Active Launch Slate
 
-Phase one uses exactly eight YouTube interview ecosystems:
+Phase one uses exactly nine YouTube interview ecosystems:
 
 | Theme | Community thesis | Source strategy | Primary editorial promise |
 | --- | --- | --- | --- |
 | `comedy` | Large repeat audience for jokes, roasts, stories, and reactions. | Comedy podcasts and visible multi-speaker formats. | The funniest moments without watching the full episode. |
 | `sports` | Durable debate culture around athletes, teams, legacy, and rivalry. | Athlete podcasts, debate shows, and high-signal sports interviews. | The argument or story fans want to react to. |
+| `gaming` | Fast-moving gaming, esports, creator, and developer culture with heavy repeat fandom. | Gaming podcasts, esports desks, creator-led channels, developer talks, and game-industry interviews. | The sharpest gaming creator, esports, developer, or industry moment with context. |
 | `finance` | High-value audience for business, markets, economics, and money frameworks. | Founder, investor, economics, and operator interviews. | A useful idea, risk, or framework per clip. |
 | `technology_ai` | Fast-moving builder and AI audience with high curiosity. | Builder, researcher, investor, and product-operator interviews. | One concrete technical or operator insight. |
 | `health_fitness` | Huge wellness and self-improvement demand with higher claim risk. | Evidence-aware fitness, nutrition, psychology, sleep, and longevity sources. | Practical behavior change with review gates. |
@@ -19,7 +20,7 @@ Phase one uses exactly eight YouTube interview ecosystems:
 
 ## Future-Compatible Configs
 
-The repository may contain extra JSON configs for future expansion, including agriculture, gaming, lifestyle, travel, religion, education, real estate, food, history, music, film/TV, and similar niches. These are not active phase-one themes. They should remain blocked from default production unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is deliberately set for testing.
+The repository may contain extra JSON configs for future expansion, including agriculture, lifestyle, travel, religion, education, real estate, food, history, music, film/TV, and similar niches. These are not active phase-one themes. They should remain blocked from default production unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is deliberately set for testing.
 
 ## Selection Criteria
 
@@ -41,4 +42,4 @@ Each active theme must pass five tests before it belongs in the launch slate:
 
 ## Launch Guardrail
 
-The default run path should discover only the eight active launch themes. Old phase-two output folders can exist on disk from prior experiments, but they should not be treated as current production inventory or upload-ready unless the future-theme gate is intentionally opened.
+The default run path should discover only the nine active launch themes. Old phase-two output folders can exist on disk from prior experiments, but they should not be treated as current production inventory or upload-ready unless the future-theme gate is intentionally opened.

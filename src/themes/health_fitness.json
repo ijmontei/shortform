@@ -29,18 +29,41 @@
     },
     "channels": [
         "https://www.youtube.com/@hubermanlab/videos",
-        "https://www.youtube.com/@melrobbins/videos",
-        "https://www.youtube.com/@JayShettyPodcast/videos",
-        "https://www.youtube.com/@TheDiaryOfACEO/videos",
-        "https://www.youtube.com/@RichRoll/videos",
-        "https://www.youtube.com/@PeterAttiaMD/videos",
         "https://www.youtube.com/@FoundMyFitness/videos",
-        "https://www.youtube.com/@drchatterjee/videos",
-        "https://www.youtube.com/@LewisHowes/videos",
-        "https://www.youtube.com/@drmarkhyman/videos",
+        "https://www.youtube.com/@drpeterattia/videos",
+        "https://www.youtube.com/@RichRoll/videos",
         "https://www.youtube.com/@MindPumpShow/videos",
         "https://www.youtube.com/@ChrisWillx/videos",
-        "https://www.youtube.com/@ZOE/videos"
+        "https://www.youtube.com/@TheMelRobbinsPodcast/videos",
+        "https://www.youtube.com/@JayShettyPodcast/videos",
+        "https://www.youtube.com/@LewisHowes/videos",
+        "https://www.youtube.com/@TheDiaryOfACEO/videos",
+        "https://www.youtube.com/@ZOE/videos",
+        "https://www.youtube.com/@DrChatterjeeRangan/videos",
+        "https://www.youtube.com/@TheProofWithSimonHill/videos",
+        "https://www.youtube.com/@RenaissancePeriodization/videos",
+        "https://www.youtube.com/@TheModelHealthShow/videos",
+        "https://www.youtube.com/@DoctorMike/videos",
+        "https://www.youtube.com/@MarkHymanMD/videos",
+        "https://www.youtube.com/@drgabormate/videos",
+        "https://www.youtube.com/@WHOOP/videos",
+        "https://www.youtube.com/@MuscleForLife/videos",
+        "https://www.youtube.com/@TomBilyeu/videos",
+        "https://www.youtube.com/@BigThink/videos",
+        "https://www.youtube.com/@MayimBialik/videos",
+        "https://www.youtube.com/@TheSchoolOfGreatness/videos",
+        "https://www.youtube.com/@FeelBetterLiveMorePodcast/videos",
+        "https://www.youtube.com/@TheDrivePodcast/videos",
+        "https://www.youtube.com/@TheMindsetMentorPodcast/videos",
+        "https://www.youtube.com/@TheSkinnyConfidential/videos",
+        "https://www.youtube.com/@ImpactTheory/videos",
+        "https://www.youtube.com/@performpodcast/videos",
+        "https://www.youtube.com/@melrobbins/videos",
+        "https://www.youtube.com/@PeterAttiaMD/videos",
+        "https://www.youtube.com/@drchatterjee/videos",
+        "https://www.youtube.com/@drmarkhyman/videos",
+        "https://www.youtube.com/@AndrewHubermanLabClips/videos",
+        "https://www.youtube.com/@ThomasDeLauerOfficial/videos"
     ],
     "research": {
         "priority": "high",
@@ -89,6 +112,17 @@
         ],
         "negative_keywords": [],
         "source_guard": {
+            "hard_negative_keywords": [
+                "birth story",
+                "our birth story",
+                "emotional day of our lives",
+                "most emotional day",
+                "wedding",
+                "relationship advice",
+                "dating advice",
+                "celebrity gossip",
+                "red carpet"
+            ],
             "positive_keywords": [
                 "health",
                 "fitness",
@@ -173,9 +207,9 @@
     "metadata_style": {
         "title_style": "specific_curiosity",
         "title_templates": [
-            "The Health Mistake Behind {topic}",
-            "A Clearer Way To Think About {topic}",
-            "Why {topic} Matters For Your Body"
+            "{topic}: The Health Detail To Rethink",
+            "The Habit Behind {topic}",
+            "Why {topic} Changes The Plan"
         ],
         "description_style": "source_plus_context",
         "hashtags": [
