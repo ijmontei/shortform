@@ -1739,34 +1739,7 @@ def clip_is_popular_segment_usable(clip):
     render_qc = clip_render_qc(clip)
 
     if render_qc and not render_qc.get("passed", True):
-        frame_path = render_qc.get("frame_path") or {}
-        flags = set(render_qc.get("flags") or [])
-        face_presence = float(frame_path.get("face_presence_rate") or 0.0)
-        no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
-        alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
-        max_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
-
-        if (
-            face_presence < 0.50
-            or no_face_run > 0.34
-            or alive_no_face > 0.45
-            or max_offset > 0.70
-            or {
-                "final render has black frames",
-                "final render has low-information frames",
-                "final render has dead visual frames",
-                "alive frames often miss speaker",
-                "extended no-speaker run in final crop",
-                "probable tiny/background face lock",
-                "probable background lock instead of speaker",
-                "probable picture-in-picture/background lock",
-                "probable flat-surface false face lock",
-                "probable small-object/background face lock",
-                "probable broadcast/b-roll montage instead of speaker clip",
-                "subject severely off-center in final crop",
-            } & flags
-        ):
-            return False
+        return False
 
     return clip_is_editorial_usable(clip)
 
@@ -4847,11 +4820,12 @@ def draw_wheel_mechanism(draw, accent, accent2, t, wheel_top, wheel_height, lock
 
 
 def draw_card_carrier(draw, x, y, width, height, accent, accent2, alpha, t, index):
-    alpha = int(130 * clamp(alpha))
+    raw_alpha = clamp(alpha)
 
-    if alpha <= 8:
+    if raw_alpha <= 0.18:
         return
 
+    alpha = int(130 * raw_alpha)
     mid_y = int(y + height / 2)
     left_anchor = int(x - 32)
     right_anchor = int(x + width + 32)
@@ -4892,36 +4866,42 @@ def draw_card_carrier(draw, x, y, width, height, accent, accent2, alpha, t, inde
 def draw_morph_energy(draw, accent, accent2, t, progress):
     progress = clamp(progress)
 
-    if progress <= 0.01 or progress >= 0.88:
+    if progress <= 0.03 or progress >= 0.82:
         return
 
     bloom = math.sin(math.pi * progress)
-    alpha = int(120 * bloom)
+    alpha = int(138 * bloom)
     pull_x = 540 + int(math.sin(t * 4.2) * 18)
 
-    for arc_index in range(7):
-        y = int(530 + arc_index * 158 + math.sin(t * 5.1 + arc_index) * 18)
-        left = 70 + int(34 * progress)
-        right = 1010 - int(42 * progress)
-        arc_alpha = int(alpha * (0.22 + 0.18 * math.sin(t * 6.0 + arc_index)))
+    for arc_index in range(5):
+        radius_x = int(220 + arc_index * 92 + 120 * progress)
+        radius_y = int(126 + arc_index * 62 + 66 * progress)
+        left = pull_x - radius_x
+        right = pull_x + radius_x
+        y = 940 + int(math.sin(t * 4.8 + arc_index) * 14)
+        arc_alpha = int(alpha * (0.12 + 0.17 * abs(math.sin(t * 5.4 + arc_index))))
         draw.arc(
-            (left, y - 58, right, y + 126),
-            start=186,
-            end=354,
-            fill=(accent2[0], accent2[1], accent2[2], max(16, arc_alpha)),
-            width=3 if arc_index % 2 else 4,
+            (left, y - radius_y, right, y + radius_y),
+            start=202,
+            end=338,
+            fill=(accent2[0], accent2[1], accent2[2], max(10, arc_alpha)),
+            width=2 if arc_index % 2 else 3,
         )
 
-    for line_index in range(18):
-        lane = line_index % 6
-        y = int(555 + lane * 190 + ((t * 680 + line_index * 37) % 152))
-        start_x = int(120 + ((line_index * 71 + t * 420) % 760))
-        end_x = int(start_x + 94 + 90 * bloom)
-        line_alpha = int(alpha * (0.18 + 0.30 * abs(math.sin(t * 5.8 + line_index))))
+    for streak_index in range(26):
+        angle = -0.36 + (streak_index % 9) * 0.09 + math.sin(t * 3.4 + streak_index) * 0.035
+        lane_offset = (streak_index // 9) - 1
+        radius = 150 + (streak_index % 7) * 72 + 170 * progress
+        start_x = int(pull_x + math.cos(angle) * radius - 160 * progress)
+        start_y = int(930 + lane_offset * 176 + math.sin(t * 6.1 + streak_index) * 52)
+        length = int(34 + 88 * bloom + (streak_index % 4) * 12)
+        end_x = int(start_x + length)
+        end_y = int(start_y - length * (0.18 + progress * 0.10))
+        streak_alpha = int(alpha * (0.10 + 0.32 * abs(math.sin(t * 7.2 + streak_index))))
         draw.line(
-            (start_x, y, min(1040, end_x), y - int(22 + 28 * progress)),
-            fill=(255, 244, 184, max(18, line_alpha)),
-            width=2 if line_index % 3 else 4,
+            (start_x, start_y, end_x, end_y),
+            fill=(255, 244, 184, max(8, streak_alpha)),
+            width=1 + (streak_index % 3 == 0),
         )
 
     for spark_index in range(14):
