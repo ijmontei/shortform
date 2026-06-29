@@ -593,6 +593,19 @@ YouTube can still enforce its own upload limits. The local uploader defaults to 
 $env:SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT="15"
 ```
 
+When YouTube returns `uploadLimitExceeded`, the uploader records a conservative cooldown in:
+
+```text
+logs/youtube_upload_cooldowns.json
+```
+
+The default retry estimate is 24 hours after the limit error. During that window, `run.py` and `upload.py` skip upload attempts for the affected theme/channel so a production run does not waste time on guaranteed failures. To change or bypass that behavior for a deliberate manual test:
+
+```powershell
+$env:SHORTFORM_YOUTUBE_UPLOAD_LIMIT_COOLDOWN_HOURS="24"
+$env:SHORTFORM_IGNORE_YOUTUBE_UPLOAD_COOLDOWN="1"
+```
+
 Sources that are scored but do not make the theme-wide cut are marked as `clips_ranked_not_selected` so future runs do not repeatedly spend hours on the same weaker sources. To reconsider them after tuning the scoring model:
 
 ```powershell

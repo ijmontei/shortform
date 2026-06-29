@@ -1,4 +1,5 @@
 import argparse
+import calendar
 import json
 import os
 import random
@@ -56,6 +57,12 @@ THEME_CHANNEL_HANDLES = {
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
 DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "0"))
+YOUTUBE_UPLOAD_COOLDOWN_FILE = os.path.join(BASE_DIR, "logs", "youtube_upload_cooldowns.json")
+YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS = max(
+    0.0,
+    float(os.getenv("SHORTFORM_YOUTUBE_UPLOAD_LIMIT_COOLDOWN_HOURS", "24")) * 3600,
+)
+IGNORE_YOUTUBE_UPLOAD_COOLDOWN = os.getenv("SHORTFORM_IGNORE_YOUTUBE_UPLOAD_COOLDOWN", "0") == "1"
 
 CURRENT_THEME = None
 UPLOAD_PATH = None
@@ -79,6 +86,17 @@ def format_duration(seconds):
         return f"{minutes}m {remainder:.1f}s"
 
     return f"{remainder:.1f}s"
+
+
+def utc_timestamp(epoch_seconds=None):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if epoch_seconds is None else epoch_seconds))
+
+
+def parse_utc_timestamp(value):
+    try:
+        return calendar.timegm(time.strptime(str(value or ""), "%Y-%m-%dT%H:%M:%SZ"))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def configure_theme(theme_name):
@@ -656,6 +674,123 @@ def get_fatal_youtube_error_message(error):
     return None
 
 
+def load_upload_cooldowns():
+    payload = load_json(YOUTUBE_UPLOAD_COOLDOWN_FILE, {"themes": {}})
+
+    if not isinstance(payload, dict):
+        payload = {"themes": {}}
+
+    payload.setdefault("themes", {})
+    return payload
+
+
+def save_upload_cooldowns(payload):
+    os.makedirs(os.path.dirname(YOUTUBE_UPLOAD_COOLDOWN_FILE), exist_ok=True)
+    write_json_file(YOUTUBE_UPLOAD_COOLDOWN_FILE, payload)
+
+
+def upload_cooldown_key():
+    return CURRENT_THEME or DEFAULT_THEME
+
+
+def upload_limit_error_details_from_package(package):
+    error_payload = ((package.get("platform_uploads") or {}).get("youtube_shorts_last_error") or {})
+    message = str(error_payload.get("message") or "")
+
+    if "uploadLimitExceeded" not in message and "exceeded the number of videos" not in message:
+        return None
+
+    failed_at = parse_utc_timestamp(error_payload.get("failed_at"))
+
+    if failed_at <= 0:
+        failed_at = time.time()
+
+    return {
+        "reason": "uploadLimitExceeded",
+        "message": message[-1000:],
+        "failed_at_epoch": failed_at,
+        "failed_at": utc_timestamp(failed_at),
+        "resume_after_epoch": failed_at + YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS,
+        "resume_after": utc_timestamp(failed_at + YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS),
+    }
+
+
+def infer_upload_limit_cooldown_from_metadata(metadata):
+    latest = None
+
+    for package in (metadata or {}).get("content", []):
+        if ((package.get("posting_status") or {}).get("youtube_shorts") or "").lower() != "failed":
+            continue
+
+        details = upload_limit_error_details_from_package(package)
+
+        if not details:
+            continue
+
+        if latest is None or details["failed_at_epoch"] > latest["failed_at_epoch"]:
+            latest = details
+
+    return latest
+
+
+def record_upload_limit_cooldown(reason, message="", failed_at_epoch=None):
+    if reason != "uploadLimitExceeded" or YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS <= 0:
+        return None
+
+    failed_at_epoch = failed_at_epoch or time.time()
+    resume_after_epoch = failed_at_epoch + YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS
+    payload = load_upload_cooldowns()
+    key = upload_cooldown_key()
+    payload["themes"][key] = {
+        "theme": CURRENT_THEME,
+        "channel_handle": get_expected_channel_handle(),
+        "reason": reason,
+        "message": str(message or "")[-1000:],
+        "failed_at": utc_timestamp(failed_at_epoch),
+        "resume_after": utc_timestamp(resume_after_epoch),
+        "cooldown_hours": round(YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS / 3600, 3),
+        "updated_at": utc_timestamp(),
+    }
+    save_upload_cooldowns(payload)
+    return payload["themes"][key]
+
+
+def active_upload_cooldown(metadata=None):
+    if IGNORE_YOUTUBE_UPLOAD_COOLDOWN or YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS <= 0:
+        return None
+
+    now = time.time()
+    payload = load_upload_cooldowns()
+    key = upload_cooldown_key()
+    entry = payload.get("themes", {}).get(key)
+
+    if entry:
+        resume_after_epoch = parse_utc_timestamp(entry.get("resume_after"))
+
+        if resume_after_epoch > now:
+            return {
+                **entry,
+                "remaining_seconds": resume_after_epoch - now,
+                "source": "cooldown_file",
+            }
+
+    inferred = infer_upload_limit_cooldown_from_metadata(metadata or {})
+
+    if inferred and inferred["resume_after_epoch"] > now:
+        entry = record_upload_limit_cooldown(
+            inferred["reason"],
+            message=inferred.get("message", ""),
+            failed_at_epoch=inferred["failed_at_epoch"],
+        )
+        return {
+            **(entry or inferred),
+            "remaining_seconds": inferred["resume_after_epoch"] - now,
+            "source": "metadata",
+        }
+
+    return None
+
+
 def mark_youtube_uploaded(package, response):
     video_id = response["id"]
     privacy_status = package_privacy_status(package)
@@ -766,6 +901,16 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         print(f"No upload-ready metadata found for theme '{CURRENT_THEME}'.")
         return 0
 
+    cooldown = active_upload_cooldown(metadata)
+
+    if cooldown:
+        print(
+            f"YouTube upload skipped for '{CURRENT_THEME}' because the last upload-limit "
+            f"error is still cooling down. Estimated retry after: {cooldown.get('resume_after')} "
+            f"({format_duration(cooldown.get('remaining_seconds', 0))} remaining)."
+        )
+        return 0
+
     youtube = get_authenticated_service()
     validate_authenticated_channel(youtube)
     uploaded_count = 0
@@ -821,6 +966,18 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
             halt_message = get_fatal_youtube_error_message(error)
 
             if halt_message:
+                reasons = get_http_error_reasons(error)
+                if "uploadLimitExceeded" in reasons:
+                    cooldown = record_upload_limit_cooldown(
+                        "uploadLimitExceeded",
+                        message=str(error),
+                    )
+
+                    if cooldown:
+                        halt_message = (
+                            f"{halt_message} Estimated retry after {cooldown.get('resume_after')}."
+                        )
+
                 remaining_content.extend(content[index + 1:])
                 metadata["content"] = remaining_content
                 save_metadata(metadata)
