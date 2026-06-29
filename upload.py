@@ -406,14 +406,28 @@ def title_looks_machine_generated(title):
         r"\bbehind\s+.*\s+is$",
         r"\bbehind\s+openai\s+mark\s+chen$",
         r"\bwhy\s+.+\s+matters$",
+        r"\bevidence\s+question\s+around\b",
+        r"\bcase\s+moment\s+inside\b",
+        r"\bdetail\s+that\s+changes\s+the\s+case\b",
+        r"\bpop\s+culture\s+missed\b",
+        r"^the\s+builders\s+are\s+debating$",
     ]
 
     return any(re.search(pattern, lower) for pattern in awkward_patterns)
 
 
+def package_first_rank_signal(package):
+    rank_signals = (package or {}).get("rank_signals") or {}
+    if isinstance(rank_signals, dict):
+        return rank_signals
+    if isinstance(rank_signals, list):
+        return next((item for item in rank_signals if isinstance(item, dict)), {})
+    return {}
+
+
 def fallback_upload_title(package):
     signal = package.get("content_signal") or {}
-    rank_signals = package.get("rank_signals") or {}
+    rank_signals = package_first_rank_signal(package)
     topic = (
         signal.get("topic")
         or package.get("caption")
@@ -450,6 +464,37 @@ def fallback_upload_title(package):
     return compact_public_text(topic, 96) or "Shortform clip"
 
 
+def sanitize_editorial_upload_title(package, title):
+    try:
+        import daily_editorial
+    except Exception:
+        return title
+
+    signal = package.get("content_signal") or {}
+    first_rank_signal = package_first_rank_signal(package)
+    theme = clean_theme_name(package.get("theme") or CURRENT_THEME or "")
+    content_format = "popular" if package.get("content_format") == "popular_segment_short" else "countdown"
+    topic = signal.get("topic") or package.get("caption") or package.get("hook_reason") or title
+    source_title = package.get("source_title", "") or first_rank_signal.get("source_title", "")
+    channel = package.get("source_channel", "") or first_rank_signal.get("source_channel", "")
+    clip = {
+        "suggested_title": package.get("title") or title,
+        "source_title": source_title,
+        "source_channel": channel,
+        "transcript_excerpt": package.get("transcript_excerpt", ""),
+        "topic_fingerprint": package.get("topic_fingerprint") or first_rank_signal.get("topic_fingerprint") or [],
+    }
+    return daily_editorial.sanitize_social_title(
+        theme,
+        title,
+        topic,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+        content_format=content_format,
+    )
+
+
 def sanitize_youtube_metadata(package):
     package = dict(package or {})
     platforms = dict(package.get("platforms") or {})
@@ -460,6 +505,7 @@ def sanitize_youtube_metadata(package):
     if title_looks_machine_generated(title):
         title = fallback_upload_title(package)
 
+    title = sanitize_editorial_upload_title(package, title)
     title = compact_public_text(title, 100)
     description = clean_public_text(youtube_package.get("description") or package.get("description") or "")
     tags = youtube_package.get("tags") or package.get("tags") or []
@@ -522,6 +568,7 @@ def refresh_package_render_qc(package):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject severely off-center in final crop",
     }
 
@@ -553,9 +600,10 @@ def review_skip_reason(package):
     review = package.get("review") or {}
     youtube_status = package.get("posting_status", {}).get("youtube_shorts", "")
     gate_package = package_with_effective_youtube_metadata(package)
-    editorial_gates = evaluate_editorial_gates(CURRENT_THEME, gate_package)
+    theme = clean_theme_name(package.get("theme") or CURRENT_THEME or "")
+    editorial_gates = evaluate_editorial_gates(theme, gate_package)
     privacy = package_privacy_status(package)
-    review_policy = get_review_policy(CURRENT_THEME)
+    review_policy = get_review_policy(theme)
 
     if review.get("rejected") or youtube_status == "rejected":
         reason = review.get("rejection_reason", "")

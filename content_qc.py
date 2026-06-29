@@ -64,6 +64,8 @@ GENERIC_TITLE_PHRASES = {
     "crime tony early",
     "prison crime dakota",
     "evidence both passenger",
+    "pop culture missed",
+    "builders are debating",
 }
 
 WEAK_TOPIC_STARTS = {
@@ -917,6 +919,72 @@ def audit_titles(themes=None):
                 "output_file": output_file,
                 "flags": sorted(set(flags)),
             })
+
+    temp_root = os.path.join(BASE_DIR, "output", "temp")
+
+    if os.path.isdir(temp_root):
+        for theme in sorted(os.listdir(temp_root)):
+            theme_name = clean_theme_name(theme)
+
+            if selected and theme_name not in selected:
+                continue
+
+            editorial_root = os.path.join(temp_root, theme, "metadata", "editorial")
+
+            if not os.path.isdir(editorial_root):
+                continue
+
+            for date_dir in sorted(os.listdir(editorial_root)):
+                brief_path = os.path.join(editorial_root, date_dir, "daily_brief.json")
+                daily = load_json_file(brief_path, {})
+
+                if not daily:
+                    continue
+
+                for item in daily.get("items") or []:
+                    output_file = item.get("output_file", "")
+
+                    if output_file and not os.path.exists(os.path.abspath(output_file)):
+                        continue
+
+                    topic = item.get("topic") or ""
+                    source = ", ".join(item.get("sources") or [])
+                    text = item.get("title") or topic
+                    flags = title_flags(text)
+                    seen[text.lower()].add(output_file or f"{theme_name}:temp_countdown_topic:{date_dir}:{item.get('rank')}")
+                    records.append({
+                        "theme": theme_name,
+                        "kind": "temp_daily_countdown_topic",
+                        "rank": item.get("rank"),
+                        "countdown_slot": item.get("countdown_slot"),
+                        "text": text,
+                        "source": source,
+                        "output_file": output_file,
+                        "flags": sorted(set(flags)),
+                    })
+
+                popular_items = list(daily.get("popular_segments") or [])
+                popular_items.extend(daily.get("popular_segment_items") or [])
+
+                for item in popular_items:
+                    output_file = item.get("output_file", "")
+
+                    if output_file and not os.path.exists(os.path.abspath(output_file)):
+                        continue
+
+                    script = item.get("script") or ""
+                    text = item.get("title") or script
+                    flags = title_flags(text)
+                    seen[text.lower()].add(output_file or f"{theme_name}:temp_popular_segment:{date_dir}:{item.get('rank')}")
+                    records.append({
+                        "theme": theme_name,
+                        "kind": "temp_daily_popular_segment",
+                        "rank": item.get("rank"),
+                        "text": text,
+                        "source": item.get("source_title", ""),
+                        "output_file": output_file,
+                        "flags": sorted(set(flags)),
+                    })
 
     for record in records:
         if len(seen[record["text"].lower()]) > 1:

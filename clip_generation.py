@@ -3018,6 +3018,19 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
         result["flags"].append("probable small-object/background face lock")
 
     if (
+        result["avg_face_height_ratio"] > 0.0
+        and result["avg_face_height_ratio"] < 0.13
+        and result["visual_cut_ratio"] > 0.32
+        and result["avg_sample_visual_change"] > 0.10
+        and (
+            result["small_face_frame_ratio_of_faces"] > 0.45
+            or result["face_presence_rate"] < 0.78
+            or result["continuity_center_jitter_ratio"] > 0.18
+        )
+    ):
+        result["flags"].append("probable broadcast/b-roll montage instead of speaker clip")
+
+    if (
         result["face_presence_rate"] < 0.24
         and result["alive_no_face_frame_ratio"] > 0.48
         and result["avg_edge_density"] >= 0.018
@@ -3048,6 +3061,8 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
         quality_score -= 0.28
     if "probable small-object/background face lock" in result["flags"]:
         quality_score -= 0.26
+    if "probable broadcast/b-roll montage instead of speaker clip" in result["flags"]:
+        quality_score -= 0.30
     jitter_penalty_basis = (
         result["continuity_center_jitter_ratio"]
         if result["continuity_center_jitter_ratio"] > 0
@@ -3311,6 +3326,9 @@ def render_attempt_selection_score(render_qc):
     if "probable small-object/background face lock" in flags:
         score -= 0.44
 
+    if "probable broadcast/b-roll montage instead of speaker clip" in flags:
+        score -= 0.52
+
     if "tiny final speaker framing" in flags:
         score -= 0.14
 
@@ -3394,6 +3412,7 @@ def should_try_alternate_framing(render_qc):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject off-center in final crop",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
@@ -3421,6 +3440,7 @@ def should_try_alternate_framing(render_qc):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
     }
@@ -3445,6 +3465,7 @@ def render_rejection_reasons(render_qc):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject severely off-center in final crop",
         "final render has black frames",
         "final render has low-information frames",
@@ -3469,6 +3490,7 @@ def render_rejection_reasons(render_qc):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
     }
     hard_flags = {
         "could not open final render",
@@ -3490,6 +3512,7 @@ def render_rejection_reasons(render_qc):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject severely off-center in final crop",
     }
 

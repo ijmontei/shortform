@@ -129,22 +129,40 @@ def _is_generic_source_title(value):
     return _text(value).lower() in GENERIC_SOURCE_TITLES
 
 
+def _rank_signal_items(rank_signals):
+    if isinstance(rank_signals, dict):
+        return [rank_signals]
+    if isinstance(rank_signals, list):
+        return [item for item in rank_signals if isinstance(item, dict)]
+    return []
+
+
+def _rank_signal_dict(rank_signals):
+    items = _rank_signal_items(rank_signals)
+    return items[0] if items else {}
+
+
 def _context_items(package, rank_signals):
     items = []
+    rank_signal = _rank_signal_dict(rank_signals)
     primary = {
-        "source_video_url": package.get("source_video_url") or rank_signals.get("source_video_url"),
-        "source_channel": package.get("source_channel") or rank_signals.get("source_channel"),
-        "source_title": package.get("source_title") or rank_signals.get("source_title"),
-        "transcript_excerpt": package.get("transcript_excerpt") or rank_signals.get("transcript_excerpt"),
-        "clip_start_time": package.get("clip_start_time", rank_signals.get("clip_start_time")),
-        "clip_end_time": package.get("clip_end_time", rank_signals.get("clip_end_time")),
-        "speaker": package.get("speaker") or rank_signals.get("speaker"),
-        "source_date": package.get("source_date") or rank_signals.get("source_date"),
+        "source_video_url": package.get("source_video_url") or rank_signal.get("source_video_url"),
+        "source_channel": package.get("source_channel") or rank_signal.get("source_channel"),
+        "source_title": package.get("source_title") or rank_signal.get("source_title"),
+        "transcript_excerpt": package.get("transcript_excerpt") or rank_signal.get("transcript_excerpt"),
+        "clip_start_time": package.get("clip_start_time", rank_signal.get("clip_start_time")),
+        "clip_end_time": package.get("clip_end_time", rank_signal.get("clip_end_time")),
+        "speaker": package.get("speaker") or rank_signal.get("speaker"),
+        "source_date": package.get("source_date") or rank_signal.get("source_date"),
     }
     items.append(primary)
 
     for item in package.get("source_context") or []:
         if isinstance(item, dict):
+            items.append(item)
+
+    for item in _rank_signal_items(rank_signals):
+        if item is not rank_signal:
             items.append(item)
 
     return items
@@ -172,6 +190,14 @@ def _theme_evidence_flags(theme, package, rank_signals):
     if not evidence_terms:
         return []
 
+    rank_signal_texts = []
+    for item in _rank_signal_items(rank_signals):
+        rank_signal_texts.extend([
+            _text(item.get("source_title")),
+            _text(item.get("source_channel")),
+            _text(item.get("transcript_excerpt")),
+        ])
+
     text_blob = " ".join([
         _text(package.get("title")),
         _text(package.get("caption")),
@@ -179,9 +205,7 @@ def _theme_evidence_flags(theme, package, rank_signals):
         _text(package.get("source_title")),
         _text(package.get("source_channel")),
         _text(package.get("transcript_excerpt")),
-        _text(rank_signals.get("source_title")),
-        _text(rank_signals.get("source_channel")),
-        _text(rank_signals.get("transcript_excerpt")),
+        *rank_signal_texts,
     ]).lower()
 
     if not text_blob:
@@ -233,6 +257,7 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
+            "probable broadcast/b-roll montage instead of speaker clip",
         } & render_flags
     ):
         flags.append("final_package_probable_background_lock")
@@ -253,6 +278,9 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
         flags.append("final_package_probable_background_lock")
 
     if "probable small-object/background face lock" in render_flags:
+        flags.append("final_package_probable_background_lock")
+
+    if "probable broadcast/b-roll montage instead of speaker clip" in render_flags:
         flags.append("final_package_probable_background_lock")
 
     if "subject severely off-center in final crop" in render_flags:
@@ -302,7 +330,8 @@ def context_evidence_for(package, rank_signals):
 def evaluate_editorial_gates(theme, package):
     package = package or {}
     content_format = str(package.get("content_format") or "").strip()
-    rank_signals = package.get("rank_signals") or {}
+    raw_rank_signals = package.get("rank_signals") or {}
+    rank_signals = _rank_signal_dict(raw_rank_signals)
     render_qc = package.get("render_qc") or {}
     risk_controls = get_risk_controls(theme)
     minimum_transformation = _float(risk_controls.get("minimum_transformation_score"), 0.55)
@@ -331,7 +360,7 @@ def evaluate_editorial_gates(theme, package):
             or []
         ),
     )
-    context_evidence = context_evidence_for(package, rank_signals)
+    context_evidence = context_evidence_for(package, raw_rank_signals)
     allow_raw_clip_uploads = os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") == "1"
     flags = []
 
@@ -371,7 +400,7 @@ def evaluate_editorial_gates(theme, package):
     if theme_signal_score < 0.18:
         flags.append("weak_theme_signal")
 
-    flags.extend(_theme_evidence_flags(theme, package, rank_signals))
+    flags.extend(_theme_evidence_flags(theme, package, raw_rank_signals))
 
     if captionability_score < 0.58:
         flags.append("weak_captionability")

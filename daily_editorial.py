@@ -83,7 +83,7 @@ NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_I
 NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
-EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.10")))
+EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.24")))
 EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
 EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
 EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SECONDS", "58.0"))
@@ -494,6 +494,9 @@ def topic_phrase_is_keyword_soup(theme, phrase):
     soup_hits = {word for word in meaningful if word in NOUN_SOUP_WORDS}
     theme_key = str(theme or "").strip().lower()
 
+    if theme_key == "technology_ai" and {"data", "black", "hole"}.issubset(set(words)):
+        return False
+
     if (
         theme_key == "truecrime"
         and domain_hits
@@ -684,6 +687,9 @@ def source_title_topic(source_title, theme="", limit=7):
     if theme == "technology_ai" and "pre-training" in lower:
         return "Why Pre-Training Isn't Dead"
 
+    if theme == "technology_ai" and "data black hole" in lower and "ai" in lower:
+        return "The AI Data Black Hole"
+
     if theme == "technology_ai" and "india's moment" in lower and "global companies" in lower:
         return "India's Startup Founder Wave"
 
@@ -735,6 +741,9 @@ def source_title_topic(source_title, theme="", limit=7):
     if theme == "popculture" and "jackass" in lower and "searched" in lower:
         return "Jackass Cast's Most Searched Questions"
 
+    if theme == "popculture" and "mark zuckerberg" in lower and "ai" in lower:
+        return "Mark Zuckerberg's AI Job Impact"
+
     if theme == "popculture" and "yunjin" in lower and "pre-debut" in lower:
         return "Yunjin's Pre-Debut Story"
 
@@ -743,6 +752,9 @@ def source_title_topic(source_title, theme="", limit=7):
 
     if theme == "truecrime" and "matching towel" in lower and "missing gun" in lower:
         return "The Missing Gun And Mother's Testimony"
+
+    if theme == "truecrime" and "nancy brophy" in lower:
+        return "Nancy Brophy Trial Evidence"
 
     if theme == "truecrime" and "maxwell connection" in lower and "epstein" in lower:
         return "Robert Maxwell And Epstein's Zorro Ranch"
@@ -1617,6 +1629,7 @@ def clip_is_editorial_usable(clip):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
         "subject severely off-center in final crop",
     }
     frame_path = render_qc.get("frame_path") or {}
@@ -1638,6 +1651,7 @@ def clip_is_editorial_usable(clip):
         and "probable picture-in-picture/background lock" not in flags
         and "probable flat-surface false face lock" not in flags
         and "probable small-object/background face lock" not in flags
+        and "probable broadcast/b-roll montage instead of speaker clip" not in flags
         and "subject severely off-center in final crop" not in flags
     )
 
@@ -1686,6 +1700,7 @@ def clip_is_editorial_usable(clip):
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
+            "probable broadcast/b-roll montage instead of speaker clip",
             "subject severely off-center in final crop",
         } & flags:
             return False
@@ -1719,6 +1734,7 @@ def clip_is_popular_segment_usable(clip):
                 "probable picture-in-picture/background lock",
                 "probable flat-surface false face lock",
                 "probable small-object/background face lock",
+                "probable broadcast/b-roll montage instead of speaker clip",
                 "subject severely off-center in final crop",
             } & flags
         ):
@@ -1740,6 +1756,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
+        "probable broadcast/b-roll montage instead of speaker clip",
     }
     reasons = sorted(flags & hard_flags)
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
@@ -1765,6 +1782,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
+            "probable broadcast/b-roll montage instead of speaker clip",
             "subject severely off-center in final crop",
         } & flags
     )
@@ -1809,6 +1827,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             or "probable picture-in-picture/background lock" in flags
             or "probable flat-surface false face lock" in flags
             or "probable small-object/background face lock" in flags
+            or "probable broadcast/b-roll montage instead of speaker clip" in flags
         )
     ):
         reasons.append(
@@ -3146,6 +3165,80 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
     return theme_fallbacks.get(theme_key, "Needs Specific Editorial Title")
 
 
+def social_title_is_publishable(theme, title, topic_terms=None):
+    title_text = clean_viewer_text(title)
+    quality = score_title_quality(theme, title, topic_terms=topic_terms or [title])
+    return (
+        bool(title_text)
+        and
+        quality.get("length_ok", True)
+        and quality.get("honesty", 0.0) >= 0.70
+        and quality.get("specificity", 0.0) >= 0.40
+        and not editorial_title_has_generic_pattern(title_text)
+        and not topic_phrase_is_keyword_soup(theme, title_text)
+        and not re.search(r"\b(the|a|an)\s+(changes|missed|debating|watching)\s+(the|a|an)\b", title_text, flags=re.I)
+        and not re.search(r"\bpop\s+culture\s+missed\b", title_text, flags=re.I)
+        and not re.search(r"^the\s+builders\s+are\s+debating$", title_text, flags=re.I)
+        and not quality.get("generic_title")
+        and not quality.get("raw_dialogue_fragment")
+        and not quality.get("mechanical_title")
+        and not quality.get("repetitive_title")
+        and not quality.get("weak_template_title")
+        and not quality.get("keyword_soup_title")
+        and quality.get("theme_native_title", True)
+        and quality.get("not_clickbait", True)
+        and not re.search(r"^needs\s+specific\s+", str(title or ""), flags=re.I)
+    )
+
+
+def sanitize_social_title(theme, title, topic, clip=None, source_title="", channel="", content_format="countdown"):
+    clip = clip or {}
+    theme_key = str(theme or "").strip().lower()
+    topic = clean_headline_topic(theme, topic, clip=clip, source_title=source_title, channel=channel)
+    topic_terms = unique_sequence(
+        [topic, source_title, channel]
+        + [str(term).replace("_", " ") for term in (clip.get("topic_fingerprint") or [])]
+    )
+
+    if social_title_is_publishable(theme, title, topic_terms=topic_terms):
+        return compact_text(title, 92)
+
+    candidates = []
+    source_topic = source_title_topic(source_title, theme)
+    source_subject = source_subject_from_title(source_title)
+
+    if source_topic:
+        candidates.extend([
+            source_topic,
+            build_social_title(theme, source_topic, content_format=content_format),
+        ])
+
+    if source_subject:
+        candidates.append(source_subject)
+
+    suggested_title = clean_viewer_text(clip.get("suggested_title", ""))
+    if suggested_title:
+        candidates.append(suggested_title)
+
+    if topic and topic != "The Standout Moment":
+        candidates.extend([
+            topic,
+            build_social_title(theme, topic, content_format=content_format),
+        ])
+
+    for candidate in unique_sequence(candidates):
+        candidate = compact_text(clean_viewer_text(candidate), 92)
+
+        if not candidate or re.search(r"^needs\s+specific\s+", candidate, flags=re.I):
+            continue
+
+        if social_title_is_publishable(theme, candidate, topic_terms=topic_terms + [candidate]):
+            return candidate
+
+    fallback_label = THEME_TITLE_NOUNS.get(theme_key, "Editorial")
+    return f"Needs Specific {fallback_label} Title"
+
+
 def build_social_caption(theme_label, topic, adjective="", countdown_slot=None, content_format="countdown", source_title=""):
     topic = editorial_title_topic(topic)
 
@@ -3410,6 +3503,15 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
         countdown_slot,
         total_count,
         is_recap=is_recap,
+    )
+    title = sanitize_social_title(
+        theme,
+        title,
+        topic,
+        clip=best_clip,
+        source_title=best_clip.get("source_title", ""),
+        channel=best_clip.get("source_channel", ""),
+        content_format="countdown",
     )
     description = build_social_caption(
         theme_label,
@@ -5304,6 +5406,15 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
     )
     signal_source = popular_segment_signal_source(item)
     title = build_social_title(theme, topic, content_format="popular", signal_source=signal_source)
+    title = sanitize_social_title(
+        theme,
+        title,
+        topic,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+        content_format="popular",
+    )
     description = build_social_caption(
         theme_label,
         topic,
