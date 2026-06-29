@@ -691,6 +691,19 @@ def summarize_frame_metrics(metrics, asset_type):
         ):
             flags.append("probable small-object/background face lock")
 
+        if (
+            flat_skin_false_face_ratio > 0.42
+            and face_presence_rate >= 0.30
+            and avg_face_height is not None
+            and avg_face_height >= 0.14
+            and (
+                low_info_ratio > 0.10
+                or (avg_offset is not None and avg_offset > avg_offset_limit)
+                or no_face_run_ratio > max_no_face_run
+            )
+        ):
+            flags.append("probable flat-surface false face lock")
+
     return {
         "sample_count": count,
         "face_presence_rate": round(face_presence_rate, 4),

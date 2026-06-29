@@ -81,6 +81,7 @@ NARRATION_LOUDNESS_I = float(os.getenv("SHORTFORM_NARRATION_LOUDNESS_I", "-16.0"
 NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "3.40"))
 NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_IN_SECONDS", "0.28")))
 NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
+NARRATION_TAIL_PAD_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_TAIL_PAD_SECONDS", "0.32")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
 EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.24")))
@@ -2704,16 +2705,16 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
     tempo = max(1.0, min(2.0, raw_duration / target_duration))
     output_path = os.path.join(scratch_dir, f"{date_key}_{theme}_{rank:02d}_intro_mastered.wav")
 
-    needs_intro_pad = NARRATION_LEAD_IN_SECONDS > 0.001 or NARRATION_FADE_IN_SECONDS > 0.001
+    needs_intro_pad = (
+        NARRATION_LEAD_IN_SECONDS > 0.001
+        or NARRATION_FADE_IN_SECONDS > 0.001
+        or NARRATION_TAIL_PAD_SECONDS > 0.001
+    )
 
     if abs(pitch - 1.0) < 0.01 and abs(NARRATION_BASS_GAIN) < 0.1 and tempo <= 1.01 and not needs_intro_pad:
         return input_path
 
     audio_filters = ["aresample=44100"]
-
-    if NARRATION_LEAD_IN_SECONDS > 0.001:
-        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
-        audio_filters.append(f"adelay={delay_ms}:all=1")
 
     if abs(pitch - 1.0) >= 0.01:
         audio_filters.append(f"rubberband=pitch={pitch:.3f}")
@@ -2724,15 +2725,23 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
     if abs(NARRATION_BASS_GAIN) >= 0.1:
         audio_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
 
-    if NARRATION_FADE_IN_SECONDS > 0.001:
-        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
-        audio_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
-
     audio_filters.extend([
         "treble=g=-0.6:f=4200:w=0.8",
         "alimiter=limit=0.94",
         f"loudnorm=I={NARRATION_LOUDNESS_I:.1f}:TP=-1.5:LRA=8",
     ])
+
+    if NARRATION_LEAD_IN_SECONDS > 0.001:
+        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
+        audio_filters.append(f"adelay={delay_ms}:all=1")
+
+    if NARRATION_FADE_IN_SECONDS > 0.001:
+        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
+        audio_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
+
+    if NARRATION_TAIL_PAD_SECONDS > 0.001:
+        audio_filters.append(f"apad=pad_dur={NARRATION_TAIL_PAD_SECONDS:.3f}")
+
     audio_filter = ",".join(audio_filters)
 
     try:
@@ -2752,25 +2761,28 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
 
     fallback_filters = ["aresample=44100"]
 
-    if NARRATION_LEAD_IN_SECONDS > 0.001:
-        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
-        fallback_filters.append(f"adelay={delay_ms}:all=1")
-
     if tempo > 1.01:
         fallback_filters.append(f"atempo={tempo:.3f}")
 
     if abs(NARRATION_BASS_GAIN) >= 0.1:
         fallback_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
 
-    if NARRATION_FADE_IN_SECONDS > 0.001:
-        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
-        fallback_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
-
     fallback_filters.extend([
         "treble=g=-0.6:f=4200:w=0.8",
         "alimiter=limit=0.94",
         f"loudnorm=I={NARRATION_LOUDNESS_I:.1f}:TP=-1.5:LRA=8",
     ])
+
+    if NARRATION_LEAD_IN_SECONDS > 0.001:
+        delay_ms = int(round(NARRATION_LEAD_IN_SECONDS * 1000))
+        fallback_filters.append(f"adelay={delay_ms}:all=1")
+
+    if NARRATION_FADE_IN_SECONDS > 0.001:
+        fade_duration = NARRATION_LEAD_IN_SECONDS + NARRATION_FADE_IN_SECONDS
+        fallback_filters.append(f"afade=t=in:st=0:d={fade_duration:.3f}")
+
+    if NARRATION_TAIL_PAD_SECONDS > 0.001:
+        fallback_filters.append(f"apad=pad_dur={NARRATION_TAIL_PAD_SECONDS:.3f}")
 
     try:
         run_subprocess([

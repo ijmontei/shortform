@@ -549,7 +549,7 @@ $env:SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY="0.55"
 $env:SHORTFORM_VALIDATE_ALLOW_REVISION_OUTPUTS="1"
 ```
 
-ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. The setup line is intentionally short, faster-paced, and clip-specific, then the source audio takes over. The pipeline adds a small lead-in pad and fade so the first syllable is not cut off. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
+ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. The setup line is intentionally short, faster-paced, and clip-specific, then the source audio takes over. The pipeline fits and masters the voice first, then adds a preserved lead-in, fade-in, and tail pad so the first and last syllables are not clipped. Tune those with `SHORTFORM_NARRATION_LEAD_IN_SECONDS`, `SHORTFORM_NARRATION_FADE_IN_SECONDS`, and `SHORTFORM_NARRATION_TAIL_PAD_SECONDS`. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
 
 Popular-segment videos are controlled separately:
 
