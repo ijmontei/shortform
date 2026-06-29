@@ -121,6 +121,7 @@ MAX_TOPIC_SIMILARITY = 0.58
 SCORING_MODEL_VERSION = "2026-06-29-v42-unlimited-source-candidates"
 MIN_CLIP_READINESS_SCORE = float(os.getenv("SHORTFORM_MIN_CLIP_READINESS_SCORE", "0.62"))
 MIN_SOURCE_DURATION_SECONDS = float(os.getenv("SHORTFORM_MIN_SOURCE_DURATION_SECONDS", "600"))
+SKIP_BROADCAST_VOD_SOURCES = os.getenv("SHORTFORM_SKIP_BROADCAST_VOD_SOURCES", "1") != "0"
 ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
 ENABLE_ALTERNATE_FRAMING_RETRY = os.getenv("SHORTFORM_ENABLE_ALTERNATE_FRAMING_RETRY", "1") != "0"
 ALLOW_FACELESS_CENTER_SAFE = os.getenv("SHORTFORM_ALLOW_FACELESS_CENTER_SAFE", "0") == "1"
@@ -381,11 +382,49 @@ def source_duration_from_record(source_record):
     return max(durations) if durations else 0.0
 
 
+BROADCAST_VOD_TITLE_PATTERNS = [
+    r"\blive\s+from\b.*\b(day|night)\s+(one|two|three|four|\d+)\b",
+    r"\bfull\s+(match|game|stream|event|broadcast|trial)\b",
+    r"\b(game|map)\s*0?\d+\b.*\b(vs\.?|versus)\b",
+    r"\b(vs\.?|versus)\b.*\b(game|map)\s*0?\d+\b",
+    r"\b(msi|major|tournament|playoffs?|finals?)\b.*\b(game|map)\s*0?\d+\b",
+    r"\b(winners?|losers?|grand)\s+finals?\b",
+    r"\bmajor\s+[ivx\d]+\s+tournament\b",
+]
+
+
+def source_looks_like_broadcast_vod(source_record):
+    if not SKIP_BROADCAST_VOD_SOURCES:
+        return False, []
+
+    title = str((source_record or {}).get("title") or "")
+    normalized = re.sub(r"\s+", " ", title).strip().lower()
+
+    if not normalized:
+        return False, []
+
+    hits = [
+        pattern
+        for pattern in BROADCAST_VOD_TITLE_PATTERNS
+        if re.search(pattern, normalized, flags=re.I)
+    ]
+
+    if hits:
+        return True, [f"broadcast/live-event vod:{title[:120]}"]
+
+    return False, []
+
+
 def source_quality_disqualification(source_record):
     duration = source_duration_from_record(source_record)
 
     if duration and duration < MIN_SOURCE_DURATION_SECONDS:
         return True, [f"source too short for long-form clipping:{duration:.0f}s"]
+
+    broadcast_disqualified, broadcast_hits = source_looks_like_broadcast_vod(source_record)
+
+    if broadcast_disqualified:
+        return True, broadcast_hits
 
     return False, []
 
@@ -8745,6 +8784,17 @@ def prefetch_audio_for_record(video_record):
 
     video_title = resolve_record_title(video_record)
     cleaned_title = clean_title_for_filename(video_title)
+    disqualified, negative_hits = source_quality_disqualification(video_record)
+
+    if disqualified:
+        video_record["source_guard_disqualified"] = True
+        video_record["source_quality_disqualified"] = True
+        video_record["source_guard_negative_hits"] = negative_hits
+        raise SkippableVideoError(
+            "source quality disqualified before audio download: "
+            + ", ".join(negative_hits)
+        )
+
     audio_filename = download_audio_for_scoring(video_url, cleaned_title)
     assert_file_exists(audio_filename, "Extracted audio")
     video_record["_last_cleaned_title"] = cleaned_title
