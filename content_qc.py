@@ -711,11 +711,24 @@ def audit_titles(themes=None):
         metadata_path = os.path.join(output_root, theme, "metadata.json")
         metadata = load_json_file(metadata_path, {})
         daily = metadata.get("daily_editorial") or {}
+        upload_candidate_outputs = set()
+        quarantined_outputs = set()
 
         for index, item in enumerate(metadata.get("content") or [], start=1):
+            status = ((item.get("posting_status") or {}).get("youtube_shorts") or "").lower()
+            output_file = item.get("video_file", "")
+            upload_candidate = status in {"ready", "failed", "uploaded"}
+
+            if output_file and upload_candidate:
+                upload_candidate_outputs.add(os.path.abspath(output_file))
+            elif output_file:
+                quarantined_outputs.add(os.path.abspath(output_file))
+
+            if not upload_candidate:
+                continue
+
             youtube_package = (item.get("platforms") or {}).get("youtube_shorts") or {}
             text = youtube_package.get("title") or item.get("title") or ""
-            output_file = item.get("video_file", "")
             flags = title_flags(text)
 
             if daily_editorial and item.get("transcript_excerpt"):
@@ -737,11 +750,22 @@ def audit_titles(themes=None):
             })
 
         for item in daily.get("items") or []:
+            output_file = item.get("output_file", "")
+
+            if output_file:
+                absolute_output = os.path.abspath(output_file)
+
+                if absolute_output in quarantined_outputs:
+                    continue
+
+                if not os.path.exists(absolute_output) and absolute_output not in upload_candidate_outputs:
+                    continue
+
             topic = item.get("topic") or ""
             source = ", ".join(item.get("sources") or [])
             text = item.get("title") or topic
             flags = title_flags(text)
-            seen[text.lower()].add(item.get("output_file", "") or f"{theme_name}:countdown_topic:{item.get('rank')}")
+            seen[text.lower()].add(output_file or f"{theme_name}:countdown_topic:{item.get('rank')}")
             records.append({
                 "theme": theme_name,
                 "kind": "countdown_topic",
@@ -749,7 +773,7 @@ def audit_titles(themes=None):
                 "countdown_slot": item.get("countdown_slot"),
                 "text": text,
                 "source": source,
-                "output_file": item.get("output_file", ""),
+                "output_file": output_file,
                 "flags": sorted(set(flags)),
             })
 
@@ -757,17 +781,28 @@ def audit_titles(themes=None):
         popular_items.extend(daily.get("popular_segment_items") or [])
 
         for item in popular_items:
+            output_file = item.get("output_file", "")
+
+            if output_file:
+                absolute_output = os.path.abspath(output_file)
+
+                if absolute_output in quarantined_outputs:
+                    continue
+
+                if not os.path.exists(absolute_output) and absolute_output not in upload_candidate_outputs:
+                    continue
+
             script = item.get("script") or ""
             text = item.get("title") or script
             flags = title_flags(text)
-            seen[text.lower()].add(item.get("output_file", "") or f"{theme_name}:popular_segment:{item.get('rank')}")
+            seen[text.lower()].add(output_file or f"{theme_name}:popular_segment:{item.get('rank')}")
             records.append({
                 "theme": theme_name,
                 "kind": "popular_segment_script",
                 "rank": item.get("rank"),
                 "text": text,
                 "source": item.get("source_title", ""),
-                "output_file": item.get("output_file", ""),
+                "output_file": output_file,
                 "flags": sorted(set(flags)),
             })
 

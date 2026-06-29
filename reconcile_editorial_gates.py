@@ -30,14 +30,21 @@ def reconcile_theme(theme, dry_run=False):
 
     for index, package in enumerate(metadata.get("content", []), start=1):
         gates = evaluate_editorial_gates(theme, package_with_effective_youtube_metadata(package))
-        package["editorial_gates"] = gates
+
+        if package.get("editorial_gates") != gates:
+            changed = True
+
+            if not dry_run:
+                package["editorial_gates"] = gates
+
         status = (package.get("posting_status") or {}).get("youtube_shorts", "")
 
-        if status == "ready" and not gates.get("passed", True):
+        if status in {"ready", "failed", "uploaded"} and not gates.get("passed", True):
             changed = True
             updated.append({
                 "index": index,
                 "title": package.get("title", ""),
+                "previous_status": status,
                 "flags": gates.get("flags", []),
                 "video_file": package.get("video_file", ""),
             })
@@ -106,7 +113,8 @@ def main():
             print(f" - {theme}: {result['updated_count']} moved to needs_revision")
 
             for item in result.get("updated", [])[:10]:
-                print(f"   #{item['index']} {item['title']} [{', '.join(item.get('flags') or [])}]")
+                previous = item.get("previous_status") or "unknown"
+                print(f"   #{item['index']} {item['title']} ({previous}) [{', '.join(item.get('flags') or [])}]")
 
 
 if __name__ == "__main__":

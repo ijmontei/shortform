@@ -225,8 +225,9 @@ def validate_theme(theme):
         privacy_status = str(youtube_package.get("privacy_status") or "private").lower()
         review = package.get("review") or {}
         content_format = package.get("content_format", "")
+        upload_candidate_status = status in {"ready", "uploaded", "failed"}
 
-        if status in {"ready", "uploaded"} and not editorial_gates.get("passed", True):
+        if upload_candidate_status and not editorial_gates.get("passed", True):
             item_issues.append(f"editorial gates failed: {', '.join(editorial_gates.get('flags') or [])}")
 
         if status in {"ready", "uploaded"} and not package.get("content_has_burned_captions"):
@@ -260,7 +261,9 @@ def validate_theme(theme):
 
         if ENABLE_FRAME_QA:
             frame_qc, frame_issues = validate_frame_quality(theme, package, video_file)
-            item_issues.extend(frame_issues)
+
+            if upload_candidate_status:
+                item_issues.extend(frame_issues)
 
         for issue in item_issues:
             issues.append(f"{label}: {issue}")

@@ -979,6 +979,12 @@ def source_context_title(theme, source_title, clip, topic_terms=None):
             return "David Duchovny's Hot Ones Story"
 
     if theme_key == "truecrime":
+        if (
+            ("ditch school" in text or "ditching school" in text)
+            and ("kicked out" in text or "continuations" in text or "fights" in text)
+            and ("14" in text or "15" in text or "years old" in text)
+        ):
+            return "Kicked Out at 14 After School Fell Apart"
         if "horrific murder" in source or "murder" in terms:
             return "Horrific Murder Case: The Key Detail"
         if "sinning" in source or "pastor" in source:
@@ -1234,9 +1240,9 @@ def generate_title(theme, archetype, clip, source_record=None, signals=None):
         "finance": "The Market Detail Investors Should Watch",
         "technology_ai": "The AI Detail Builders Are Watching",
         "health_fitness": "The Health Detail Worth Rethinking",
-        "politics": "The Debate Clip With Real Context",
-        "truecrime": "The Evidence Detail Worth Rechecking",
-        "popculture": "The Pop Culture Detail People Missed",
+        "politics": "The Policy Fight That Needs Context",
+        "truecrime": "The Timeline Detail Investigators Rechecked",
+        "popculture": "The Culture Moment People Replayed",
     }
     return compact_text(theme_fallbacks.get(normalize_theme_key(theme), "The Interview Moment Worth Watching"), 92)
 
