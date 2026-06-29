@@ -31,7 +31,7 @@ def blank_theme_payload(theme_name, profile_name="generic"):
         "min_clip_duration": 0,
         "max_clip_duration": 0,
         "default_clip_count": 0,
-        "theme_clip_budget": 15,
+        "theme_clip_budget": 0,
         "theme_candidates_per_video": 8,
         "min_readiness_score": 0.0,
         "min_selected_score": 0.0,

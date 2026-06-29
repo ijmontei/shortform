@@ -564,13 +564,14 @@ src/adjective_rotation.json
 
 Each generated editorial Short consumes the next adjective and moves it to the end of the queue, so the same adjective is reused only after the other 19 have been used for that theme.
 
-## Daily Upload Budget
+## Clip Volume And Upload Limits
 
-YouTube can limit how many videos a channel uploads in a 24-hour period. The pipeline therefore defaults to a 15-clip budget per theme and a 15-upload cap per theme run.
+The pipeline defaults to quality-threshold selection: each theme generates every clip that clears the scoring, framing, title, caption, and editorial upload gates. `theme_clip_budget: 0` means unlimited. Use a positive budget only when you intentionally want a local cap for a test run.
 
-To change the clip selection budget:
+To force an explicit clip selection budget:
 
 ```powershell
+$env:SHORTFORM_ENFORCE_THEME_CLIP_BUDGET="1"
 $env:SHORTFORM_THEME_CLIP_BUDGET="15"
 ```
 
@@ -586,7 +587,7 @@ To disable theme-wide ranking and return to per-video clip generation:
 $env:SHORTFORM_ENABLE_THEME_GLOBAL_RANKING="0"
 ```
 
-To change the upload cap, or set it to `0` for no local cap:
+YouTube can still enforce its own upload limits. The local uploader defaults to no app-side cap, halts cleanly when YouTube returns an upload-limit error, and leaves remaining qualified clips queued for the next retry. To add your own local upload cap, set:
 
 ```powershell
 $env:SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT="15"

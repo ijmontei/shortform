@@ -408,10 +408,10 @@ def validate_theme_profile(theme_name):
     if max_duration > 75:
         warnings.append("clip_rules.max_clip_duration is above Shorts-safe range")
 
-    if theme_budget <= 0:
-        errors.append("clip_rules.theme_clip_budget must be positive")
-    elif theme_budget > 15:
-        warnings.append("clip_rules.theme_clip_budget exceeds the current default daily upload target of 15")
+    if theme_budget < 0:
+        errors.append("clip_rules.theme_clip_budget must be zero for unlimited or a positive explicit cap")
+    elif theme_budget > 0:
+        warnings.append("clip_rules.theme_clip_budget is an explicit cap; production defaults to unlimited quality-threshold selection")
 
     scoring_weights = profile.get("scoring_weights") or {}
     if not scoring_weights:

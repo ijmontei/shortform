@@ -104,6 +104,9 @@ MIN_EDITORIAL_SOURCE_FACE_PLAUSIBILITY = float(os.getenv("SHORTFORM_MIN_EDITORIA
 MIN_EDITORIAL_OUTPUT_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_EDITORIAL_OUTPUT_FACE_PRESENCE", "0.46"))
 MAX_EDITORIAL_OUTPUT_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OUTPUT_NO_FACE_RUN", "0.24"))
 MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE", "0.40"))
+MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY", "0.60"))
+MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN", "0.50"))
+MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE", "0.62"))
 YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
 if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     YOUTUBE_PRIVACY_STATUS = "public"
@@ -1392,10 +1395,20 @@ def clip_is_editorial_usable(clip):
         "unexpected resolution",
     }
     frame_path = render_qc.get("frame_path") or {}
+    face_presence = float(frame_path.get("face_presence_rate") or 0.0)
+    no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
+    alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
+    center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
+    max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
+    plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
     documentary_non_face_ok = (
         theme_key in {"politics", "truecrime"}
         and render_qc.get("documentary_non_face_ok")
-        and clip_visual_quality_score(clip) >= 0.50
+        and clip_visual_quality_score(clip) >= MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY
+        and no_face_run <= MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN
+        and alive_no_face <= MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE
+        and "alive frames often miss speaker" not in flags
+        and "extended no-speaker run in final crop" not in flags
     )
 
     if flags & hard_flags:
@@ -1405,13 +1418,6 @@ def clip_is_editorial_usable(clip):
         return True
 
     if STRICT_EDITORIAL_FACE_GATES:
-        face_presence = float(frame_path.get("face_presence_rate") or 0.0)
-        no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
-        alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
-        center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
-        max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
-        plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
-
         if face_presence and face_presence < MIN_EDITORIAL_SOURCE_FACE_PRESENCE:
             return False
 
@@ -1459,11 +1465,13 @@ def clip_is_popular_segment_usable(clip):
         frame_path = render_qc.get("frame_path") or {}
         flags = set(render_qc.get("flags") or [])
         face_presence = float(frame_path.get("face_presence_rate") or 0.0)
+        no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
         alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
         max_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
 
         if (
             face_presence < 0.50
+            or no_face_run > 0.34
             or alive_no_face > 0.45
             or max_offset > 0.70
             or {
@@ -1501,10 +1509,16 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
     black_frames = float(frame_qc.get("black_frame_ratio") or 0.0)
     documentary_non_face_ok = (
         str(theme or "").strip().lower() in {"politics", "truecrime"}
-        and visual_score >= 0.45
+        and visual_score >= MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY
         and low_information <= 0.18
         and dead_frames <= 0.02
         and black_frames <= 0.02
+        and no_face_run <= MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN
+        and alive_no_face <= MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE
+        and not {
+            "alive frames often miss speaker",
+            "extended no-speaker run in final crop",
+        } & flags
     )
 
     if visual_score < MIN_EDITORIAL_VISUAL_QUALITY and not documentary_non_face_ok:

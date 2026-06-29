@@ -116,6 +116,52 @@ def _contains_any(text, terms):
     return any(term in lowered for term in terms)
 
 
+def transformed_render_quality_flags(theme, content_format, render_qc):
+    if content_format not in TRANSFORMED_CONTENT_FORMATS or not isinstance(render_qc, dict):
+        return []
+
+    frame_path = render_qc.get("frame_path") or {}
+    render_flags = set(render_qc.get("flags") or [])
+    visual_score = _float(render_qc.get("visual_quality_score", frame_path.get("visual_quality_score")), 0.0)
+    face_presence = _float(frame_path.get("face_presence_rate"), 0.0)
+    no_face_run = _float(frame_path.get("longest_no_face_run_ratio"), 0.0)
+    alive_no_face = _float(frame_path.get("alive_no_face_frame_ratio"), 0.0)
+    max_center_offset = _float(frame_path.get("max_face_center_offset_ratio"), 0.0)
+    theme_key = str(theme or "").strip().lower().replace("-", "_").replace(" ", "_")
+    documentary_theme = theme_key in {"politics", "truecrime"}
+    flags = []
+
+    if visual_score and visual_score < 0.52:
+        flags.append("final_package_low_visual_quality")
+
+    if no_face_run > (0.50 if documentary_theme else 0.34):
+        flags.append("final_package_long_no_speaker_run")
+
+    if alive_no_face > (0.62 if documentary_theme else 0.46):
+        flags.append("final_package_misses_speaker_too_often")
+
+    if face_presence and face_presence < (0.22 if documentary_theme else 0.36) and alive_no_face > 0.48:
+        flags.append("final_package_low_speaker_presence")
+
+    if (
+        max_center_offset > 0.72
+        and alive_no_face > 0.30
+        and {
+            "subject off-center in final crop",
+            "unstable final subject position",
+        } & render_flags
+    ):
+        flags.append("final_package_probable_background_lock")
+
+    if "alive frames often miss speaker" in render_flags and alive_no_face > 0.40:
+        flags.append("final_package_alive_frames_miss_speaker")
+
+    if "extended no-speaker run in final crop" in render_flags and no_face_run > 0.24:
+        flags.append("final_package_extended_no_speaker_run")
+
+    return flags
+
+
 def context_evidence_for(package, rank_signals):
     items = _context_items(package, rank_signals)
     has_source_url = any(_has_text(item.get("source_video_url"), 8) for item in items)
@@ -177,10 +223,14 @@ def evaluate_editorial_gates(theme, package):
     first_second_qc = package.get("first_second_qc") or rank_signals.get("first_second_qc") or {}
     first_second_passed = _bool_passed(first_second_qc, default=True)
     render_passed = _bool_passed(render_qc, default=True)
-    title_quality = (
-        package.get("title_quality")
-        or rank_signals.get("title_quality")
-        or score_title_quality(theme, package.get("title", ""), topic_terms=package.get("topic_fingerprint") or [])
+    title_quality = score_title_quality(
+        theme,
+        package.get("title", ""),
+        topic_terms=(
+            package.get("topic_fingerprint")
+            or rank_signals.get("topic_fingerprint")
+            or []
+        ),
     )
     context_evidence = context_evidence_for(package, rank_signals)
     allow_raw_clip_uploads = os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") == "1"
@@ -211,6 +261,8 @@ def evaluate_editorial_gates(theme, package):
     if not render_passed:
         flags.append("render_qc_failed")
 
+    flags.extend(transformed_render_quality_flags(theme, content_format, render_qc))
+
     if transformation_score < minimum_transformation:
         flags.append("transformation_below_theme_minimum")
 
@@ -234,6 +286,15 @@ def evaluate_editorial_gates(theme, package):
 
     if title_quality.get("repetitive_title"):
         flags.append("repetitive_title")
+
+    if title_quality.get("weak_template_title"):
+        flags.append("weak_template_title")
+
+    if title_quality.get("keyword_soup_title"):
+        flags.append("keyword_soup_title")
+
+    if title_quality.get("contextless_time_fragment"):
+        flags.append("contextless_time_fragment_title")
 
     if not title_quality.get("theme_native_title", True):
         flags.append("weak_theme_native_title")

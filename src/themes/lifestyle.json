@@ -40,7 +40,7 @@
         "min_clip_duration": 14,
         "max_clip_duration": 60,
         "default_clip_count": 10,
-        "theme_clip_budget": 15,
+        "theme_clip_budget": 0,
         "theme_candidates_per_video": 8,
         "min_readiness_score": 0.68,
         "min_selected_score": 0.29,

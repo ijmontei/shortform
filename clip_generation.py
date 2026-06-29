@@ -161,7 +161,7 @@ CLIP_TRANSCRIBE_BEST_OF = max(1, int(speed_profile_default(
     premium=str(CLIP_TRANSCRIBE_BEAM_SIZE),
 )))
 ENABLE_THEME_GLOBAL_RANKING = os.getenv("SHORTFORM_ENABLE_THEME_GLOBAL_RANKING", "1") != "0"
-THEME_CLIP_BUDGET = max(1, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "15")))
+THEME_CLIP_BUDGET = max(0, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "0")))
 ENFORCE_THEME_CLIP_BUDGET = os.getenv("SHORTFORM_ENFORCE_THEME_CLIP_BUDGET", "0") == "1"
 THEME_CANDIDATES_PER_VIDEO = max(1, int(os.getenv("SHORTFORM_THEME_CANDIDATES_PER_VIDEO", "24")))
 CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(
@@ -280,14 +280,19 @@ def active_max_topic_similarity(theme_name=None):
 
 
 def active_theme_clip_budget(theme_name=None):
-    return rule_number("theme_clip_budget", THEME_CLIP_BUDGET, theme_name=theme_name, cast=int)
+    return max(0, rule_number("theme_clip_budget", THEME_CLIP_BUDGET, theme_name=theme_name, cast=int))
 
 
 def active_theme_clip_limit(theme_name=None):
     if not ENFORCE_THEME_CLIP_BUDGET:
         return None
 
-    return max(1, active_theme_clip_budget(theme_name))
+    budget = active_theme_clip_budget(theme_name)
+
+    if budget <= 0:
+        return None
+
+    return budget
 
 
 def active_theme_candidates_per_video(theme_name=None):

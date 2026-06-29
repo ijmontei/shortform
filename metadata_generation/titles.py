@@ -77,6 +77,12 @@ GENERIC_BAD_PATTERNS = [
     r"^the\s+ai\s+question\s+inside\b",
     r"\bthe\s+ai\s+detail\s+builders\s+are\s+watching\b",
     r"^the\s+market\s+detail\s+investors\s+should\s+watch$",
+    r":\s+the\s+detail\s+that\s+changes\s+the\s+case$",
+    r"^the\s+evidence\s+detail\s+worth\s+rechecking$",
+    r"^the\s+debate\s+clip\s+with\s+real\s+context$",
+    r"^the\s+pop\s+culture\s+detail\s+people\s+missed$",
+    r"^the\s+(interview|podcast)\s+moment\s+worth\s+watching$",
+    r"^evidence\s+(question|detail)\s+(around|behind)\b",
     r"^the\s+game\s+industry\s+bet\s+on\b",
     r"^what\s+if\s+granny\s+smith\s+had\s+a\s+birthday\s+party\??$",
     r"^the\s+health\s+detail\s+worth\s+rethinking$",
@@ -537,7 +543,8 @@ def weak_template_subject(lower_title):
         (r"^the\s+take\s+inside\s+(.+?)$", 1),
         (r"^the\s+awkward\s+moment\s+behind\s+(.+?)$", 1),
         (r"^the\s+(ai\s+question|context|case\s+moment|culture\s+moment|funny\s+part)\s+inside\s+(.+?)$", 2),
-        (r"^(.+?):\s+the\s+(sports\s+debate|locker\s+room\s+angle|investor\s+takeaway|business\s+risk|builder\s+takeaway|habit\s+to\s+rethink|health\s+detail|claim\s+worth\s+checking|policy\s+fight|story\s+people\s+will\s+debate|culture\s+moment)$", 1),
+        (r"^the\s+evidence\s+question\s+around\s+(.+?)$", 1),
+        (r"^(.+?):\s+the\s+(detail\s+that\s+changes\s+the\s+case|key\s+detail|timeline\s+detail|sports\s+debate|locker\s+room\s+angle|investor\s+takeaway|business\s+risk|builder\s+takeaway|habit\s+to\s+rethink|health\s+detail|claim\s+worth\s+checking|policy\s+fight|story\s+people\s+will\s+debate|culture\s+moment)$", 1),
     ]
 
     for pattern, subject_group in patterns:
@@ -891,8 +898,8 @@ def fallback_title_candidates(theme, archetype, topic):
             "The Debate Inside {topic}",
         ],
         "truecrime": [
-            "{topic}: The Detail That Changes The Case",
-            "The Evidence Question Around {topic}",
+            "{topic}: The Timeline Detail",
+            "Why {topic} Raised New Questions",
         ],
         "popculture": [
             "The Pop Culture Detail Inside {topic}",
@@ -1247,6 +1254,10 @@ def score_title_quality(theme, title, topic_terms=None):
     source_title_like = looks_like_source_title(title)
     weak_template_title = weak_template_subject(lower)
     keyword_soup = keyword_soup_title(theme, title, topic_terms=topic_terms)
+    contextless_time_fragment = bool(
+        re.search(r"\b\d+\s+years?\s+ago$", lower)
+        and not re.match(r"^(why|how|what|when)\b", lower)
+    )
     malformed_apostrophe_title = bool(re.search(r"\b[A-Za-z]+['’]S\b", title))
     raw_dialogue_fragment = looks_like_raw_dialogue_fragment(title)
     theme_hits = theme_signal_terms(theme, lower)
@@ -1300,6 +1311,7 @@ def score_title_quality(theme, title, topic_terms=None):
         or source_title_like
         or weak_template_title
         or keyword_soup
+        or contextless_time_fragment
         or repetitive_title
         or raw_dialogue_fragment
         or source_only_title
@@ -1322,6 +1334,7 @@ def score_title_quality(theme, title, topic_terms=None):
             or source_title_like
             or weak_template_title
             or keyword_soup
+            or contextless_time_fragment
         ),
         "raw_dialogue_fragment": raw_dialogue_fragment,
         "theme_native_title": theme_native_title,
@@ -1334,6 +1347,7 @@ def score_title_quality(theme, title, topic_terms=None):
         "source_title_like": source_title_like,
         "weak_template_title": weak_template_title,
         "keyword_soup_title": keyword_soup,
+        "contextless_time_fragment": contextless_time_fragment,
         "topic_hit": topic_hit,
         "theme_signal_terms": theme_hits,
         "meaningful_word_count": len(set(meaningful_words)),

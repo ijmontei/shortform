@@ -630,6 +630,11 @@ FATAL_YOUTUBE_REASON_MESSAGES = {
         "YouTube rejected the upload because the project hit the video upload rate limit. "
         "Wait a few minutes, then rerun with --limit 1 or another small limit."
     ),
+    "uploadLimitExceeded": (
+        "YouTube rejected the upload because the channel or account hit its upload limit. "
+        "Wait for YouTube's upload window to reset, then rerun upload.py or run.py; "
+        "qualified files that were not uploaded will stay queued."
+    ),
     "quotaExceeded": (
         "YouTube rejected the upload because the project quota is exhausted. "
         "Wait for quota to reset or request more quota in Google Cloud, then rerun with a small --limit."
@@ -811,13 +816,17 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         except Exception as error:
             mark_youtube_failed(package, error)
             remaining_content.append(package)
-            save_metadata(metadata)
             print(f" -> YouTube upload failed: {error}")
 
             halt_message = get_fatal_youtube_error_message(error)
 
             if halt_message:
+                remaining_content.extend(content[index + 1:])
+                metadata["content"] = remaining_content
+                save_metadata(metadata)
                 raise YouTubeUploadHalted(halt_message) from error
+
+            save_metadata(metadata)
 
         if effective_limit is not None and uploaded_count >= effective_limit:
             remaining_content.extend(content[index + 1:])

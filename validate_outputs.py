@@ -20,6 +20,9 @@ ENABLE_FRAME_QA = os.getenv("SHORTFORM_VALIDATE_FRAME_QA", "1") != "0"
 FINAL_FRAME_AUDITS = os.getenv("SHORTFORM_VALIDATE_FRAME_AUDITS", "1") != "0"
 MIN_FINAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_FINAL_VISUAL_QUALITY", "0.55"))
 EDITORIAL_FACE_QA_FORMATS = {"raw_subtitled_clip", "classic_clip"}
+MIN_DOCUMENTARY_FINAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_DOCUMENTARY_FINAL_VISUAL_QUALITY", "0.60"))
+MAX_TRANSFORMED_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_TRANSFORMED_NO_FACE_RUN", "0.50"))
+MAX_TRANSFORMED_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_TRANSFORMED_ALIVE_NO_FACE", "0.62"))
 
 
 def package_with_effective_youtube_metadata(package):
@@ -122,17 +125,47 @@ def validate_frame_quality(theme, package, video_file):
             issues.append(flag)
 
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
+    face_presence = float(frame_qc.get("face_presence_rate") or 0.0)
+    no_face_run = float(frame_qc.get("longest_no_face_run_ratio") or 0.0)
+    alive_no_face = float(frame_qc.get("alive_no_face_frame_ratio") or 0.0)
+    max_center_offset = float(frame_qc.get("max_face_center_offset_ratio") or 0.0)
     documentary_non_face_ok = (
         clean_theme_name(theme) in {"politics", "truecrime"}
         and content_format in TRANSFORMED_CONTENT_FORMATS
-        and visual_score >= 0.45
+        and visual_score >= MIN_DOCUMENTARY_FINAL_VISUAL_QUALITY
+        and no_face_run <= MAX_TRANSFORMED_NO_FACE_RUN
+        and alive_no_face <= MAX_TRANSFORMED_ALIVE_NO_FACE
         and not (hard_flags & non_face_hard_flags)
+        and not {
+            "alive frames often miss speaker",
+            "extended no-speaker run in final crop",
+        } & hard_flags
     )
 
     if visual_score < MIN_FINAL_VISUAL_QUALITY and not documentary_non_face_ok:
         issues.append(
             f"low visual quality score ({visual_score:.2f})"
         )
+
+    if content_format in TRANSFORMED_CONTENT_FORMATS:
+        if no_face_run > (MAX_TRANSFORMED_NO_FACE_RUN if documentary_non_face_ok else 0.34):
+            issues.append(f"transformed package has long no-speaker run ({no_face_run:.2f})")
+
+        if alive_no_face > (MAX_TRANSFORMED_ALIVE_NO_FACE if documentary_non_face_ok else 0.46):
+            issues.append(f"transformed package often misses speaker ({alive_no_face:.2f})")
+
+        if face_presence and face_presence < (0.22 if documentary_non_face_ok else 0.36) and alive_no_face > 0.48:
+            issues.append(f"transformed package has low speaker presence ({face_presence:.2f})")
+
+        if (
+            max_center_offset > 0.72
+            and alive_no_face > 0.30
+            and {
+                "subject off-center in final crop",
+                "unstable final subject position",
+            } & hard_flags
+        ):
+            issues.append("transformed package likely locked to background instead of speaker")
 
     return frame_qc, issues
 
