@@ -1612,6 +1612,8 @@ def clip_is_editorial_usable(clip):
         "possible black frames",
         "missing audio",
         "unexpected resolution",
+        "probable tiny/background face lock",
+        "subject severely off-center in final crop",
     }
     frame_path = render_qc.get("frame_path") or {}
     face_presence = float(frame_path.get("face_presence_rate") or 0.0)
@@ -1628,6 +1630,8 @@ def clip_is_editorial_usable(clip):
         and alive_no_face <= MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE
         and "alive frames often miss speaker" not in flags
         and "extended no-speaker run in final crop" not in flags
+        and "probable tiny/background face lock" not in flags
+        and "subject severely off-center in final crop" not in flags
     )
 
     if flags & hard_flags:
@@ -1671,6 +1675,8 @@ def clip_is_editorial_usable(clip):
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
             "weak final face plausibility",
+            "probable tiny/background face lock",
+            "subject severely off-center in final crop",
         } & flags:
             return False
 
@@ -1699,6 +1705,8 @@ def clip_is_popular_segment_usable(clip):
                 "final render has dead visual frames",
                 "alive frames often miss speaker",
                 "extended no-speaker run in final crop",
+                "probable tiny/background face lock",
+                "subject severely off-center in final crop",
             } & flags
         ):
             return False
@@ -1737,6 +1745,8 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         and not {
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
+            "probable tiny/background face lock",
+            "subject severely off-center in final crop",
         } & flags
     )
 
@@ -1776,6 +1786,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         and (
             "subject off-center in final crop" in flags
             or "unstable final subject position" in flags
+            or "probable tiny/background face lock" in flags
         )
     ):
         reasons.append(

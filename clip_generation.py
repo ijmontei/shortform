@@ -304,7 +304,7 @@ def active_theme_candidates_per_video(theme_name=None):
         theme_name=theme_name,
         cast=int,
     )
-    return max(THEME_CANDIDATES_PER_VIDEO, configured)
+    return max(CLIP_SCORE_CACHE_CANDIDATE_LIMIT, configured)
 
 
 def active_candidate_stride(theme_name=None):
@@ -1439,7 +1439,11 @@ def compute_frame_visual_features(frame):
         "laplacian_var": laplacian_var,
         "edge_density": edge_density,
         "is_black": mean_luma < 8.0,
-        "is_low_information": mean_luma < 18.0 or contrast < 9.0,
+        "is_low_information": (
+            mean_luma < 18.0
+            or contrast < 9.0
+            or (edge_density < 0.010 and laplacian_var < 18.0)
+        ),
         "is_blank_background": (
             (mean_luma < 26.0 and contrast < 12.0 and edge_density < 0.014)
             or (contrast < 14.0 and edge_density < 0.010)

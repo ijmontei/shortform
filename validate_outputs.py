@@ -114,10 +114,12 @@ def validate_frame_quality(theme, package, video_file):
     face_hard_flags = {
         "low final face presence",
         "subject off-center in final crop",
+        "subject severely off-center in final crop",
         "unstable final subject position",
         "alive frames often miss speaker",
         "extended no-speaker run in final crop",
         "weak final face plausibility",
+        "probable tiny/background face lock",
     }
 
     for flag in sorted(hard_flags & non_face_hard_flags):
@@ -142,6 +144,8 @@ def validate_frame_quality(theme, package, video_file):
         and not {
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
+            "probable tiny/background face lock",
+            "subject severely off-center in final crop",
         } & hard_flags
     )
 
@@ -166,6 +170,7 @@ def validate_frame_quality(theme, package, video_file):
             and {
                 "subject off-center in final crop",
                 "unstable final subject position",
+                "probable tiny/background face lock",
             } & hard_flags
         ):
             issues.append("transformed package likely locked to background instead of speaker")

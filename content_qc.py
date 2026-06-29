@@ -93,6 +93,14 @@ def safe_name(value):
     return value[:160] or "untitled"
 
 
+def report_paths(report_suffix=""):
+    suffix = safe_name(report_suffix)[:48] if report_suffix else "latest"
+    return (
+        os.path.join(REPORT_DIR, f"content_qc_{suffix}.json"),
+        os.path.join(REPORT_DIR, f"content_qc_{suffix}.md"),
+    )
+
+
 def ffprobe_media(path):
     result = subprocess.run(
         [
@@ -1078,7 +1086,16 @@ def aggregate_report(asset_reports, title_records, prospective_title_records=Non
     }
 
 
-def run_content_qc(themes=None, interval_seconds=2.0, max_frames=36, limit=None, titles_only=False, asset_types=None):
+def run_content_qc(
+    themes=None,
+    interval_seconds=2.0,
+    max_frames=36,
+    limit=None,
+    titles_only=False,
+    asset_types=None,
+    report_suffix="",
+    skip_title_audit=False,
+):
     os.makedirs(REPORT_DIR, exist_ok=True)
     assets = [] if titles_only else discover_assets(themes=themes, asset_types=asset_types)
 
@@ -1099,19 +1116,24 @@ def run_content_qc(themes=None, interval_seconds=2.0, max_frames=36, limit=None,
                 "error": str(error),
             })
 
-    title_records = audit_titles(themes=themes)
-    prospective_title_records = audit_prospective_titles(themes=themes)
+    if skip_title_audit:
+        title_records = []
+        prospective_title_records = []
+    else:
+        title_records = audit_titles(themes=themes)
+        prospective_title_records = audit_prospective_titles(themes=themes)
     report = aggregate_report(reports, title_records, prospective_title_records)
+    json_path, md_path = report_paths(report_suffix)
 
-    with open(LATEST_JSON, "w", encoding="utf-8") as handle:
+    with open(json_path, "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
         handle.write("\n")
 
-    with open(LATEST_MD, "w", encoding="utf-8") as handle:
+    with open(md_path, "w", encoding="utf-8") as handle:
         handle.write(build_markdown(report))
 
-    print(f"Content QC JSON: {LATEST_JSON}")
-    print(f"Content QC report: {LATEST_MD}")
+    print(f"Content QC JSON: {json_path}")
+    print(f"Content QC report: {md_path}")
     print(
         f"Assets checked: {report['asset_count']}; "
         f"flagged: {report['flagged_asset_count']}; "
@@ -1130,6 +1152,8 @@ def parse_args():
     parser.add_argument("--max-frames", type=int, default=36, help="Maximum sampled frames per video.")
     parser.add_argument("--limit", type=int, help="Limit assets for quick smoke tests.")
     parser.add_argument("--titles-only", action="store_true", help="Only audit existing and prospective titles; skip frame/audio sampling.")
+    parser.add_argument("--skip-title-audit", action="store_true", help="Skip title/prospective-title audits for faster frame/audio sampling.")
+    parser.add_argument("--report-suffix", help="Write content_qc_SUFFIX.json/.md instead of content_qc_latest.*")
     return parser.parse_args()
 
 
@@ -1143,6 +1167,8 @@ def main():
         limit=args.limit,
         titles_only=args.titles_only,
         asset_types=["final_upload"] if args.final_only else args.asset_type,
+        report_suffix=args.report_suffix or "",
+        skip_title_audit=args.skip_title_audit,
     )
 
 

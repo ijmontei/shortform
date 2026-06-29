@@ -204,12 +204,16 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
     no_face_run = _float(frame_path.get("longest_no_face_run_ratio"), 0.0)
     alive_no_face = _float(frame_path.get("alive_no_face_frame_ratio"), 0.0)
     max_center_offset = _float(frame_path.get("max_face_center_offset_ratio"), 0.0)
+    low_information = _float(frame_path.get("low_information_frame_ratio"), 0.0)
     theme_key = str(theme or "").strip().lower().replace("-", "_").replace(" ", "_")
     documentary_theme = theme_key in {"politics", "truecrime"}
     flags = []
 
     if visual_score and visual_score < 0.52:
         flags.append("final_package_low_visual_quality")
+
+    if low_information > (0.18 if documentary_theme else 0.12):
+        flags.append("final_package_low_information_frames")
 
     if no_face_run > (0.50 if documentary_theme else 0.34):
         flags.append("final_package_long_no_speaker_run")
@@ -235,6 +239,12 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
 
     if "extended no-speaker run in final crop" in render_flags and no_face_run > 0.24:
         flags.append("final_package_extended_no_speaker_run")
+
+    if "probable tiny/background face lock" in render_flags:
+        flags.append("final_package_probable_background_lock")
+
+    if "subject severely off-center in final crop" in render_flags:
+        flags.append("final_package_severe_off_center")
 
     return flags
 
