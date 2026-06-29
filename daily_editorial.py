@@ -337,6 +337,9 @@ GENERIC_EDITORIAL_TITLE_PATTERNS = [
     r"^prison\s+crime\s+dakota$",
     r"^evidence\s+both\s+passenger\b",
     r"^why\s+don'?t\s+we\b",
+    r"\bwas\s+somebody\s+who\b",
+    r"\bcast\s+debate\s+the\s+movie\b",
+    r"^everyone\s+who\s+stood\s+by\s+.+\s+the\s+crash$",
     r"\binside\s+joke\s+league\s+find\b",
     r"^(trying\s+games\s+left|call\s+post\s+block|career\s+zion\s+young|locker\s+jaylen\s+brown)\s+changed\s+the\s+game$",
 ]
@@ -3159,7 +3162,7 @@ def theme_specific_direct_title(theme_key, topic):
 
     if theme_key == "popculture":
         if "jackass" in lower and "movie" in lower:
-            return "Jackass Cast Debate The Movie"
+            return "The Jackass Movie Debate"
         if public_editorial_topic_ok("popculture", topic, topic_terms=[topic], allow_short_topic=False):
             return topic
 

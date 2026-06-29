@@ -13,6 +13,7 @@ import mediapipe as mp
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from metadata_generation.titles import score_title_quality
 from theme_config import BASE_DIR, clean_theme_name, discover_themes, load_json_file
 
 
@@ -68,6 +69,8 @@ GENERIC_TITLE_PHRASES = {
     "pop culture missed",
     "builders are debating",
     "inside joke league find",
+    "was somebody who",
+    "cast debate the movie",
     "trying games left changed the game",
     "call post block changed the game",
     "career zion young changed the game",
@@ -892,6 +895,15 @@ def title_flags(text):
     if re.search(r"^why\s+don'?t\s+we\b", lowered):
         flags.append("raw dialogue fragment")
 
+    if re.search(r"\bwas\s+somebody\s+who\b", lowered):
+        flags.append("raw transcript-style title")
+
+    if re.search(r"\bcast\s+debate\s+the\s+movie\b", lowered):
+        flags.append("awkward generated title")
+
+    if re.search(r"^everyone\s+who\s+stood\s+by\s+.+\s+the\s+crash$", lowered):
+        flags.append("awkward generated title")
+
     if words and words[0] in WEAK_TOPIC_STARTS and "?" not in text:
         flags.append("looks like raw transcript fragment")
 
@@ -908,6 +920,47 @@ def title_flags(text):
         flags.append("too many questions")
 
     return flags
+
+
+def title_quality_flags(theme, text, topic_terms=None):
+    quality = score_title_quality(theme, text, topic_terms=topic_terms or [text])
+    flags = []
+
+    if quality.get("generic_title"):
+        flags.append("title scorer marks generic")
+
+    if quality.get("honesty", 1.0) < 0.70:
+        flags.append("title scorer low honesty")
+
+    if quality.get("raw_dialogue_fragment"):
+        flags.append("title scorer raw dialogue")
+
+    if quality.get("mechanical_title"):
+        flags.append("title scorer mechanical")
+
+    if quality.get("weak_template_title"):
+        flags.append("title scorer weak template")
+
+    if quality.get("keyword_soup_title"):
+        flags.append("title scorer keyword soup")
+
+    if quality.get("source_title_like"):
+        flags.append("title scorer source-title-like")
+
+    if not quality.get("theme_native_title", True):
+        flags.append("title scorer weak theme fit")
+
+    if not quality.get("length_ok", True):
+        flags.append("title scorer bad length")
+
+    return flags
+
+
+def audit_title_flags(theme, text, topic_terms=None):
+    return sorted(set(
+        title_flags(text)
+        + title_quality_flags(theme, text, topic_terms=topic_terms or [text])
+    ))
 
 
 GENERIC_SCRIPT_PHRASES = {
@@ -1023,7 +1076,11 @@ def audit_titles(themes=None):
 
             youtube_package = (item.get("platforms") or {}).get("youtube_shorts") or {}
             text = youtube_package.get("title") or item.get("title") or ""
-            flags = title_flags(text)
+            flags = audit_title_flags(
+                theme_name,
+                text,
+                topic_terms=[text, item.get("source_title", ""), item.get("source_channel", "")],
+            )
 
             if not upload_candidate:
                 flags.append(f"package status is {status or 'not_upload_ready'}")
@@ -1074,7 +1131,7 @@ def audit_titles(themes=None):
             topic = item.get("topic") or ""
             source = ", ".join(item.get("sources") or [])
             text = item.get("title") or topic
-            flags = title_flags(text)
+            flags = audit_title_flags(theme_name, text, topic_terms=[text, topic, source])
             seen[text.lower()].add(output_file or f"{theme_name}:countdown_topic:{item.get('rank')}")
             records.append({
                 "theme": theme_name,
@@ -1117,7 +1174,7 @@ def audit_titles(themes=None):
 
             script = item.get("script") or ""
             text = item.get("title") or script
-            flags = title_flags(text)
+            flags = audit_title_flags(theme_name, text, topic_terms=[text, item.get("source_title", "")])
             seen[text.lower()].add(output_file or f"{theme_name}:popular_segment:{item.get('rank')}")
             records.append({
                 "theme": theme_name,
@@ -1170,7 +1227,7 @@ def audit_titles(themes=None):
                     topic = item.get("topic") or ""
                     source = ", ".join(item.get("sources") or [])
                     text = item.get("title") or topic
-                    flags = title_flags(text)
+                    flags = audit_title_flags(theme_name, text, topic_terms=[text, topic, source])
                     seen[text.lower()].add(output_file or f"{theme_name}:temp_countdown_topic:{date_dir}:{item.get('rank')}")
                     records.append({
                         "theme": theme_name,
@@ -1207,7 +1264,7 @@ def audit_titles(themes=None):
 
                     script = item.get("script") or ""
                     text = item.get("title") or script
-                    flags = title_flags(text)
+                    flags = audit_title_flags(theme_name, text, topic_terms=[text, item.get("source_title", "")])
                     seen[text.lower()].add(output_file or f"{theme_name}:temp_popular_segment:{date_dir}:{item.get('rank')}")
                     records.append({
                         "theme": theme_name,
@@ -1301,7 +1358,7 @@ def audit_prospective_titles(themes=None, max_per_theme=30):
                 countdown_slot=max(1, 6 - inspected),
                 total_count=5,
             )
-            flags = title_flags(title)
+            flags = audit_title_flags(theme_name, title, topic_terms=[title, topic, clip.get("source_title", "")])
             topic_terms = clip.get("topic_fingerprint") or [topic]
 
             if not daily_editorial.public_editorial_topic_ok(
