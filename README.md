@@ -541,7 +541,11 @@ Finished editorial countdowns, popular-segment shorts, and recap compilations al
 ```powershell
 $env:SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS="0"
 $env:SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY="0.55"
+$env:SHORTFORM_ENABLE_SECONDARY_FINAL_FRAME_QC="1"
+$env:SHORTFORM_SECONDARY_FINAL_FRAME_QC_MAX_FRAMES="10"
 ```
+
+The secondary final-frame QC samples the completed upload package with the same contact-sheet analyzer used by `content_qc.py`. It catches issues such as off-center speakers, weak face/speaker continuity, and background/object locks that may not be obvious from the source clip alone.
 
 `run.py --validate-outputs` fails if final metadata still contains `needs_revision` or `rejected` packages, because those are not upload-ready. To inspect revision artifacts during debugging without failing validation:
 

@@ -67,6 +67,11 @@ GENERIC_TITLE_PHRASES = {
     "evidence both passenger",
     "pop culture missed",
     "builders are debating",
+    "inside joke league find",
+    "trying games left changed the game",
+    "call post block changed the game",
+    "career zion young changed the game",
+    "locker jaylen brown changed the game",
     "popularity signal",
     "replay hotspot",
     "viewers kept replaying",
@@ -883,6 +888,9 @@ def title_flags(text):
 
     if re.search(r"^(what|why|how)\s+\1\b", lowered):
         flags.append("duplicated question word")
+
+    if re.search(r"^why\s+don'?t\s+we\b", lowered):
+        flags.append("raw dialogue fragment")
 
     if words and words[0] in WEAK_TOPIC_STARTS and "?" not in text:
         flags.append("looks like raw transcript fragment")

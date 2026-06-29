@@ -110,6 +110,8 @@ MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OU
 MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY", "0.60"))
 MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN", "0.50"))
 MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE", "0.62"))
+ENABLE_SECONDARY_FINAL_FRAME_QC = os.getenv("SHORTFORM_ENABLE_SECONDARY_FINAL_FRAME_QC", "1") != "0"
+SECONDARY_FINAL_FRAME_QC_MAX_FRAMES = max(6, int(os.getenv("SHORTFORM_SECONDARY_FINAL_FRAME_QC_MAX_FRAMES", "10")))
 YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
 if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     YOUTUBE_PRIVACY_STATUS = "public"
@@ -334,6 +336,9 @@ GENERIC_EDITORIAL_TITLE_PATTERNS = [
     r"^crime\s+tony\s+early$",
     r"^prison\s+crime\s+dakota$",
     r"^evidence\s+both\s+passenger\b",
+    r"^why\s+don'?t\s+we\b",
+    r"\binside\s+joke\s+league\s+find\b",
+    r"^(trying\s+games\s+left|call\s+post\s+block|career\s+zion\s+young|locker\s+jaylen\s+brown)\s+changed\s+the\s+game$",
 ]
 
 TOPIC_ACTION_WORDS = {
@@ -1869,6 +1874,74 @@ def editorial_audio_qc_for(output_file):
         }
 
 
+def editorial_secondary_frame_qc_for(output_file, theme=""):
+    if not ENABLE_SECONDARY_FINAL_FRAME_QC:
+        return {"skipped": True, "reason": "secondary final-frame QC disabled", "flags": []}
+
+    try:
+        import content_qc
+
+        media = content_qc.ffprobe_media(output_file)
+        interval_seconds = max(
+            2.0,
+            float(media.get("duration") or 0.0) / max(1, SECONDARY_FINAL_FRAME_QC_MAX_FRAMES),
+        )
+        contact_sheet, frame_samples = content_qc.create_contact_sheet(
+            output_file,
+            str(theme or DEFAULT_THEME),
+            "final_upload",
+            media,
+            interval_seconds=interval_seconds,
+            max_frames=SECONDARY_FINAL_FRAME_QC_MAX_FRAMES,
+        )
+        frame_qc = content_qc.summarize_frame_metrics(frame_samples, "final_upload")
+        frame_qc["contact_sheet"] = contact_sheet
+        frame_qc["frame_qc_version"] = "content_qc_final_upload_v1"
+        return frame_qc
+    except Exception as error:
+        return {
+            "flags": [f"final editorial secondary frame QA failed: {error}"],
+        }
+
+
+def editorial_secondary_frame_rejection_reasons(frame_qc):
+    flags = set((frame_qc or {}).get("flags") or [])
+    reasons = []
+    face_presence = float((frame_qc or {}).get("face_presence_rate") or 0.0)
+    no_face_run = float((frame_qc or {}).get("longest_no_face_run_ratio") or 0.0)
+    avg_offset = float((frame_qc or {}).get("avg_face_center_offset") or 0.0)
+    max_offset = float((frame_qc or {}).get("max_face_center_offset") or 0.0)
+    hard_flags = {
+        "no sampled frames",
+        "black/dead frames present",
+        "too many low-information frames",
+        "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
+        "probable small-object/background face lock",
+        "probable flat-surface false face lock",
+    }
+
+    for flag in sorted(flags & hard_flags):
+        reasons.append(f"secondary final-frame QC: {flag}")
+
+    if "low speaker/face presence" in flags and face_presence < 0.42:
+        reasons.append(f"secondary final-frame QC low speaker presence ({face_presence:.2f} < 0.42)")
+
+    if "extended run without a strong face" in flags and no_face_run > 0.36:
+        reasons.append(f"secondary final-frame QC extended weak-subject run ({no_face_run:.2f} > 0.36)")
+
+    if "subject often off center" in flags and avg_offset > 0.26:
+        reasons.append(f"secondary final-frame QC off-center subject ({avg_offset:.2f} > 0.26)")
+
+    if "severe off-center frames" in flags and max_offset > 0.40:
+        reasons.append(f"secondary final-frame QC severe off-center frames ({max_offset:.2f} > 0.40)")
+
+    if any(flag.startswith("final editorial secondary frame QA failed") for flag in flags):
+        reasons.append("secondary final-frame QC failed")
+
+    return reasons
+
+
 def editorial_audio_rejection_reasons(audio_qc):
     flags = set((audio_qc or {}).get("flags") or [])
     hard_flags = {
@@ -1900,15 +1973,23 @@ def finalize_editorial_package(package, label):
         }
 
     audio_qc = editorial_audio_qc_for(output_file)
+    secondary_frame_qc = editorial_secondary_frame_qc_for(output_file, package.get("theme", DEFAULT_THEME))
     rejection_reasons = editorial_output_rejection_reasons(frame_qc, package.get("theme", DEFAULT_THEME))
+    rejection_reasons.extend(editorial_secondary_frame_rejection_reasons(secondary_frame_qc))
     rejection_reasons.extend(editorial_audio_rejection_reasons(audio_qc))
     rejection_reasons = sorted(set(rejection_reasons))
     package["render_qc"] = {
         "frame_qc_version": frame_qc.get("frame_qc_version", CURRENT_FRAME_QC_VERSION),
         "passed": not rejection_reasons,
-        "flags": sorted(set(list(frame_qc.get("flags") or []) + list(audio_qc.get("flags") or []) + rejection_reasons)),
+        "flags": sorted(set(
+            list(frame_qc.get("flags") or [])
+            + list((secondary_frame_qc or {}).get("flags") or [])
+            + list(audio_qc.get("flags") or [])
+            + rejection_reasons
+        )),
         "visual_quality_score": frame_qc.get("visual_quality_score", 0.0),
         "frame_path": frame_qc,
+        "secondary_frame_path": secondary_frame_qc,
         "intro_audio": audio_qc,
         "rejected": bool(rejection_reasons),
         "rejection_reasons": rejection_reasons,
