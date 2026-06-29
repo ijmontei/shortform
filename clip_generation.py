@@ -3572,6 +3572,67 @@ def render_rejection_reasons(render_qc):
     return sorted(set(reasons))
 
 
+def audit_existing_final_clip(video_path, expected_duration=0.0, face_cascades=None, audit_path=None):
+    probe = probe_video_file(video_path)
+    frame_qc = analyze_final_frame_path(video_path, face_cascades=face_cascades)
+    audit_result = None
+
+    if audit_path:
+        audit_result = create_frame_audit_contact_sheet(
+            video_path,
+            audit_path,
+            face_cascades=face_cascades,
+        )
+
+    render_qc = {
+        "passed": True,
+        "flags": list(frame_qc.get("flags") or []),
+        "visual_quality_score": frame_qc.get("visual_quality_score", 0.0),
+        "attempt_quality_score": frame_qc.get("visual_quality_score", 0.0),
+        "render_strategy": "existing_file_audit",
+        "crop": {
+            "strategy": "existing_file_audit",
+            "framing_score": frame_qc.get("visual_quality_score", 0.0),
+            "face_detection_rate": frame_qc.get("face_presence_rate", 0.0),
+            "speaker_switches": 0,
+            "offcenter_reframes": 0,
+        },
+        "frame_path": frame_qc,
+        "probe": probe,
+        "reused_existing_file": True,
+    }
+
+    if audit_result and audit_result.get("created"):
+        render_qc["frame_audit_file"] = audit_result.get("path", "")
+        render_qc["frame_path"]["audit_file"] = audit_result.get("path", "")
+
+    duration = float(probe.get("duration") or 0.0)
+    expected_duration = float(expected_duration or 0.0)
+
+    if expected_duration > 0:
+        duration_delta = abs(duration - expected_duration)
+        duration_tolerance = max(1.2, min(3.0, expected_duration * 0.08))
+
+        if duration_delta > duration_tolerance:
+            render_qc["flags"].append(
+                f"existing clip duration mismatch ({duration:.2f}s vs expected {expected_duration:.2f}s)"
+            )
+
+    rejection_reasons = render_rejection_reasons(render_qc)
+
+    if rejection_reasons:
+        render_qc["passed"] = False
+        render_qc["rejected"] = True
+        render_qc["rejection_reasons"] = rejection_reasons
+        render_qc["flags"] = sorted(set(render_qc.get("flags", []) + rejection_reasons))
+    else:
+        render_qc["rejected"] = False
+        render_qc["rejection_reasons"] = []
+        render_qc["flags"] = sorted(set(render_qc.get("flags", [])))
+
+    return render_qc
+
+
 def render_crop_attempt(
     temp_subclip,
     temp_tracked_avi,
@@ -8007,10 +8068,35 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             not REGENERATE_EXISTING_CLIPS
             and is_valid_existing_clip(final_filename)
         ):
-            print(f" -> Final clip already exists, skipping: {final_filename}\n")
-            rendered_count += 1
-            clip_number += 1
-            continue
+            existing_audit_path = os.path.join(
+                get_frame_audit_dir(),
+                f"{cleaned_title}_{clip_number}_existing_file_audit.jpg",
+            )
+            existing_qc = audit_existing_final_clip(
+                final_filename,
+                expected_duration=duration,
+                face_cascades=face_cascades,
+                audit_path=existing_audit_path,
+            )
+            clip.output_file = os.path.abspath(final_filename)
+            clip.render_qc = existing_qc
+
+            if existing_qc.get("passed"):
+                print(f" -> Final clip already exists and passed current QC, skipping: {final_filename}\n")
+                rendered_count += 1
+                clip_number += 1
+                continue
+
+            print(
+                " -> Existing final clip failed current QC; regenerating: "
+                f"{final_filename} ({', '.join(existing_qc.get('rejection_reasons') or existing_qc.get('flags') or [])})"
+            )
+            clip.output_file = ""
+
+            try:
+                os.remove(final_filename)
+            except OSError:
+                pass
         elif not REGENERATE_EXISTING_CLIPS and os.path.exists(final_filename):
             print(f" -> Existing final clip is invalid; regenerating: {final_filename}")
 

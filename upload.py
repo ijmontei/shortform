@@ -480,7 +480,76 @@ def package_with_effective_youtube_metadata(package):
     return sanitize_youtube_metadata(package)
 
 
+def refresh_package_render_qc(package):
+    video_file = package.get("video_file", "")
+
+    if not video_file or not os.path.exists(video_file):
+        return package
+
+    try:
+        import clip_generation
+
+        frame_qc = clip_generation.analyze_final_frame_path(video_file, max_samples=24)
+    except Exception as error:
+        existing_qc = dict(package.get("render_qc") or {})
+        existing_qc["passed"] = False
+        existing_qc["rejected"] = True
+        existing_qc["flags"] = sorted(set(
+            list(existing_qc.get("flags") or [])
+            + [f"upload preflight frame QA failed: {error}"]
+        ))
+        existing_qc.setdefault("rejection_reasons", []).append(
+            f"upload preflight frame QA failed: {error}"
+        )
+        package["render_qc"] = existing_qc
+        return package
+
+    existing_qc = dict(package.get("render_qc") or {})
+    existing_flags = list(existing_qc.get("flags") or [])
+    existing_rejections = list(existing_qc.get("rejection_reasons") or [])
+    frame_flags = list(frame_qc.get("flags") or [])
+    rejections = list(existing_rejections)
+    hard_upload_flags = {
+        "could not open final render",
+        "no final render frames",
+        "no readable final frames",
+        "final render has black frames",
+        "final render has low-information frames",
+        "final render has dead visual frames",
+        "low final alive-frame rate",
+        "probable background lock instead of speaker",
+        "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
+        "subject severely off-center in final crop",
+    }
+
+    for flag in sorted(set(frame_flags) & hard_upload_flags):
+        if flag not in rejections:
+            rejections.append(flag)
+
+    passed = not rejections and bool(existing_qc.get("passed", True))
+
+    package["render_qc"] = {
+        **existing_qc,
+        "passed": passed,
+        "rejected": bool(rejections) or bool(existing_qc.get("rejected", False)),
+        "flags": sorted(set(existing_flags + frame_flags + rejections)),
+        "visual_quality_score": frame_qc.get(
+            "visual_quality_score",
+            existing_qc.get("visual_quality_score", 0.0),
+        ),
+        "frame_path": frame_qc,
+        "rejection_reasons": rejections,
+        "render_strategy": existing_qc.get("render_strategy", "upload_preflight_frame_audit"),
+        "upload_preflight_refreshed": True,
+    }
+    return package
+
+
 def review_skip_reason(package):
+    refresh_package_render_qc(package)
     review = package.get("review") or {}
     youtube_status = package.get("posting_status", {}).get("youtube_shorts", "")
     gate_package = package_with_effective_youtube_metadata(package)
