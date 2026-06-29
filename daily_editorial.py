@@ -1106,6 +1106,18 @@ def topic_supported_by_clip(topic, clip):
 
 def clip_has_theme_relevance(theme, clip):
     theme = str(theme or clip_theme_key(clip)).strip().lower()
+    source_tier = str(
+        clip.get("source_tier")
+        or (clip.get("rank_signals") or {}).get("source_tier")
+        or ""
+    ).strip().lower()
+
+    if (
+        os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") != "0"
+        and source_tier in {"priority", "secondary", "legacy"}
+    ):
+        return True
+
     words = support_words(clip.get("transcript_excerpt", ""))
     positive_words = THEME_RELEVANCE_WORDS.get(theme, set())
 

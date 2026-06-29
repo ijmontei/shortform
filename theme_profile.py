@@ -17,6 +17,10 @@ DEFAULT_SCORING_WEIGHTS = {
     "transformation": 0.10,
 }
 
+RELAX_CONFIGURED_SOURCE_GUARD = os.getenv("SHORTFORM_RELAX_CONFIGURED_SOURCE_GUARD", "1") != "0"
+STRICT_SOURCE_GUARD = os.getenv("SHORTFORM_STRICT_SOURCE_GUARD", "0") == "1"
+CONFIGURED_SOURCE_TIERS = {"priority", "secondary", "legacy"}
+
 DEFAULT_THEME_PROFILE = {
     "theme": DEFAULT_THEME,
     "profile": "generic",
@@ -1220,12 +1224,19 @@ def source_guard_disqualification(profile, source_record):
     if hard_hits:
         return True, hard_hits[:6]
 
+    source_tier = str(source_record.get("source_tier") or "").strip().lower()
+    relaxed_configured_source = (
+        RELAX_CONFIGURED_SOURCE_GUARD
+        and not STRICT_SOURCE_GUARD
+        and source_tier in CONFIGURED_SOURCE_TIERS
+    )
+
     hits = [keyword for keyword in negative_keywords if keyword_in_text(source_text, keyword)]
     positive_keywords = list(signal_config.get("positive_keywords") or [])
     positive_keywords.extend(source_guard.get("positive_keywords") or [])
     positive_hits = [keyword for keyword in positive_keywords if keyword_in_text(source_text, keyword)]
 
-    if hits:
+    if hits and not relaxed_configured_source:
         # Block clear source-level mismatches, while allowing sources whose
         # title strongly declares the target theme despite a stray negative term.
         override_min_hits = int(source_guard.get("negative_override_min_positive_hits") or 2)
@@ -1234,7 +1245,6 @@ def source_guard_disqualification(profile, source_record):
 
     min_positive_hits = int(source_guard.get("min_positive_hits") or 0)
     tier_minimums = source_guard.get("min_positive_hits_by_tier") or {}
-    source_tier = str(source_record.get("source_tier") or "").strip().lower()
 
     if source_tier in tier_minimums:
         min_positive_hits = int(tier_minimums.get(source_tier) or 0)
@@ -1242,7 +1252,12 @@ def source_guard_disqualification(profile, source_record):
     explicit_trusted_terms = normalized_string_list(source_guard.get("trusted_source_terms") or [])
     explicit_trusted_source = any(keyword_in_text(source_text, term) for term in explicit_trusted_terms)
 
-    if min_positive_hits and not explicit_trusted_source and len(positive_hits) < min_positive_hits:
+    if (
+        min_positive_hits
+        and not relaxed_configured_source
+        and not explicit_trusted_source
+        and len(positive_hits) < min_positive_hits
+    ):
         return True, [f"missing_source_positive_signal:{len(positive_hits)}/{min_positive_hits}"]
 
     return False, hits[:6]

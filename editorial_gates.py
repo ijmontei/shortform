@@ -15,6 +15,8 @@ RAW_RECYCLER_CONTENT_FORMATS = {
     "classic_clip",
     "selected_clip",
 }
+TRUST_CONFIGURED_SOURCE_RELEVANCE = os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") != "0"
+CONFIGURED_SOURCE_TIERS = {"priority", "secondary", "legacy"}
 FINANCIAL_CLAIM_TERMS = {
     "buy",
     "sell",
@@ -194,6 +196,18 @@ def _rank_signal_items(rank_signals):
 def _rank_signal_dict(rank_signals):
     items = _rank_signal_items(rank_signals)
     return items[0] if items else {}
+
+
+def _configured_source_package(package, rank_signals):
+    tier_values = [
+        package.get("source_tier"),
+        _rank_signal_dict(rank_signals).get("source_tier"),
+    ]
+
+    for item in _rank_signal_items(rank_signals):
+        tier_values.append(item.get("source_tier"))
+
+    return any(str(value or "").strip().lower() in CONFIGURED_SOURCE_TIERS for value in tier_values)
 
 
 def _context_items(package, rank_signals):
@@ -398,6 +412,9 @@ def _script_quality_flags(package):
 
 
 def _theme_evidence_flags(theme, package, rank_signals):
+    if TRUST_CONFIGURED_SOURCE_RELEVANCE and _configured_source_package(package, rank_signals):
+        return []
+
     theme_key = str(theme or "").strip().lower().replace("-", "_").replace(" ", "_")
     evidence_terms = THEME_EVIDENCE_TERMS.get(theme_key)
 
@@ -576,6 +593,7 @@ def evaluate_editorial_gates(theme, package):
     )
     context_evidence = context_evidence_for(package, raw_rank_signals)
     title_supported, title_support = _title_supported_by_context(package, raw_rank_signals)
+    trusted_source_relevance = TRUST_CONFIGURED_SOURCE_RELEVANCE and _configured_source_package(package, raw_rank_signals)
     allow_raw_clip_uploads = os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") == "1"
     flags = []
 
@@ -612,7 +630,7 @@ def evaluate_editorial_gates(theme, package):
     if reused_content_risk >= 0.42:
         flags.append("high_reused_content_risk")
 
-    if theme_signal_score < 0.18:
+    if theme_signal_score < 0.18 and not trusted_source_relevance:
         flags.append("weak_theme_signal")
 
     flags.extend(_theme_evidence_flags(theme, package, raw_rank_signals))

@@ -4,6 +4,7 @@ import os
 import time
 
 from theme_config import BASE_DIR, PHASE_ONE_ACTIVE_THEMES, THEMES_SRC_PATH, clean_theme_name, discover_themes, load_json_file, theme_config_path, write_json_file
+import theme_profile
 from theme_profile import DEFAULT_SCORING_WEIGHTS, load_theme_profile, source_disqualified_by_theme_name
 
 
@@ -259,34 +260,40 @@ def _theme_signal_module_exists(theme, profile):
 def _validate_source_guard_cases(theme):
     case_results = []
     errors = []
+    previous_strict = theme_profile.STRICT_SOURCE_GUARD
+    theme_profile.STRICT_SOURCE_GUARD = True
 
-    for index, case in enumerate(SOURCE_GUARD_EXPECTATIONS.get(theme, []), start=1):
-        source_record = {
-            "title": case.get("title", ""),
-            "source_tier": case.get("source_tier", ""),
-            "channel_url": case.get("channel_url", ""),
-        }
-        disqualified, hits = source_disqualified_by_theme_name(theme, source_record)
-        expected_block = case.get("expect") == "block"
-        passed = bool(disqualified) == expected_block
+    try:
+        for index, case in enumerate(SOURCE_GUARD_EXPECTATIONS.get(theme, []), start=1):
+            source_record = {
+                "title": case.get("title", ""),
+                "source_tier": case.get("source_tier", ""),
+                "channel_url": case.get("channel_url", ""),
+            }
+            disqualified, hits = source_disqualified_by_theme_name(theme, source_record)
+            expected_block = case.get("expect") == "block"
+            passed = bool(disqualified) == expected_block
 
-        case_results.append({
-            "index": index,
-            "expect": case.get("expect", ""),
-            "passed": passed,
-            "title": case.get("title", ""),
-            "source_tier": case.get("source_tier", ""),
-            "channel_url": case.get("channel_url", ""),
-            "guard_disqualified": bool(disqualified),
-            "guard_hits": hits,
-        })
+            case_results.append({
+                "index": index,
+                "expect": case.get("expect", ""),
+                "mode": "strict_regression",
+                "passed": passed,
+                "title": case.get("title", ""),
+                "source_tier": case.get("source_tier", ""),
+                "channel_url": case.get("channel_url", ""),
+                "guard_disqualified": bool(disqualified),
+                "guard_hits": hits,
+            })
 
-        if not passed:
-            errors.append(
-                f"source_guard case {index} expected {case.get('expect')} "
-                f"for '{case.get('title')}' but got "
-                f"{'block' if disqualified else 'pass'}"
-            )
+            if not passed:
+                errors.append(
+                    f"source_guard case {index} expected {case.get('expect')} "
+                    f"for '{case.get('title')}' but got "
+                    f"{'block' if disqualified else 'pass'}"
+                )
+    finally:
+        theme_profile.STRICT_SOURCE_GUARD = previous_strict
 
     return case_results, errors
 

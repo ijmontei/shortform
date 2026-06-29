@@ -4954,7 +4954,19 @@ def candidate_theme_negative_hits(candidate):
     return sorted(set(hits))
 
 
+def configured_source_tier(value):
+    return str(value or "").strip().lower() in {"priority", "secondary", "legacy"}
+
+
+def candidate_from_configured_source(candidate):
+    signals = candidate.rank_signals or {}
+    return configured_source_tier(signals.get("source_tier"))
+
+
 def candidate_theme_fit_ready(candidate):
+    if os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") != "0" and candidate_from_configured_source(candidate):
+        return True
+
     signal_config = get_theme_signals(active_theme_name())
 
     if not signal_config.get("penalize_missing_theme_signal", True):
@@ -5002,7 +5014,10 @@ def candidate_selection_ready(candidate):
     if not candidate_theme_fit_ready(candidate):
         return False
 
-    if not transcript_has_theme_relevance(active_theme_name(), candidate.transcript_excerpt):
+    if (
+        os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") == "0"
+        or not candidate_from_configured_source(candidate)
+    ) and not transcript_has_theme_relevance(active_theme_name(), candidate.transcript_excerpt):
         return False
 
     if hard_failures and readiness < min_readiness and external_signal < 0.42:
