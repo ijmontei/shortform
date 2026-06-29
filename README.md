@@ -601,7 +601,13 @@ To disable theme-wide ranking and return to per-video clip generation:
 $env:SHORTFORM_ENABLE_THEME_GLOBAL_RANKING="0"
 ```
 
-YouTube can still enforce its own upload limits. The local uploader defaults to no app-side cap, halts cleanly when YouTube returns an upload-limit error, and leaves remaining qualified clips queued for the next retry. To add your own local upload cap, set:
+YouTube can still enforce its own upload limits. The local uploader defaults to a 15-video upload queue per theme/channel so production does not intentionally run into the known daily API/channel limit. Generation can still create more than 15 qualified clips; overflow clips are moved into:
+
+```text
+output/themes/<theme>/archive
+```
+
+Those archived clips keep their metadata in `output/themes/<theme>/metadata.json` under `archive`. When the live `content` queue is empty, the manifest/uploader promotes archived clips back into `content` for the next upload batch, and uploaded files are deleted locally after YouTube accepts them. To change the local upload queue cap, set:
 
 ```powershell
 $env:SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT="15"

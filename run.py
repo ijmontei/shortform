@@ -13,6 +13,7 @@ from clip_generation import run_clip_scoring
 from clip_generation import run_selected_clip_render
 from clip_generation import run_selected_video_prefetch
 from clip_generation import active_theme_clip_limit
+from content_archive import prepare_upload_queue
 from daily_editorial import run_daily_editorial
 from pipeline_doctor import run_doctor
 from reconcile_editorial_gates import reconcile_theme
@@ -27,7 +28,7 @@ RUNS_LOG_PATH = os.path.join(LOGS_PATH, "runs")
 LATEST_LOG_FILE = os.path.join(LOGS_PATH, "run_latest.log")
 LATEST_SUMMARY_FILE = os.path.join(LOGS_PATH, "run_latest_summary.json")
 MEDIA_AUTH_WAIT_STATUS_FILE = os.path.join(LOGS_PATH, "media_auth_wait_latest.json")
-DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "0"))
+DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
 DEFAULT_PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "editorial", "subtitle", "reconcile", "manifest", "upload"]
 PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload"]
 SUMMARY_LABELS = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload", "total"]
@@ -215,14 +216,19 @@ def write_media_auth_wait_status(
     return payload
 
 
-def write_content_manifest(theme):
+def write_content_manifest(theme, queue_limit=15):
     paths = get_theme_paths(theme)
     content_dir = paths["final_videos_path"]
+    archive_dir = paths["archive_path"]
     metadata_file = paths["final_metadata_file"]
+    queue_result = prepare_upload_queue(theme, queue_limit=queue_limit)
     metadata = load_json_file(metadata_file, {"theme": theme, "content": []})
     packages = metadata.get("content") if isinstance(metadata, dict) else []
     packages = packages if isinstance(packages, list) else []
+    archived_packages = metadata.get("archive") if isinstance(metadata, dict) else []
+    archived_packages = archived_packages if isinstance(archived_packages, list) else []
     video_files = []
+    archive_video_files = []
 
     if os.path.isdir(content_dir):
         video_files = [
@@ -231,8 +237,16 @@ def write_content_manifest(theme):
             if filename.lower().endswith(".mp4")
         ]
 
+    if os.path.isdir(archive_dir):
+        archive_video_files = [
+            os.path.join(archive_dir, filename)
+            for filename in sorted(os.listdir(archive_dir))
+            if filename.lower().endswith(".mp4")
+        ]
+
     ready_count = 0
     captioned_ready_count = 0
+    archived_ready_count = 0
     moved_uncaptioned_ready = 0
 
     for package in packages:
@@ -256,6 +270,12 @@ def write_content_manifest(theme):
             if package.get("content_has_burned_captions"):
                 captioned_ready_count += 1
 
+    for package in archived_packages:
+        status = ((package.get("posting_status") or {}).get("youtube_shorts") or "").lower()
+
+        if status == "ready" and package.get("content_has_burned_captions"):
+            archived_ready_count += 1
+
     if moved_uncaptioned_ready:
         write_json_file(metadata_file, metadata)
 
@@ -263,11 +283,18 @@ def write_content_manifest(theme):
         f"theme: {theme}",
         f"generated_at: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
         f"content_dir: {content_dir}",
+        f"archive_dir: {archive_dir}",
         f"metadata_file: {metadata_file}",
+        f"upload_queue_limit: {queue_limit if queue_limit and queue_limit > 0 else 'unlimited'}",
         f"mp4_count: {len(video_files)}",
+        f"archive_mp4_count: {len(archive_video_files)}",
         f"metadata_items: {len(packages)}",
+        f"archive_metadata_items: {len(archived_packages)}",
         f"ready_items: {ready_count}",
         f"ready_items_with_burned_captions: {captioned_ready_count}",
+        f"archive_ready_items_with_burned_captions: {archived_ready_count}",
+        f"archive_promoted_this_manifest: {queue_result.get('promoted_count', 0)}",
+        f"archive_overflowed_this_manifest: {queue_result.get('archived_count', 0)}",
         "",
     ]
 
@@ -279,6 +306,18 @@ def write_content_manifest(theme):
 
         lines.append(f"- {video_file} ({size_mb:.1f} MB)")
 
+    if archive_video_files:
+        lines.append("")
+        lines.append("archive:")
+
+        for video_file in archive_video_files:
+            try:
+                size_mb = os.path.getsize(video_file) / (1024 * 1024)
+            except OSError:
+                size_mb = 0.0
+
+            lines.append(f"- {video_file} ({size_mb:.1f} MB)")
+
     manifest_file = os.path.join(paths["output_path"], "content_manifest.txt")
     os.makedirs(os.path.dirname(manifest_file), exist_ok=True)
 
@@ -287,8 +326,15 @@ def write_content_manifest(theme):
 
     print(
         f"content manifest written for {theme}: {manifest_file} "
-        f"({len(video_files)} mp4, {captioned_ready_count}/{ready_count} ready captioned)"
+        f"({len(video_files)} mp4, {captioned_ready_count}/{ready_count} ready captioned, "
+        f"{len(archive_video_files)} archived)"
     )
+    if queue_result.get("promoted_count") or queue_result.get("archived_count"):
+        print(
+            " -> archive queue update: "
+            f"promoted {queue_result.get('promoted_count', 0)}, "
+            f"archived overflow {queue_result.get('archived_count', 0)}"
+        )
     if moved_uncaptioned_ready:
         print(
             f" -> moved {moved_uncaptioned_ready} uncaptioned ready item(s) "
@@ -473,6 +519,7 @@ def clean_generated_artifacts(themes, include_inactive=False):
         metadata_path = paths["metadata_path"]
         targets = [
             paths["final_videos_path"],
+            paths.get("archive_path", os.path.join(paths["output_path"], "archive")),
             os.path.join(paths["output_path"], "needs_revision"),
             os.path.join(paths["output_path"], "rejected"),
             paths["final_metadata_file"],
@@ -822,7 +869,11 @@ def run_stage_for_theme(theme, stage, args, summary):
         return True
 
     if stage == "manifest":
-        timed_stage(summary, "manifest", lambda: write_content_manifest(theme))
+        timed_stage(
+            summary,
+            "manifest",
+            lambda: write_content_manifest(theme, queue_limit=resolved_youtube_upload_limit(args)),
+        )
         return True
 
     if stage == "upload":
@@ -1124,7 +1175,7 @@ def parse_args():
     parser.add_argument(
         "--youtube-upload-limit",
         type=int,
-        help="Optional max number of YouTube uploads per theme for this run. Default is unlimited.",
+        help="Optional max number of YouTube uploads per theme for this run. Default is 15.",
     )
     parser.add_argument(
         "--doctor",

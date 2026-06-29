@@ -201,6 +201,7 @@ def validate_theme(theme):
     paths = ensure_theme(theme)
     metadata = load_json_file(paths["final_metadata_file"], {"theme": theme, "content": []})
     content = metadata.get("content", [])
+    archive = metadata.get("archive", [])
     issues = []
     results = []
     checked = 0
@@ -208,9 +209,20 @@ def validate_theme(theme):
     if not isinstance(content, list):
         return 0, [f"{theme}: metadata content is not a list"], []
 
-    for index, package in enumerate(content, start=1):
+    if not isinstance(archive, list):
+        return 0, [f"{theme}: metadata archive is not a list"], []
+
+    packages_to_validate = [
+        ("content", index, package)
+        for index, package in enumerate(content, start=1)
+    ] + [
+        ("archive", index, package)
+        for index, package in enumerate(archive, start=1)
+    ]
+
+    for collection, index, package in packages_to_validate:
         video_file = package.get("video_file", "")
-        label = f"{theme} item {index}"
+        label = f"{theme} {collection} item {index}"
 
         if not video_file:
             issues.append(f"{label}: missing video_file")
@@ -301,6 +313,7 @@ def validate_theme(theme):
             issues.append(f"{label}: {issue}")
 
         results.append({
+            "collection": collection,
             "index": index,
             "video_file": video_file,
             "content_format": package.get("content_format", ""),

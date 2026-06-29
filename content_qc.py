@@ -1063,7 +1063,15 @@ def audit_titles(themes=None):
         upload_candidate_outputs = set()
         quarantined_outputs = set()
 
-        for index, item in enumerate(metadata.get("content") or [], start=1):
+        metadata_items = [
+            ("content", index, item)
+            for index, item in enumerate(metadata.get("content") or [], start=1)
+        ] + [
+            ("archive", index, item)
+            for index, item in enumerate(metadata.get("archive") or [], start=1)
+        ]
+
+        for collection, index, item in metadata_items:
             status = ((item.get("posting_status") or {}).get("youtube_shorts") or "").lower()
             output_file = item.get("video_file", "")
             upload_candidate = status in {"ready", "failed", "uploaded"}
@@ -1095,10 +1103,14 @@ def audit_titles(themes=None):
                 if theme_name in support_audit_themes and not daily_editorial.topic_supported_by_clip(text, item):
                     flags.append("title not supported by clip transcript")
 
-            seen[text.lower()].add(output_file or f"{theme_name}:final_metadata:{index}")
+            seen[text.lower()].add(output_file or f"{theme_name}:final_metadata:{collection}:{index}")
             records.append({
                 "theme": theme_name,
-                "kind": "final_metadata" if upload_candidate else f"final_metadata_{status or 'not_upload_ready'}",
+                "kind": (
+                    f"final_metadata_{collection}"
+                    if upload_candidate
+                    else f"final_metadata_{collection}_{status or 'not_upload_ready'}"
+                ),
                 "rank": index,
                 "text": text,
                 "source": item.get("source_title", ""),
@@ -1111,7 +1123,11 @@ def audit_titles(themes=None):
                 script_topic = ((item.get("content_signal") or {}).get("topic") or item.get("title") or text)
                 records.append({
                     "theme": theme_name,
-                    "kind": "final_metadata_script" if upload_candidate else f"final_metadata_{status or 'not_upload_ready'}_script",
+                    "kind": (
+                        f"final_metadata_{collection}_script"
+                        if upload_candidate
+                        else f"final_metadata_{collection}_{status or 'not_upload_ready'}_script"
+                    ),
                     "rank": index,
                     "text": script,
                     "source": item.get("source_title", ""),

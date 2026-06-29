@@ -317,6 +317,7 @@ def get_theme_paths(theme_name=DEFAULT_THEME, create=False):
         "executed_file": EXECUTED_FILE,
         "output_path": theme_output_path,
         "final_videos_path": os.path.join(theme_output_path, "content"),
+        "archive_path": os.path.join(theme_output_path, "archive"),
         "final_metadata_file": os.path.join(theme_output_path, "metadata.json"),
         "temp_path": theme_temp_path,
         "videos_path": os.path.join(theme_temp_path, "downloads", "videos"),
@@ -332,6 +333,7 @@ def get_theme_paths(theme_name=DEFAULT_THEME, create=False):
     if create:
         for key in [
             "final_videos_path",
+            "archive_path",
             "videos_path",
             "audio_path",
             "transcriptions_path",

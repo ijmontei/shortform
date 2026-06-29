@@ -142,6 +142,30 @@ def check_clip_generation_volume():
     )]
 
 
+def check_upload_queue_policy():
+    limit = safe_int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"), 15)
+
+    if limit <= 0:
+        return [status_line(
+            False,
+            "YouTube upload queue",
+            "local upload queue cap is disabled; set SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT=15 for production",
+        )]
+
+    if limit > 15:
+        return [status_line(
+            False,
+            "YouTube upload queue",
+            f"local upload queue cap is {limit}; keep it at 15 or lower to avoid the known upload limit",
+        )]
+
+    return [status_line(
+        True,
+        "YouTube upload queue",
+        f"local upload queue cap is {limit} per theme; overflow upload-ready clips are archived for later batches",
+    )]
+
+
 def process_running(image_name):
     try:
         result = subprocess.run(
@@ -325,6 +349,7 @@ def run_doctor(include_auth=True):
     checks.extend(check_theme_engine())
     print("")
     checks.extend(check_clip_generation_volume())
+    checks.extend(check_upload_queue_policy())
     print("")
 
     if include_auth:

@@ -7,6 +7,7 @@ import re
 import sys
 import time
 
+from content_archive import prepare_upload_queue
 from editorial_gates import evaluate_editorial_gates
 from theme_config import (
     BASE_DIR,
@@ -56,7 +57,7 @@ THEME_CHANNEL_HANDLES = {
 }
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 MAX_UPLOAD_RETRIES = 5
-DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "0"))
+DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
 YOUTUBE_UPLOAD_COOLDOWN_FILE = os.path.join(BASE_DIR, "logs", "youtube_upload_cooldowns.json")
 YOUTUBE_UPLOAD_LIMIT_COOLDOWN_SECONDS = max(
     0.0,
@@ -1084,6 +1085,14 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
         )
         return 0
 
+    queue_result = prepare_upload_queue(CURRENT_THEME, queue_limit=effective_limit)
+    if queue_result.get("promoted_count") or queue_result.get("archived_count"):
+        print(
+            "Upload queue archive update: "
+            f"promoted {queue_result.get('promoted_count', 0)}, "
+            f"archived overflow {queue_result.get('archived_count', 0)}"
+        )
+
     metadata = load_metadata()
     content = metadata.get("content", [])
 
@@ -1232,7 +1241,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Upload shortform clips to YouTube with each theme's configured privacy.")
     parser.add_argument("--theme", help="Optional theme to upload.")
     parser.add_argument("--all", action="store_true", help="Upload every discovered theme.")
-    parser.add_argument("--limit", type=int, help="Optional max number of clips to upload per theme.")
+    parser.add_argument("--limit", type=int, help="Optional max number of clips to upload per theme. Default is 15.")
     parser.add_argument("--force", action="store_true", help="Re-upload clips even if metadata has a YouTube video ID.")
     parser.add_argument(
         "--auth-only",
