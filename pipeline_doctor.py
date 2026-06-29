@@ -103,6 +103,45 @@ def check_theme_engine():
     return [status_line(report["status"] == "ok", "Theme engine schema", detail)]
 
 
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def check_clip_generation_volume():
+    themes = discover_themes()
+    env_budget = safe_int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "0"))
+    cap_armed = (
+        os.getenv("SHORTFORM_ENFORCE_THEME_CLIP_BUDGET", "0") == "1"
+        and os.getenv("SHORTFORM_ALLOW_THEME_CLIP_CAP", "0") == "1"
+    )
+    capped = []
+
+    for theme in themes:
+        config = load_theme_config(theme)
+        clip_rules = config.get("clip_rules") or {}
+        budget = safe_int(clip_rules.get("theme_clip_budget"), env_budget)
+
+        if cap_armed and budget > 0:
+            capped.append(f"{theme}:{budget}")
+
+    if capped:
+        return [status_line(
+            False,
+            "Clip generation volume",
+            "local clip cap is enabled; disable SHORTFORM_ENFORCE_THEME_CLIP_BUDGET/SHORTFORM_ALLOW_THEME_CLIP_CAP "
+            f"or set theme_clip_budget=0 ({', '.join(capped)})",
+        )]
+
+    return [status_line(
+        True,
+        "Clip generation volume",
+        "quality-threshold unlimited; clips are limited by scoring, framing, captions, and upload gates, not a 15-clip cap",
+    )]
+
+
 def process_running(image_name):
     try:
         result = subprocess.run(
@@ -284,6 +323,8 @@ def run_doctor(include_auth=True):
     checks.extend(check_themes())
     print("")
     checks.extend(check_theme_engine())
+    print("")
+    checks.extend(check_clip_generation_volume())
     print("")
 
     if include_auth:

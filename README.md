@@ -573,13 +573,14 @@ Each generated editorial Short consumes the next adjective and moves it to the e
 
 ## Clip Volume And Upload Limits
 
-The pipeline defaults to quality-threshold selection: each theme generates every clip that clears the scoring, framing, title, caption, and editorial upload gates. `theme_clip_budget: 0` means unlimited, and the legacy per-video fallback now follows the same rule. Use a positive budget only when you intentionally want a local cap for a test run.
+The pipeline defaults to quality-threshold selection: each theme generates every clip that clears the scoring, framing, title, caption, and editorial upload gates. `theme_clip_budget: 0` means unlimited, and production theme validation requires this value. The goal is to make every publishable clip, not to stop at a fixed number.
 
-To force an explicit clip selection budget:
+Debug-only local caps still exist for short smoke tests, but they should not be enabled for production runs:
 
 ```powershell
 $env:SHORTFORM_ENFORCE_THEME_CLIP_BUDGET="1"
-$env:SHORTFORM_THEME_CLIP_BUDGET="15"
+$env:SHORTFORM_ALLOW_THEME_CLIP_CAP="1"
+$env:SHORTFORM_THEME_CLIP_BUDGET="3"
 ```
 
 To change the number of top candidates retained from each source video before theme-wide ranking:

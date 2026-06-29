@@ -3814,6 +3814,9 @@ def captioned_editorial_source_clip(theme, clip, scratch_dir):
     if not source_file or not os.path.exists(source_file):
         return clip
 
+    if not clip_is_editorial_usable(clip):
+        raise RuntimeError(f"source clip failed editorial visual QC: {os.path.basename(source_file)}")
+
     if clip.get("content_has_burned_captions") or source_file.lower().endswith("_captioned.mp4"):
         return clip
 
@@ -3861,10 +3864,15 @@ def captioned_editorial_source_clip(theme, clip, scratch_dir):
 
 
 def captioned_editorial_source_clips(theme, clips, scratch_dir):
-    return [
-        captioned_editorial_source_clip(theme, clip, scratch_dir)
-        for clip in clips
-    ]
+    captioned = []
+
+    for clip in clips:
+        try:
+            captioned.append(captioned_editorial_source_clip(theme, clip, scratch_dir))
+        except RuntimeError as error:
+            print(f"Skipping source clip before editorial packaging: {error}")
+
+    return captioned
 
 
 def clip_play_duration_for(source_clip, per_clip_limit):
@@ -5876,14 +5884,27 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
     for index, topic_item in enumerate(topic_groups, start=1):
         adjective = reel_adjective
         print(f"Rendering countdown short #{topic_item['_countdown_slot']}: {adjective} - {topic_item['topic']}")
-        package = render_editorial_short(
-            theme=theme,
-            topic_item=topic_item,
-            rank=index,
-            adjective=adjective,
-            date_key=date_key,
-            paths=paths,
-        )
+        try:
+            package = render_editorial_short(
+                theme=theme,
+                topic_item=topic_item,
+                rank=index,
+                adjective=adjective,
+                date_key=date_key,
+                paths=paths,
+            )
+        except Exception as error:
+            rejected_items.append({
+                "type": "countdown",
+                "countdown_slot": topic_item.get("_countdown_slot"),
+                "topic": topic_item.get("topic", ""),
+                "rejection_reasons": [f"render failed: {str(error).splitlines()[0][:260]}"],
+            })
+            print(
+                f"Skipping countdown short #{topic_item.get('_countdown_slot')} after render failure: "
+                f"{str(error).splitlines()[0][:260]}"
+            )
+            continue
 
         if not package_is_upload_ready(package):
             gate_flags = (package.get("editorial_gates") or {}).get("flags", [])
@@ -5991,13 +6012,26 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
                 f"Rendering popular segment #{index}: "
                 f"{item.get('channel_label', 'Podcast Channel')} - {item.get('source_title', '')}"
             )
-            package = render_popular_segment_short(
-                theme=theme,
-                item=item,
-                index=index,
-                date_key=date_key,
-                paths=paths,
-            )
+            try:
+                package = render_popular_segment_short(
+                    theme=theme,
+                    item=item,
+                    index=index,
+                    date_key=date_key,
+                    paths=paths,
+                )
+            except Exception as error:
+                rejected_items.append({
+                    "type": "popular_segment",
+                    "rank": index,
+                    "source_title": item.get("source_title", ""),
+                    "rejection_reasons": [f"render failed: {str(error).splitlines()[0][:260]}"],
+                })
+                print(
+                    f"Skipping popular segment #{index} after render failure: "
+                    f"{str(error).splitlines()[0][:260]}"
+                )
+                continue
 
             if not package_is_upload_ready(package):
                 gate_flags = (package.get("editorial_gates") or {}).get("flags", [])

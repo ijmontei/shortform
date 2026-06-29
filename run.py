@@ -12,6 +12,7 @@ from clip_generation import run_audio_prefetch
 from clip_generation import run_clip_scoring
 from clip_generation import run_selected_clip_render
 from clip_generation import run_selected_video_prefetch
+from clip_generation import active_theme_clip_limit
 from daily_editorial import run_daily_editorial
 from pipeline_doctor import run_doctor
 from reconcile_editorial_gates import reconcile_theme
@@ -526,6 +527,24 @@ def resolved_youtube_upload_limit(args):
         return None
 
     return DEFAULT_YOUTUBE_UPLOAD_LIMIT
+
+
+def clip_generation_volume_label(themes):
+    capped = []
+
+    for theme in themes:
+        try:
+            limit = active_theme_clip_limit(theme)
+        except Exception:
+            limit = None
+
+        if limit is not None:
+            capped.append(f"{theme}:{limit}")
+
+    if capped:
+        return "budget-limited (" + ", ".join(capped) + ")"
+
+    return "quality-threshold unlimited; no per-theme local clip cap"
 
 
 def theme_has_youtube_upload_route(theme):
@@ -1397,6 +1416,7 @@ def main():
                 print("Clean-slate reset complete; exiting before production stages.")
                 return
 
+        print(f"Configured clip generation volume: {clip_generation_volume_label(themes)}")
         print(f"Configured YouTube upload run cap per theme: {resolved_youtube_upload_limit(args) or 'unlimited'}\n")
 
         if run_requires_youtube_upload(themes, args):
