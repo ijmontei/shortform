@@ -410,6 +410,8 @@ def validate_theme_profile(theme_name):
 
     if theme_budget < 0:
         errors.append("clip_rules.theme_clip_budget must be zero for unlimited or a positive explicit cap")
+    elif is_phase_one and theme_budget > 0:
+        errors.append("phase-one clip_rules.theme_clip_budget must be 0; production generation is quality-threshold unlimited")
     elif theme_budget > 0:
         warnings.append("clip_rules.theme_clip_budget is an explicit cap; production defaults to unlimited quality-threshold selection")
 

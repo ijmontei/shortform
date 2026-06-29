@@ -379,12 +379,14 @@ def frame_metrics(frame, faces):
     edge_density = float(np.mean(edges > 0))
     face_count = len(faces)
     largest_face_area = 0.0
+    largest_face_height_ratio = 0.0
     center_offset = None
 
     if faces:
         largest = max(faces, key=lambda box: box[2] * box[3])
         x, y, w, h = largest
         largest_face_area = (w * h) / max(1, width * height)
+        largest_face_height_ratio = h / max(1, height)
         face_center_x = x + w / 2
         face_center_y = y + h / 2
         center_offset = math.sqrt(
@@ -402,6 +404,7 @@ def frame_metrics(frame, faces):
         "edge_density": round(edge_density, 5),
         "face_count": face_count,
         "largest_face_area": round(largest_face_area, 5),
+        "largest_face_height_ratio": round(largest_face_height_ratio, 4),
         "face_center_offset": round(center_offset, 4) if center_offset is not None else None,
         "is_black": is_black,
         "low_info": low_info,
@@ -506,6 +509,7 @@ def summarize_frame_metrics(metrics, asset_type):
     black_count = sum(1 for item in metrics if item.get("is_black"))
     low_info_count = sum(1 for item in metrics if item.get("low_info"))
     offsets = [float(item["face_center_offset"]) for item in metrics if item.get("face_center_offset") is not None]
+    face_heights = [float(item["largest_face_height_ratio"]) for item in metrics if item.get("largest_face_height_ratio")]
     flags = []
     face_presence_rate = face_count / count
     no_face_run_ratio = longest_false_run(plausible) / count
@@ -513,6 +517,7 @@ def summarize_frame_metrics(metrics, asset_type):
     black_ratio = black_count / count
     avg_offset = sum(offsets) / len(offsets) if offsets else None
     max_offset = max(offsets) if offsets else None
+    avg_face_height = sum(face_heights) / len(face_heights) if face_heights else None
 
     if black_ratio > 0.04:
         flags.append("black/dead frames present")
@@ -538,6 +543,18 @@ def summarize_frame_metrics(metrics, asset_type):
         if max_offset is not None and max_offset > severe_offset_limit:
             flags.append("severe off-center frames")
 
+        if (
+            avg_face_height is not None
+            and avg_face_height < 0.085
+            and face_presence_rate >= 0.30
+            and (
+                face_presence_rate < 0.68
+                or (avg_offset is not None and avg_offset > avg_offset_limit)
+                or (max_offset is not None and max_offset > severe_offset_limit)
+            )
+        ):
+            flags.append("probable tiny/background face lock")
+
     return {
         "sample_count": count,
         "face_presence_rate": round(face_presence_rate, 4),
@@ -546,6 +563,7 @@ def summarize_frame_metrics(metrics, asset_type):
         "low_info_frame_ratio": round(low_info_ratio, 4),
         "avg_face_center_offset": round(avg_offset, 4) if avg_offset is not None else None,
         "max_face_center_offset": round(max_offset, 4) if max_offset is not None else None,
+        "avg_face_height_ratio": round(avg_face_height, 4) if avg_face_height is not None else None,
         "avg_edge_density": round(sum(item.get("edge_density", 0.0) for item in metrics) / count, 5),
         "avg_laplacian": round(sum(item.get("laplacian", 0.0) for item in metrics) / count, 3),
         "flags": flags,

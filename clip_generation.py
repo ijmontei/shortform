@@ -142,6 +142,8 @@ MAX_FINAL_ALIVE_NO_FACE_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_ALIVE_NO_FA
 MAX_FINAL_NO_FACE_RUN_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_NO_FACE_RUN_RATIO", "0.24"))
 MAX_FINAL_AVG_FACE_CENTER_OFFSET = float(os.getenv("SHORTFORM_MAX_FINAL_AVG_FACE_CENTER_OFFSET", "0.28"))
 MIN_FINAL_FACE_PLAUSIBILITY = float(os.getenv("SHORTFORM_MIN_FINAL_FACE_PLAUSIBILITY", "0.37"))
+MIN_FINAL_FACE_HEIGHT_RATIO = float(os.getenv("SHORTFORM_MIN_FINAL_FACE_HEIGHT_RATIO", "0.085"))
+MIN_FINAL_TINY_FACE_LOCK_HEIGHT_RATIO = float(os.getenv("SHORTFORM_MIN_FINAL_TINY_FACE_LOCK_HEIGHT_RATIO", "0.070"))
 CLIP_TRANSCRIBE_MODEL_SIZE = speed_profile_default(
     "SHORTFORM_CLIP_TRANSCRIBE_MODEL",
     production="base",
@@ -2916,8 +2918,15 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
 
     if result["face_presence_rate"] < MIN_FINAL_SPEAKER_FACE_PRESENCE:
         result["flags"].append("low final face presence")
-    elif result["avg_face_center_offset_ratio"] > MAX_FINAL_AVG_FACE_CENTER_OFFSET or result["max_face_center_offset_ratio"] > 0.64:
+
+    if face_offsets and (
+        result["avg_face_center_offset_ratio"] > MAX_FINAL_AVG_FACE_CENTER_OFFSET
+        or result["max_face_center_offset_ratio"] > 0.64
+    ):
         result["flags"].append("subject off-center in final crop")
+
+    if face_offsets and result["max_face_center_offset_ratio"] > 0.78:
+        result["flags"].append("subject severely off-center in final crop")
 
     if result["alive_no_face_frame_ratio"] > MAX_FINAL_ALIVE_NO_FACE_RATIO:
         result["flags"].append("alive frames often miss speaker")
@@ -2927,6 +2936,20 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
 
     if face_plausibilities and result["avg_face_plausibility"] < MIN_FINAL_FACE_PLAUSIBILITY:
         result["flags"].append("weak final face plausibility")
+
+    if face_offsets and result["avg_face_height_ratio"] < MIN_FINAL_FACE_HEIGHT_RATIO:
+        tiny_lock_suspected = (
+            result["avg_face_height_ratio"] < MIN_FINAL_TINY_FACE_LOCK_HEIGHT_RATIO
+            or result["avg_face_center_offset_ratio"] > max(MAX_FINAL_AVG_FACE_CENTER_OFFSET, 0.32)
+            or result["max_face_center_offset_ratio"] > 0.62
+            or result["avg_face_plausibility"] < MIN_FINAL_FACE_PLAUSIBILITY + 0.08
+            or result["face_presence_rate"] < 0.68
+        )
+
+        if tiny_lock_suspected:
+            result["flags"].append("probable tiny/background face lock")
+        else:
+            result["flags"].append("tiny final speaker framing")
 
     if (
         result["face_presence_rate"] < 0.24
@@ -2952,6 +2975,7 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
     quality_score -= result["longest_no_face_run_ratio"] * 0.16
     quality_score -= result["avg_face_center_offset_ratio"] * 0.18
     quality_score -= max(0.0, result["max_face_center_offset_ratio"] - 0.55) * 0.22
+    quality_score -= max(0.0, MIN_FINAL_FACE_HEIGHT_RATIO - result["avg_face_height_ratio"]) * 0.42
     jitter_penalty_basis = (
         result["continuity_center_jitter_ratio"]
         if result["continuity_center_jitter_ratio"] > 0
@@ -3174,6 +3198,9 @@ def render_attempt_selection_score(render_qc):
     alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
     no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
     center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
+    max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
+    face_height = float(frame_path.get("avg_face_height_ratio") or 0.0)
+    face_plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
 
     # Prefer a slightly lower scoring but stable crop over a face-lock that is
     # actually chasing false positives on curtains, logos, or background edges.
@@ -3182,12 +3209,29 @@ def render_attempt_selection_score(render_qc):
     score -= max(0.0, alive_no_face - 0.34) * 0.35
     score -= max(0.0, no_face_run - 0.22) * 0.55
     score -= max(0.0, center_offset - 0.32) * 0.25
+    score -= max(0.0, max_center_offset - 0.58) * 0.34
+    score -= max(0.0, MIN_FINAL_FACE_HEIGHT_RATIO - face_height) * 1.30
+
+    if face_plausibility:
+        score -= max(0.0, (MIN_FINAL_FACE_PLAUSIBILITY + 0.08) - face_plausibility) * 0.24
 
     if "unstable final subject position" in flags:
         score -= 0.16
 
+    if "subject off-center in final crop" in flags:
+        score -= 0.15
+
+    if "subject severely off-center in final crop" in flags:
+        score -= 0.32
+
     if "probable background lock instead of speaker" in flags:
         score -= 0.34
+
+    if "probable tiny/background face lock" in flags:
+        score -= 0.42
+
+    if "tiny final speaker framing" in flags:
+        score -= 0.14
 
     if (
         render_qc.get("render_strategy") == "stable_face_lock"
@@ -3263,8 +3307,17 @@ def should_try_alternate_framing(render_qc):
         "extended no-speaker run in final crop",
         "low final face presence",
     }
+    universal_retry_flags = {
+        "probable background lock instead of speaker",
+        "probable tiny/background face lock",
+        "subject off-center in final crop",
+        "subject severely off-center in final crop",
+        "tiny final speaker framing",
+        "final render has dead visual frames",
+        "low final alive-frame rate",
+    }
 
-    if flags & no_speaker_flags and not needs_reaction_retry:
+    if flags & no_speaker_flags and not needs_reaction_retry and not (flags & universal_retry_flags):
         return False
 
     visual_score = float(render_qc.get("visual_quality_score", 0.0) or 0.0)
@@ -3279,6 +3332,10 @@ def should_try_alternate_framing(render_qc):
         "alive frames often miss speaker",
         "extended no-speaker run in final crop",
         "weak final face plausibility",
+        "probable background lock instead of speaker",
+        "probable tiny/background face lock",
+        "subject severely off-center in final crop",
+        "tiny final speaker framing",
     }
 
     return visual_score < FRAME_RETRY_SCORE_THRESHOLD or bool(flags & retry_flags)
@@ -3295,12 +3352,22 @@ def render_rejection_reasons(render_qc):
     low_information = float(frame_path.get("low_information_frame_ratio") or 0.0)
     dead_frames = float(frame_path.get("dead_frame_ratio") or 0.0)
     black_frames = float(frame_path.get("black_frame_ratio") or 0.0)
+    documentary_disqualifying_flags = {
+        "probable background lock instead of speaker",
+        "probable tiny/background face lock",
+        "subject severely off-center in final crop",
+        "final render has black frames",
+        "final render has low-information frames",
+        "final render has dead visual frames",
+        "low final alive-frame rate",
+    }
     documentary_non_face_ok = (
         profile_name in {"politics", "truecrime"}
         and visual_score >= 0.50
         and low_information <= 0.18
         and dead_frames <= 0.02
         and black_frames <= 0.02
+        and not (flags & documentary_disqualifying_flags)
     )
     face_hard_flags = {
         "low final face presence",
@@ -3308,6 +3375,7 @@ def render_rejection_reasons(render_qc):
         "extended no-speaker run in final crop",
         "weak final face plausibility",
         "probable background lock instead of speaker",
+        "probable tiny/background face lock",
     }
     hard_flags = {
         "could not open final render",
@@ -3325,6 +3393,8 @@ def render_rejection_reasons(render_qc):
         "extended no-speaker run in final crop",
         "weak final face plausibility",
         "probable background lock instead of speaker",
+        "probable tiny/background face lock",
+        "subject severely off-center in final crop",
     }
 
     if documentary_non_face_ok:
@@ -3336,6 +3406,8 @@ def render_rejection_reasons(render_qc):
     alive_no_face = float(frame_path.get("alive_no_face_frame_ratio") or 0.0)
     no_face_run = float(frame_path.get("longest_no_face_run_ratio") or 0.0)
     center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
+    max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
+    face_height = float(frame_path.get("avg_face_height_ratio") or 0.0)
     plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
 
     if not documentary_non_face_ok and face_presence and face_presence < MIN_FINAL_SPEAKER_FACE_PRESENCE:
@@ -3367,6 +3439,16 @@ def render_rejection_reasons(render_qc):
     if face_presence < 0.55 and plausibility and plausibility < MIN_FINAL_FACE_PLAUSIBILITY:
         reasons.append(
             f"face plausibility below threshold ({plausibility:.2f} < {MIN_FINAL_FACE_PLAUSIBILITY:.2f})"
+        )
+
+    if not documentary_non_face_ok and face_presence >= 0.30 and face_height and face_height < MIN_FINAL_FACE_HEIGHT_RATIO:
+        reasons.append(
+            f"speaker face too small for reliable crop ({face_height:.2f} < {MIN_FINAL_FACE_HEIGHT_RATIO:.2f})"
+        )
+
+    if not documentary_non_face_ok and max_center_offset > 0.78:
+        reasons.append(
+            f"speaker max center offset is severe ({max_center_offset:.2f} > 0.78)"
         )
 
     if visual_score < MIN_ACCEPTED_RENDER_VISUAL_QUALITY and not documentary_non_face_ok:
