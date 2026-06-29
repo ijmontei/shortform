@@ -49,6 +49,21 @@ GENERIC_TITLE_PHRASES = {
     "story people will debate",
     "detail that changes the case",
     "the claim worth checking",
+    "needs specific",
+    "case moment inside",
+    "evidence question around",
+    "debate clip with real context",
+    "evidence detail worth rechecking",
+    "pop culture detail people missed",
+    "ai detail builders are debating",
+    "market detail investors should watch",
+    "health habit worth rethinking",
+    "trial credit deny",
+    "prime crime",
+    "room credit deny",
+    "crime tony early",
+    "prison crime dakota",
+    "evidence both passenger",
 }
 
 WEAK_TOPIC_STARTS = {

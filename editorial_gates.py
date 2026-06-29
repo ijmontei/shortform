@@ -53,6 +53,55 @@ GENERIC_SOURCE_TITLES = {
     "source episode",
     "podcast channel",
 }
+THEME_EVIDENCE_TERMS = {
+    "comedy": {
+        "comedy", "comic", "comedian", "joke", "laugh", "roast", "funny",
+        "bit", "punchline", "crowd", "riff",
+    },
+    "sports": {
+        "sports", "game", "team", "coach", "athlete", "nba", "nfl",
+        "season", "playoff", "draft", "trade", "nascar", "race", "racing",
+        "quarterback", "locker", "championship",
+    },
+    "gaming": {
+        "gaming", "game", "games", "esports", "streamer", "creator",
+        "valorant", "cod", "league", "riot", "lcs", "tournament", "roster",
+        "studio", "developer", "console", "controller",
+    },
+    "finance": {
+        "money", "market", "markets", "stock", "stocks", "investor",
+        "investors", "business", "revenue", "profit", "debt", "rates",
+        "inflation", "cash", "rental", "rent", "mortgage", "economy",
+        "valuation", "founder", "company",
+    },
+    "technology_ai": {
+        "ai", "artificial intelligence", "model", "models", "agent",
+        "openai", "claude", "code", "coding", "software", "developer",
+        "data", "robot", "chip", "startup", "builder", "tech",
+    },
+    "health_fitness": {
+        "health", "fitness", "workout", "training", "exercise", "protein",
+        "nutrition", "sleep", "stress", "therapy", "body", "muscle",
+        "abs", "fertility", "metabolism", "recovery", "wellness",
+    },
+    "politics": {
+        "politics", "policy", "election", "campaign", "court", "congress",
+        "senate", "president", "border", "war", "vote", "law", "hearing",
+        "debate", "trump", "vance", "israel", "iran", "supreme court",
+    },
+    "popculture": {
+        "celebrity", "actor", "movie", "music", "hollywood", "culture",
+        "artist", "dating", "fame", "viral", "fan", "fans", "album",
+        "song", "scene", "tour",
+    },
+    "truecrime": {
+        "crime", "criminal", "case", "trial", "court", "confession",
+        "witness", "victim", "testimony", "investigation", "detective",
+        "police", "prison", "jury", "verdict", "evidence", "lawyer",
+        "legal", "murder", "homicide", "suspect", "bodycam", "arrest",
+        "custody", "prosecutor", "prosecutors",
+    },
+}
 
 
 def _float(value, default=0.0):
@@ -114,6 +163,34 @@ def _has_time_pair(item):
 def _contains_any(text, terms):
     lowered = _text(text).lower()
     return any(term in lowered for term in terms)
+
+
+def _theme_evidence_flags(theme, package, rank_signals):
+    theme_key = str(theme or "").strip().lower().replace("-", "_").replace(" ", "_")
+    evidence_terms = THEME_EVIDENCE_TERMS.get(theme_key)
+
+    if not evidence_terms:
+        return []
+
+    text_blob = " ".join([
+        _text(package.get("title")),
+        _text(package.get("caption")),
+        _text(package.get("description")),
+        _text(package.get("source_title")),
+        _text(package.get("source_channel")),
+        _text(package.get("transcript_excerpt")),
+        _text(rank_signals.get("source_title")),
+        _text(rank_signals.get("source_channel")),
+        _text(rank_signals.get("transcript_excerpt")),
+    ]).lower()
+
+    if not text_blob:
+        return ["missing_theme_evidence"]
+
+    if not any(term in text_blob for term in evidence_terms):
+        return ["off_theme_content"]
+
+    return []
 
 
 def transformed_render_quality_flags(theme, content_format, render_qc):
@@ -271,6 +348,8 @@ def evaluate_editorial_gates(theme, package):
 
     if theme_signal_score < 0.18:
         flags.append("weak_theme_signal")
+
+    flags.extend(_theme_evidence_flags(theme, package, rank_signals))
 
     if captionability_score < 0.58:
         flags.append("weak_captionability")

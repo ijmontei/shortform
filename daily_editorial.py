@@ -277,6 +277,9 @@ WEAK_TOPIC_WORDS = STOPWORDS | {
     "group", "lesson", "rule", "number", "true", "many", "hours", "days",
     "year", "years", "attorney", "phone", "college", "budget", "network",
     "enterprise", "thinking", "scary", "crazy", "sense", "times",
+    "very", "government", "million", "parents", "caps", "overweight",
+    "wealth", "destroy", "sentiment", "terror", "rooting", "country",
+    "president", "express", "subjective", "hard", "panel", "working",
 }
 
 GENERIC_TOPIC_PHRASES = {
@@ -295,6 +298,65 @@ GENERIC_TOPIC_PHRASES = {
     "context behind",
     "standout moment",
     "locker room story",
+    "debate clip with real context",
+    "evidence detail worth rechecking",
+    "case moment inside",
+    "evidence question around",
+    "pop culture detail people missed",
+    "ai detail builders are debating",
+    "health habit worth rethinking",
+    "market detail investors should watch",
+    "trial credit deny",
+    "prime crime",
+    "room credit deny",
+    "crime tony early",
+    "prison crime dakota",
+    "evidence both passenger",
+}
+
+GENERIC_EDITORIAL_TITLE_PATTERNS = [
+    r"^the\s+debate\s+clip\s+with\s+real\s+context$",
+    r"^the\s+evidence\s+detail\s+worth\s+rechecking$",
+    r"^the\s+case\s+moment\s+inside\b",
+    r"^the\s+pop\s+culture\s+detail\s+people\s+missed$",
+    r"^the\s+ai\s+detail\s+builders\s+are\s+debating$",
+    r"^the\s+market\s+detail\s+investors\s+should\s+watch$",
+    r"^the\s+health\s+habit\s+worth\s+rethinking$",
+    r"\bevidence\s+question\s+around\b",
+    r"\bthe\s+moment\s+inside\b",
+    r"^trial\s+credit\s+deny$",
+    r"^prime\s+crime$",
+    r"^room\s+credit\s+deny$",
+    r"^crime\s+tony\s+early$",
+    r"^prison\s+crime\s+dakota$",
+    r"^evidence\s+both\s+passenger\b",
+]
+
+TOPIC_ACTION_WORDS = {
+    "admit", "admits", "admitted", "argue", "argues", "argued",
+    "ask", "asks", "asked", "avoid", "avoids", "avoided", "ban",
+    "banned", "beat", "beats", "became", "becomes", "break",
+    "breaks", "broke", "changed", "changes", "challenge", "challenged",
+    "confess", "confessed", "confront", "confronts", "debate", "debated",
+    "deny", "denied", "explain", "explains", "explained", "fight",
+    "fights", "found", "hit", "hits", "land", "landed", "lost",
+    "miss", "missed", "panic", "question", "questions", "recover",
+    "recovery", "rethink", "reveal", "reveals", "revealed", "risk",
+    "save", "saved", "shift", "shifts", "split", "splits", "stand",
+    "stood", "testimony", "trial", "verdict", "warning", "warns",
+}
+
+TOPIC_CONNECTOR_WORDS = {
+    "after", "against", "before", "during", "over", "under", "versus",
+    "without", "with", "vs", "inside", "because", "when", "why", "how",
+}
+
+NOUN_SOUP_WORDS = WEAK_TOPIC_WORDS | {
+    "actions", "aired", "afternoon", "broadcasting", "charity",
+    "christine", "dakota", "defense", "dom", "hard", "helen", "however",
+    "jameson", "king", "nancy", "paris", "phoenix", "potty", "reason",
+    "room", "ruin", "russo", "sears", "solid", "students", "subjective",
+    "town", "van", "ways",
 }
 
 MOJIBAKE_REPLACEMENTS = {
@@ -385,6 +447,71 @@ def title_words(text):
     return re.findall(r"[a-zA-Z][a-zA-Z0-9']{1,}|\b\d+[\d,.]*%?\b", str(text or ""))
 
 
+def editorial_title_has_generic_pattern(text):
+    lowered = clean_viewer_text(text).lower()
+    return any(re.search(pattern, lowered) for pattern in GENERIC_EDITORIAL_TITLE_PATTERNS)
+
+
+def topic_phrase_is_keyword_soup(theme, phrase):
+    cleaned = clean_viewer_text(phrase)
+    lowered = cleaned.lower()
+
+    if not cleaned:
+        return True
+
+    if editorial_title_has_generic_pattern(cleaned):
+        return True
+
+    words = [word.lower().strip("'") for word in title_words(cleaned)]
+    meaningful = [
+        word
+        for word in words
+        if word not in WEAK_TOPIC_WORDS and word not in SOURCE_TITLE_SHOW_WORDS and len(word) >= 3
+    ]
+
+    if len(words) >= 3 and len(meaningful) < 2:
+        return True
+
+    if len(meaningful) < 3:
+        return False
+
+    action_hits = {
+        word
+        for word in meaningful
+        if word in TOPIC_ACTION_WORDS
+        or (word.endswith("ed") and word not in NOUN_SOUP_WORDS)
+        or (word.endswith("ing") and word not in NOUN_SOUP_WORDS)
+    }
+    connector_hit = any(word in TOPIC_CONNECTOR_WORDS for word in words)
+    specific_anchor = (
+        bool(re.search(r"\b\d+[\d,.]*%?\b", cleaned))
+        or bool(re.search(r"[A-Za-z]['’]s\b", cleaned))
+        or connector_hit
+    )
+    theme_words = THEME_RELEVANCE_WORDS.get(str(theme or "").strip().lower(), set())
+    domain_hits = {word for word in meaningful if word in theme_words}
+    soup_hits = {word for word in meaningful if word in NOUN_SOUP_WORDS}
+    theme_key = str(theme or "").strip().lower()
+
+    if (
+        theme_key == "truecrime"
+        and domain_hits
+        and re.search(r"\b(life sentence|sentencing hearing|trial|verdict|testimony|custody decision)\b", lowered)
+    ):
+        return False
+
+    if len(soup_hits) >= 2 and len(domain_hits) <= 1:
+        return True
+
+    if not action_hits and not specific_anchor and len(domain_hits) == 0:
+        return True
+
+    if len(meaningful) >= 4 and not action_hits and not specific_anchor and len(domain_hits) <= 1:
+        return True
+
+    return False
+
+
 def looks_like_raw_dialogue_topic(text):
     cleaned = clean_viewer_text(text)
     lowered = cleaned.lower()
@@ -444,6 +571,9 @@ def short_topic_phrase_ok(text):
     if not cleaned or any(phrase in lowered for phrase in GENERIC_TOPIC_PHRASES):
         return False
 
+    if topic_phrase_is_keyword_soup("", cleaned):
+        return False
+
     if lowered in SPECIAL_TOPIC_CASE:
         return True
 
@@ -472,6 +602,39 @@ def source_subject_from_title(source_title):
         return first_chunk
 
     return ""
+
+
+def possessive_subject(subject):
+    subject = clean_viewer_text(subject).strip(" .:-")
+
+    if not subject:
+        return ""
+
+    return f"{subject}'" if subject.lower().endswith("s") else f"{subject}'s"
+
+
+def strengthen_topic_with_source_subject(theme, topic, source_title):
+    topic = editorial_title_topic(topic)
+    subject = source_subject_from_title(source_title)
+
+    if not topic or topic == "The Standout Moment" or not subject:
+        return topic
+
+    subject_words = {word.lower().strip("'") for word in title_words(subject)}
+    topic_words = [word.lower().strip("'") for word in title_words(topic)]
+
+    if not subject_words or subject_words & set(topic_words):
+        return topic
+
+    topic_without_article = re.sub(r"^(the|a|an)\s+", "", topic, flags=re.I).strip()
+
+    if len(topic_words) <= 4 and (
+        re.search(r"\b(story|take|debate|panic|mistake|warning|question|case|moment|clip)\b", topic, flags=re.I)
+        or str(theme or "").strip().lower() in {"comedy", "sports", "popculture"}
+    ):
+        return compact_text(f"{possessive_subject(subject)} {topic_without_article}", 62)
+
+    return topic
 
 
 SOURCE_TITLE_SHOW_WORDS = {
@@ -653,7 +816,10 @@ def source_title_topic(source_title, theme="", limit=7):
     return compact_text(" ".join(best_words).title(), 62)
 
 
-def topic_phrase_is_weak(phrase):
+def topic_phrase_is_weak(phrase, theme=""):
+    if topic_phrase_is_keyword_soup(theme, phrase):
+        return True
+
     if short_topic_phrase_ok(phrase):
         return False
 
@@ -695,7 +861,7 @@ def public_editorial_topic_ok(theme, text, topic_terms=None, allow_short_topic=T
     if allow_short_topic and short_topic_phrase_ok(cleaned):
         return True
 
-    if looks_like_raw_dialogue_topic(cleaned) or topic_phrase_is_weak(cleaned):
+    if looks_like_raw_dialogue_topic(cleaned) or topic_phrase_is_weak(cleaned, theme=theme):
         return False
 
     terms = topic_terms or [cleaned]
@@ -729,6 +895,18 @@ TOPIC_CONTEXT_WORDS = {
 }
 
 THEME_RELEVANCE_WORDS = {
+    "comedy": {
+        "comedy", "comic", "comedian", "joke", "jokes", "laugh", "laughs",
+        "roast", "bit", "story", "setup", "punchline", "awkward", "riff",
+        "crowd", "room", "funny", "weird", "wild",
+    },
+    "gaming": {
+        "gaming", "game", "games", "esports", "creator", "streamer",
+        "tournament", "team", "player", "pro", "ranked", "league",
+        "valorant", "cod", "riot", "lcs", "studio", "developer",
+        "console", "controller", "launch", "patch", "roster", "scrim",
+        "optic", "thieves", "faze",
+    },
     "health_fitness": {
         "health", "fitness", "wellness", "training", "exercise", "workout", "protein",
         "amino", "acid", "eaa", "leucine", "lucine", "range", "motion", "hip",
@@ -753,6 +931,25 @@ THEME_RELEVANCE_WORDS = {
         "coding", "developer", "developers", "software", "startup", "founder",
         "product", "data", "machine", "learning", "robot", "chip", "security",
         "eval", "builder", "tech", "technology", "training", "paradigm",
+    },
+    "politics": {
+        "politics", "policy", "election", "campaign", "court", "congress",
+        "senate", "president", "border", "war", "media", "vote", "law",
+        "hearing", "debate", "poll", "corruption", "foreign", "trump",
+        "vance", "israel", "iran", "netanyahu", "hezbollah", "supreme",
+    },
+    "popculture": {
+        "celebrity", "actor", "movie", "movies", "music", "song", "album",
+        "hollywood", "culture", "artist", "dating", "fame", "career",
+        "viral", "scene", "tour", "fan", "fans", "jackass", "amy",
+        "adams", "markiplier",
+    },
+    "truecrime": {
+        "crime", "case", "trial", "court", "confession", "witness",
+        "victim", "testimony", "investigation", "detective", "prison",
+        "jury", "verdict", "evidence", "lawyer", "legal", "survivor",
+        "murder", "gun", "mother", "cruise", "epstein", "ranch",
+        "harmony", "anna", "sam", "jacob",
     },
 }
 
@@ -956,6 +1153,28 @@ def transcript_topic_phrase(theme, clip):
 
         if "coding is solved" in lower:
             return "What Happens After Coding Is Solved"
+
+    if theme == "truecrime":
+        if "jameson" in lower and "removed from his mother's care" in lower:
+            return "Jameson Was Removed From His Mother's Care"
+
+        if "harmony" in lower and "potty train" in lower:
+            return "Harmony Montgomery Potty Trained Herself"
+
+        if "prosecution's case is pretty airtight" in lower and "video" in lower:
+            return "The Cruise Video Timeline Looked Airtight"
+
+        if "enter the room" in lower and "deny it" in lower:
+            return "The Room Entry He Planned To Deny"
+
+        if "pardon" in lower and "prime minister" in lower:
+            return "The Pardon Claim After The Murder Case"
+
+        if ("matthew" in lower or "matt " in lower) and "sentencing" in lower and "kidnapping" in lower:
+            return "Matthew Ponema Sentencing Hearing"
+
+        if "life in prison" in lower and "dakota van patten" in lower:
+            return "Dakota Van Patten's Life Sentence Trial"
 
     if theme == "comedy":
         if "embarrassing story" in lower and "sidetrack" in lower:
@@ -2641,10 +2860,10 @@ def clean_headline_topic(theme, topic, clip=None, source_title="", channel=""):
     channel = clean_viewer_text(channel)
     candidates = [
         topic,
-        phrase_from_topic_terms(theme, clip, clip_topic_terms(clip)),
-        clean_viewer_text(clip.get("suggested_title", "")),
         transcript_topic_phrase(theme, clip),
+        phrase_from_topic_terms(theme, clip, clip_topic_terms(clip)),
         source_title_topic(source_title, theme),
+        clean_viewer_text(clip.get("suggested_title", "")),
         source_subject_from_title(source_title),
     ]
 
@@ -2655,6 +2874,7 @@ def clean_headline_topic(theme, topic, clip=None, source_title="", channel=""):
             cleaned = re.sub(rf"\s+from\s+{re.escape(channel)}$", "", cleaned, flags=re.I).strip()
 
         cleaned = compact_text(cleaned.replace("'S", "'s").replace("’S", "'s"), 58)
+        cleaned = strengthen_topic_with_source_subject(theme, cleaned, source_title)
 
         if theme_key == "politics":
             cleaned_l = cleaned.lower()
@@ -2682,6 +2902,9 @@ def theme_specific_direct_title(theme_key, topic):
     lower = topic.lower()
 
     if not topic or topic.lower() in {"the standout moment", "standout moment"}:
+        return ""
+
+    if topic_phrase_is_keyword_soup(theme_key, topic):
         return ""
 
     if theme_key == "comedy":
@@ -2769,6 +2992,9 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
     topic_terms = [topic]
     topic_l = topic.lower()
 
+    if topic_phrase_is_keyword_soup(theme_key, topic):
+        return "Needs Specific Editorial Title"
+
     if theme_key == "politics" and ("ai spending" in topic_l or ("ai" in topic_l and "spending" in topic_l)):
         return "AI Spending Becomes A Policy Fight"
 
@@ -2801,40 +3027,40 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
 
     patterns = {
         "comedy": [
-            "{topic} Is The Joke That Stuck",
-            "The Funny Part Inside {topic}",
+            "{topic} Gets Weird Fast",
+            "{topic} Became The Punchline",
         ],
         "sports": [
-            "{topic} Split The Room",
-            "The Take Inside {topic}",
+            "{topic} Changed The Game",
+            "{topic} Became The Locker Room Debate",
         ],
         "gaming": [
-            "{topic} Split The Gaming Room",
-            "The Creator Take Inside {topic}",
+            "{topic} Has Gamers Arguing",
+            "{topic} Became The Creator Debate",
         ],
         "finance": [
-            "{topic} Is The Market Detail",
-            "The Investor Catch Inside {topic}",
+            "Why {topic} Changes The Math",
+            "{topic} Is Back In Focus",
         ],
         "technology_ai": [
-            "{topic}: The Builder Takeaway",
-            "The AI Question Inside {topic}",
+            "Why Builders Are Debating {topic}",
+            "{topic} Is The AI Question",
         ],
         "health_fitness": [
-            "{topic}: The Habit To Rethink",
-            "The Health Warning Inside {topic}",
+            "Why {topic} Is Worth Rethinking",
+            "{topic} Changes The Health Advice",
         ],
         "politics": [
-            "{topic}: The Policy Fight",
-            "The Debate Inside {topic}",
+            "{topic} Became The Policy Fight",
+            "Why {topic} Has Everyone Arguing",
         ],
         "truecrime": [
-            "{topic}: The Detail That Changes The Case",
-            "The Case Moment Inside {topic}",
+            "Investigators Focused On {topic}",
+            "Why {topic} Matters In The Case",
         ],
         "popculture": [
-            "The Pop Culture Detail Inside {topic}",
-            "Why {topic} Took Over The Conversation",
+            "{topic} Took Over The Conversation",
+            "Why Fans Are Talking About {topic}",
         ],
     }
     template_pool = patterns.get(theme_key, ["The Moment Inside {topic}"])
@@ -2874,17 +3100,17 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
         return compact_text(topic, 92)
 
     theme_fallbacks = {
-        "comedy": "The Joke That Actually Landed",
-        "sports": "The Sports Debate That Split The Room",
-        "gaming": "The Gaming Take People Are Arguing About",
-        "finance": "The Market Detail Investors Should Watch",
-        "technology_ai": "The AI Detail Builders Are Debating",
-        "health_fitness": "The Health Habit Worth Rethinking",
-        "politics": "The Debate Clip With Real Context",
-        "truecrime": "The Evidence Detail Worth Rechecking",
-        "popculture": "The Pop Culture Detail People Missed",
+        "comedy": "Needs Specific Comedy Title",
+        "sports": "Needs Specific Sports Title",
+        "gaming": "Needs Specific Gaming Title",
+        "finance": "Needs Specific Finance Title",
+        "technology_ai": "Needs Specific AI Title",
+        "health_fitness": "Needs Specific Health Title",
+        "politics": "Needs Specific Politics Title",
+        "truecrime": "Needs Specific True Crime Title",
+        "popculture": "Needs Specific Culture Title",
     }
-    return theme_fallbacks.get(theme_key, "The Interview Moment Worth Watching")
+    return theme_fallbacks.get(theme_key, "Needs Specific Editorial Title")
 
 
 def build_social_caption(theme_label, topic, adjective="", countdown_slot=None, content_format="countdown", source_title=""):
