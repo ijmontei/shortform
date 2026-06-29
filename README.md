@@ -557,11 +557,11 @@ Popular-segment videos are controlled separately:
 $env:SHORTFORM_RENDER_POPULAR_SEGMENTS="1"
 $env:SHORTFORM_ENABLE_POPULARITY_SCORING="1"
 $env:SHORTFORM_POPULAR_SEGMENTS_PER_THEME="0"
-$env:SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL="0"
+$env:SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL="1"
 $env:SHORTFORM_POPULAR_SEGMENT_MIN_SCORE="0.12"
 ```
 
-`SHORTFORM_POPULAR_SEGMENTS_PER_THEME=0` means one popular-style short can be generated for every source interview that has rendered clips. When YouTube exposes replay heatmap, timestamp, or chapter signals, the video is labeled as replay/popularity-backed. Otherwise it falls back to the strongest internally scored moment and labels it as `BEST MOMENT`. Set `SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL=1` if you only want public replay/popularity-backed shorts, or set `SHORTFORM_POPULAR_SEGMENTS_PER_THEME` to a positive number to cap the extra video type per theme.
+`SHORTFORM_POPULAR_SEGMENTS_PER_THEME=0` means there is no fixed per-theme cap for this extra video type. By default, popular-style shorts require a real public replay/timestamp/chapter signal above `SHORTFORM_POPULAR_SEGMENT_MIN_SCORE`; fallback-only internal picks stay in the normal editorial queue instead of being packaged as popular/replayed clips. Set `SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL=0` only for debugging, or set `SHORTFORM_POPULAR_SEGMENTS_PER_THEME` to a positive number if you intentionally want a cap for this extra video type.
 
 Daily adjectives rotate through a 20-item queue per theme and are stored in:
 

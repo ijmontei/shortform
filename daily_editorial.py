@@ -115,7 +115,7 @@ if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     YOUTUBE_PRIVACY_STATUS = "public"
 RENDER_POPULAR_SEGMENT_SHORTS = os.getenv("SHORTFORM_RENDER_POPULAR_SEGMENTS", "1") != "0"
 POPULAR_SEGMENTS_PER_THEME = max(0, int(os.getenv("SHORTFORM_POPULAR_SEGMENTS_PER_THEME", "0")))
-POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "0") != "0"
+POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "1") != "0"
 POPULAR_SEGMENT_MIN_SCORE = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MIN_SCORE", "0.12"))
 POPULAR_SEGMENT_INTRO_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_INTRO_SECONDS", "2.85"))
 POPULAR_SEGMENT_MAX_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MAX_SECONDS", "58.0"))
@@ -3187,11 +3187,11 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
 
     if popular and signal_is_external:
         external_patterns = {
-            "sports": "The Clip Fans Replayed: {topic}",
-            "finance": "{topic}: The Clip Viewers Replayed",
-            "gaming": "The Gaming Clip People Replayed: {topic}",
-            "technology_ai": "The Builder Clip People Replayed: {topic}",
-            "truecrime": "The Case Clip People Replayed: {topic}",
+            "sports": "{topic}: The Take That Changed The Debate",
+            "finance": "{topic}: The Catch Investors Should Hear",
+            "gaming": "{topic}: The Take That Changed The Match",
+            "technology_ai": "{topic}: The Limit Builders Should Hear",
+            "truecrime": "{topic}: The Detail That Changes The Read",
         }
         template = external_patterns.get(theme_key)
 
@@ -3311,8 +3311,61 @@ def build_social_caption(theme_label, topic, adjective="", countdown_slot=None, 
     topic = editorial_title_topic(topic)
 
     if content_format == "popular":
+        theme_key = str(theme_label or "").strip().lower().replace(" ", "_")
+        caption_patterns = {
+            "crime_legal": [
+                "{topic}, with the context that makes the case feel different.",
+                "{topic}. The short clip gives the detail room to land.",
+                "{topic}. A clean case detail, shown with the original context.",
+            ],
+            "finance": [
+                "{topic}. The clip explains the catch without burying the point.",
+                "{topic}, framed around the part that changes the math.",
+                "{topic}. A short market/business moment with the context intact.",
+            ],
+            "comedy": [
+                "{topic}. The setup is quick, and the turn does the work.",
+                "{topic}. A short joke moment with the payoff left intact.",
+                "{topic}. The clip keeps the room reaction and the turn together.",
+            ],
+            "sports": [
+                "{topic}. The clip keeps the debate and reaction together.",
+                "{topic}. A short sports moment with the context still attached.",
+                "{topic}. The take lands because the reaction is included.",
+            ],
+            "gaming": [
+                "{topic}. The clip keeps the take and reaction in one piece.",
+                "{topic}. A short gaming moment with the context still attached.",
+                "{topic}. The argument works because the setup stays in.",
+            ],
+            "tech_ai": [
+                "{topic}. The clip keeps the technical point clear and short.",
+                "{topic}. A quick builder moment with the limitation included.",
+                "{topic}. The point lands because the context stays in.",
+            ],
+            "wellness": [
+                "{topic}. The clip keeps the practical health context intact.",
+                "{topic}. A short wellness moment with the useful detail included.",
+                "{topic}. The advice works because the setup stays in.",
+            ],
+            "politics": [
+                "{topic}. The clip keeps the claim and context together.",
+                "{topic}. A short policy moment with the messy part included.",
+                "{topic}. The argument lands because the context stays in.",
+            ],
+            "pop_culture": [
+                "{topic}. The clip keeps the answer and reaction together.",
+                "{topic}. A short culture moment with the turn left intact.",
+                "{topic}. The moment works because the reaction stays in.",
+            ],
+        }
+        patterns = caption_patterns.get(theme_key) or [
+            "{topic}. The clip keeps the setup and payoff together.",
+            "{topic}. A short moment with the context still attached.",
+            "{topic}. The point lands because the setup stays in.",
+        ]
         return compact_text(
-            f"The part people kept circling back to: {topic}.",
+            patterns[title_variant_index(theme_label, topic, source_title, count=len(patterns))].format(topic=topic),
             160,
         )
 
@@ -3536,24 +3589,11 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
         ],
     }
 
-    if signal_source == "youtube_heatmap":
-        templates = [
-            "People kept replaying {topic}. Watch the turn.",
-            "This replay spike centers on {topic}, and the reason is obvious in a second.",
-            "Viewers came back to {topic} for a reason.",
-        ]
-    elif signal_source in {"timestamp_mentions", "chapters", "public_popularity_signal"}:
-        templates = [
-            "This timestamp kept showing up: {topic}.",
-            "People pointed to {topic} first.",
-            "The audience kept circling {topic}.",
-        ]
-    else:
-        templates = theme_templates.get(theme_key) or [
-            "This {adjective} moment is the part that earns the replay.",
-            "{topic} sounds simple, then the real point lands.",
-            "This is the {topic} moment that stood out.",
-        ]
+    templates = theme_templates.get(theme_key) or [
+        "{topic} sounds simple, then the real point lands.",
+        "This starts with {topic}, then the clip turns.",
+        "The setup is {topic}. The payoff is why this made the cut.",
+    ]
 
     template = templates[title_variant_index(theme_key, hook_topic, adjective_text, signal_source, count=len(templates))]
     script = template.format(topic=hook_topic, adjective=adjective_text).strip()
@@ -5478,16 +5518,29 @@ def popular_segment_signal_source(item):
     return "internal_quality_fallback"
 
 
-def popular_segment_labels(item):
+def popular_segment_labels(item, theme=""):
     source = popular_segment_signal_source(item)
+    theme_key = str(theme or "").strip().lower()
+    labels = {
+        "comedy": ("JOKE FILE", "BEST TURN", "WAIT FOR THE PAYOFF"),
+        "sports": ("GAME FILE", "KEY TAKE", "WATCH THE REACTION"),
+        "gaming": ("QUEUE FILE", "HOT TAKE", "WATCH THE TURN"),
+        "finance": ("MARKET NOTE", "KEY TAKEAWAY", "WATCH THE CATCH"),
+        "technology_ai": ("BUILDER NOTE", "KEY LIMIT", "WATCH THE TURN"),
+        "health_fitness": ("HEALTH NOTE", "KEY DETAIL", "WATCH THE ADVICE"),
+        "politics": ("CIVICS FILE", "KEY CLAIM", "WATCH THE CONTEXT"),
+        "popculture": ("CULTURE FILE", "KEY REACTION", "WATCH THE SWERVE"),
+        "truecrime": ("CASE FILE", "KEY DETAIL", "WATCH THE CONTEXT"),
+    }
+    primary, secondary, detail = labels.get(theme_key, ("CLIP FILE", "KEY MOMENT", "WATCH THE TURN"))
 
     if source == "youtube_heatmap":
-        return "MOST REPLAYED", "REPLAY HOTSPOT", "VIEWERS KEPT REPLAYING THIS PART"
+        return primary, secondary, detail
 
     if source in {"timestamp_mentions", "chapters", "public_popularity_signal"}:
-        return "MOST POPULAR", "POPULARITY SIGNAL", "THE PART PEOPLE KEPT COMING BACK TO"
+        return primary, secondary, detail
 
-    return "BEST MOMENT", "TOP PICK", "THE MOMENT THAT STOOD OUT"
+    return primary, "EDITOR PICK", detail
 
 
 def build_popular_segment_script(theme, item):
@@ -5651,7 +5704,8 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     dark = style.get("dark", "0x2E3440")
     profile = theme_profile(theme)
     archive_label = f"THE {profile['label'].upper()} ARCHIVE"
-    signal_label, popularity_label, detail_label = popular_segment_labels(item)
+    signal_label, popularity_label, detail_label = popular_segment_labels(item, theme)
+    hero_label = compact_text(signal_label, 18).upper()
     script = build_popular_segment_script(theme, item)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, 1000 + index)
     intro_duration = max(
@@ -5664,6 +5718,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     source_title_size = fitted_label_font_size(source_title, max_width=860, max_size=44, min_size=28)
     topic_size = fitted_label_font_size(topic, max_width=780, max_size=48, min_size=34)
     channel_size = fitted_label_font_size(channel, max_width=560, max_size=31, min_size=22)
+    hero_label_size = fitted_label_font_size(hero_label, max_width=760, max_size=154, min_size=86)
     font_bold = ffmpeg_path(font_path_or_fallback(FONT_BOLD_FILE, FONT_FILE))
     font_meta = ffmpeg_path(font_path_or_fallback(FONT_META_FILE, FONT_FILE))
     font_display = ffmpeg_path(font_path_or_fallback(FONT_DISPLAY_FILE, FONT_BOLD_FILE))
@@ -5672,7 +5727,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
         f"[0:v]trim=0:{intro_duration:.3f},setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=18:2,eq=brightness=-0.34:saturation=1.10,setsar=1[intro_bg]",
         "[intro_bg]"
         f"drawbox=x=0:y=0:w=1080:h=1920:color={dark}@0.24:t=fill,"
-        f"drawtext=fontfile='{font_display}':text='POPULAR':x=44:y=244:fontsize=154:fontcolor={cream}@0.11,"
+        f"drawtext=fontfile='{font_display}':text='{drawtext_text(hero_label)}':x=44:y=244:fontsize={hero_label_size}:fontcolor={cream}@0.12,"
         f"drawbox=x=54:y=390:w=972:h=748:color=black@0.70:t=fill,"
         f"drawbox=x=54:y=390:w=972:h=748:color={accent}@0.88:t=5,"
         f"drawbox=x=54:y=390:w=18:h=748:color={accent}@0.98:t=fill,"

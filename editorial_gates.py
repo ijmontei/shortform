@@ -58,6 +58,12 @@ GENERIC_SCRIPT_PHRASES = {
     "this is the part people pointed to first",
     "the audience kept circling this moment",
     "viewers came back to this moment for a reason",
+    "people kept replaying this moment",
+    "people kept replaying",
+    "people pointed to",
+    "the audience kept circling",
+    "this timestamp kept showing up",
+    "replay spike",
     "this is the moment that stood out",
     "the setup sounds simple, then the real point lands",
     "this money moment looks simple, then the catch shows up",
@@ -69,6 +75,11 @@ GENERIC_SCRIPT_PHRASES = {
     "this detail changes how the whole story feels",
     "the case sounds one way, until this part lands",
 }
+INTERNAL_SIGNAL_PATTERNS = [
+    r"\b(timestamp|replay spike|popularity signal|public popularity|heatmap|top pick)\b",
+    r"\b(viewers?|audience|people|fans)\s+(kept|came back|pointed|circled|replayed)\b",
+    r"\bkept\s+(circling|replaying|coming back)\b",
+]
 SCRIPT_TOPIC_STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "for", "your", "this",
     "that", "moment", "clip", "part", "detail", "question", "inside",
@@ -238,6 +249,9 @@ def _script_quality_flags(package):
 
     if any(phrase in lower for phrase in GENERIC_SCRIPT_PHRASES):
         flags.append("generic_setup_script")
+
+    if any(re.search(pattern, lower) for pattern in INTERNAL_SIGNAL_PATTERNS):
+        flags.append("internal_signal_setup_script")
 
     topic_words = _script_topic_words(topic)
 

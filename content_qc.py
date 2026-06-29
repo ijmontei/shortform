@@ -67,6 +67,12 @@ GENERIC_TITLE_PHRASES = {
     "evidence both passenger",
     "pop culture missed",
     "builders are debating",
+    "popularity signal",
+    "replay hotspot",
+    "viewers kept replaying",
+    "people kept coming back",
+    "people kept circling",
+    "timestamp kept showing up",
 }
 
 WEAK_TOPIC_STARTS = {
@@ -900,6 +906,12 @@ GENERIC_SCRIPT_PHRASES = {
     "this is the part people pointed to first",
     "the audience kept circling this moment",
     "viewers came back to this moment for a reason",
+    "people kept replaying this moment",
+    "people kept replaying",
+    "people pointed to",
+    "the audience kept circling",
+    "this timestamp kept showing up",
+    "replay spike",
     "this is the moment that stood out",
     "the setup sounds simple, then the real point lands",
     "this money moment looks simple, then the catch shows up",
@@ -911,6 +923,11 @@ GENERIC_SCRIPT_PHRASES = {
     "this detail changes how the whole story feels",
     "the case sounds one way, until this part lands",
 }
+INTERNAL_SIGNAL_PATTERNS = [
+    r"\b(timestamp|replay spike|popularity signal|public popularity|heatmap|top pick)\b",
+    r"\b(viewers?|audience|people|fans)\s+(kept|came back|pointed|circled|replayed)\b",
+    r"\bkept\s+(circling|replaying|coming back)\b",
+]
 
 
 def script_topic_words(topic):
@@ -940,6 +957,9 @@ def script_flags(text, topic=""):
 
     if any(phrase in lowered for phrase in GENERIC_SCRIPT_PHRASES):
         flags.append("generic/repetitive setup script")
+
+    if any(re.search(pattern, lowered) for pattern in INTERNAL_SIGNAL_PATTERNS):
+        flags.append("internal scoring/audience metric language")
 
     topic_words = script_topic_words(topic)
 
