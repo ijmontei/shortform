@@ -596,8 +596,59 @@ def refresh_package_render_qc(package):
     return package
 
 
+def audio_rejection_reasons(audio_qc):
+    flags = set((audio_qc or {}).get("flags") or [])
+    hard_flags = {
+        "audio start is empty",
+        "no clear audio onset in first five seconds",
+        "slow audio/narration start",
+        "possible clipped/distorted intro audio",
+    }
+    return sorted(flags & hard_flags)
+
+
+def refresh_package_intro_audio_qc(package):
+    video_file = package.get("video_file", "")
+
+    if not video_file or not os.path.exists(video_file):
+        return package
+
+    try:
+        import content_qc
+
+        audio_qc = content_qc.analyze_audio_start(video_file)
+    except Exception as error:
+        audio_qc = {
+            "flags": [f"upload preflight intro audio QA failed: {error}"],
+        }
+
+    render_qc = dict(package.get("render_qc") or {})
+    existing_flags = list(render_qc.get("flags") or [])
+    existing_rejections = list(render_qc.get("rejection_reasons") or [])
+    audio_flags = list(audio_qc.get("flags") or [])
+    rejections = list(existing_rejections)
+
+    for reason in audio_rejection_reasons(audio_qc):
+        if reason not in rejections:
+            rejections.append(reason)
+
+    if any(flag.startswith("upload preflight intro audio QA failed") for flag in audio_flags):
+        if "upload preflight intro audio QA failed" not in rejections:
+            rejections.append("upload preflight intro audio QA failed")
+
+    render_qc["intro_audio"] = audio_qc
+    render_qc["flags"] = sorted(set(existing_flags + audio_flags + rejections))
+    render_qc["rejection_reasons"] = rejections
+    render_qc["rejected"] = bool(rejections) or bool(render_qc.get("rejected", False))
+    render_qc["passed"] = not rejections and bool(render_qc.get("passed", True))
+    render_qc["upload_preflight_audio_refreshed"] = True
+    package["render_qc"] = render_qc
+    return package
+
+
 def review_skip_reason(package):
     refresh_package_render_qc(package)
+    refresh_package_intro_audio_qc(package)
     review = package.get("review") or {}
     youtube_status = package.get("posting_status", {}).get("youtube_shorts", "")
     gate_package = package_with_effective_youtube_metadata(package)
