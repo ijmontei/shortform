@@ -473,6 +473,8 @@ def clean_generated_artifacts(themes, include_inactive=False):
         metadata_path = paths["metadata_path"]
         targets = [
             paths["final_videos_path"],
+            os.path.join(paths["output_path"], "needs_revision"),
+            os.path.join(paths["output_path"], "rejected"),
             paths["final_metadata_file"],
             os.path.join(paths["output_path"], "content_manifest.txt"),
             paths["clips_path"],
