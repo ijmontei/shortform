@@ -3137,10 +3137,20 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
         "sampled_frames": 0,
         "face_frames": 0,
         "black_frame_ratio": 1.0,
+        "low_information_frame_ratio": 1.0,
         "dead_frame_ratio": 1.0,
         "alive_frame_rate": 0.0,
         "avg_edge_density": 0.0,
+        "avg_laplacian_var": 0.0,
         "face_presence_rate": 0.0,
+        "alive_no_face_frame_ratio": 1.0,
+        "longest_no_face_run_ratio": 1.0,
+        "avg_face_height_ratio": 0.0,
+        "avg_face_plausibility": 0.0,
+        "flat_skin_false_face_ratio": 0.0,
+        "small_face_ratio_of_faces": 0.0,
+        "visual_cut_ratio": 0.0,
+        "avg_sample_visual_change": 0.0,
         "passed": False,
         "flags": [],
     }
@@ -3157,8 +3167,19 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
         return result
 
     black_frames = 0
+    low_information_frames = 0
     dead_frames = 0
+    alive_no_face_frames = 0
+    current_no_face_run = 0
+    longest_no_face_run = 0
+    flat_skin_false_face_frames = 0
+    face_heights = []
+    face_plausibilities = []
     edge_density_values = []
+    laplacian_values = []
+    sample_visual_changes = []
+    visual_cuts = 0
+    previous_analysis_gray = None
 
     for frame_index in np.linspace(0, max(0, frame_count - 1), num=min(max_samples, frame_count), dtype=int):
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
@@ -3178,16 +3199,73 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
         faces = filter_plausible_interview_faces(detection_frame, face_cascades)
         frame_state = classify_frame_visual_state(frame, faces=faces)
         edge_density_values.append(frame_state["edge_density"])
+        laplacian_values.append(frame_state["laplacian_var"])
+        analysis_gray = cv2.resize(
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
+            (96, 170),
+            interpolation=cv2.INTER_AREA,
+        )
+
+        if previous_analysis_gray is not None:
+            visual_change = float(np.mean(cv2.absdiff(analysis_gray, previous_analysis_gray)) / 255.0)
+            sample_visual_changes.append(visual_change)
+
+            if visual_change > 0.145:
+                visual_cuts += 1
 
         if frame_state["is_black"]:
             black_frames += 1
 
+        if frame_state["is_low_information"]:
+            low_information_frames += 1
+
         if frame_state["is_dead_visual"]:
             dead_frames += 1
+            current_no_face_run += 1
+            longest_no_face_run = max(longest_no_face_run, current_no_face_run)
+            previous_analysis_gray = analysis_gray
             continue
 
-        if faces:
-            result["face_frames"] += 1
+        if not faces:
+            alive_no_face_frames += 1
+            current_no_face_run += 1
+            longest_no_face_run = max(longest_no_face_run, current_no_face_run)
+            previous_analysis_gray = analysis_gray
+            continue
+
+        face = select_best_interview_face(faces)
+
+        if not face:
+            alive_no_face_frames += 1
+            current_no_face_run += 1
+            longest_no_face_run = max(longest_no_face_run, current_no_face_run)
+            previous_analysis_gray = analysis_gray
+            continue
+
+        current_no_face_run = 0
+        result["face_frames"] += 1
+        face_height_ratio = float(face["h"] / max(1, detection_frame.shape[0]))
+        face_heights.append(face_height_ratio)
+        face_plausibilities.append(float(face.get("plausibility", 0.0)))
+
+        roi_x1 = max(0, int(face["x"] - face["w"] * 0.12))
+        roi_y1 = max(0, int(face["y"] - face["h"] * 0.12))
+        roi_x2 = min(detection_frame.shape[1], int(face["x"] + face["w"] * 1.12))
+        roi_y2 = min(detection_frame.shape[0], int(face["y"] + face["h"] * 1.12))
+
+        if roi_x2 > roi_x1 and roi_y2 > roi_y1:
+            face_roi = detection_frame[roi_y1:roi_y2, roi_x1:roi_x2]
+            face_roi_features = compute_frame_visual_features(face_roi)
+            face_skin_tone_ratio = estimate_skin_tone_ratio(face_roi)
+
+            if (
+                face_height_ratio >= 0.14
+                and face_skin_tone_ratio > 0.82
+                and face_roi_features["edge_density"] < 0.04
+            ):
+                flat_skin_false_face_frames += 1
+
+        previous_analysis_gray = analysis_gray
 
     cap.release()
 
@@ -3196,19 +3274,70 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
         return result
 
     result["black_frame_ratio"] = black_frames / result["sampled_frames"]
+    result["low_information_frame_ratio"] = low_information_frames / result["sampled_frames"]
     result["dead_frame_ratio"] = dead_frames / result["sampled_frames"]
     result["alive_frame_rate"] = 1.0 - result["dead_frame_ratio"]
+    result["alive_no_face_frame_ratio"] = alive_no_face_frames / result["sampled_frames"]
+    result["longest_no_face_run_ratio"] = longest_no_face_run / result["sampled_frames"]
     result["avg_edge_density"] = float(np.mean(edge_density_values)) if edge_density_values else 0.0
+    result["avg_laplacian_var"] = float(np.mean(laplacian_values)) if laplacian_values else 0.0
+    result["visual_cut_ratio"] = visual_cuts / max(1, result["sampled_frames"] - 1)
+    result["avg_sample_visual_change"] = float(np.mean(sample_visual_changes)) if sample_visual_changes else 0.0
     result["face_presence_rate"] = result["face_frames"] / result["sampled_frames"]
+
+    if face_heights:
+        result["avg_face_height_ratio"] = float(np.mean(face_heights))
+        result["avg_face_plausibility"] = float(np.mean(face_plausibilities)) if face_plausibilities else 0.0
+        result["flat_skin_false_face_ratio"] = flat_skin_false_face_frames / result["sampled_frames"]
+        result["small_face_ratio_of_faces"] = sum(1 for height in face_heights if height < 0.12) / len(face_heights)
 
     if result["black_frame_ratio"] > 0.10:
         result["flags"].append("preflight black frames")
+
+    if result["low_information_frame_ratio"] > 0.22:
+        result["flags"].append("preflight low-information frames")
 
     if result["dead_frame_ratio"] > 0.30:
         result["flags"].append("preflight dead visual frames")
 
     if result["face_presence_rate"] < 0.20:
         result["flags"].append("low preflight face presence")
+
+    if result["alive_no_face_frame_ratio"] > 0.52 and result["avg_edge_density"] >= 0.018:
+        result["flags"].append("preflight likely misses speaker")
+
+    if (
+        result["avg_face_height_ratio"] > 0.0
+        and result["avg_face_height_ratio"] < 0.10
+        and (
+            result["face_presence_rate"] < 0.34
+            or result["alive_no_face_frame_ratio"] > 0.50
+            or result["longest_no_face_run_ratio"] > 0.40
+        )
+    ):
+        result["flags"].append("preflight probable picture-in-picture/background lock")
+
+    if (
+        result["flat_skin_false_face_ratio"] > 0.42
+        and result["face_presence_rate"] > 0.50
+        and result["avg_face_height_ratio"] < 0.24
+    ):
+        result["flags"].append("preflight probable flat-surface false face lock")
+
+    if (
+        result["small_face_ratio_of_faces"] > 0.55
+        and result["face_presence_rate"] > 0.50
+        and result["avg_face_height_ratio"] < 0.13
+    ):
+        result["flags"].append("preflight probable small-object/background face lock")
+
+    if (
+        result["avg_face_height_ratio"] > 0.0
+        and result["avg_face_height_ratio"] < 0.13
+        and result["visual_cut_ratio"] > 0.32
+        and result["avg_sample_visual_change"] > 0.10
+    ):
+        result["flags"].append("preflight probable broadcast/b-roll montage")
 
     result["passed"] = not result["flags"]
     return result
@@ -8167,8 +8296,21 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
                 elif not allow_low_face_preflight:
                     clip.render_qc = {
                         "passed": False,
+                        "rejected": True,
                         "flags": flags,
+                        "rejection_reasons": flags,
+                        "visual_quality_score": 0.0,
+                        "attempt_quality_score": 0.0,
+                        "render_strategy": "preflight_skip",
                         "preflight": preflight_qc,
+                        "frame_path": preflight_qc,
+                        "crop": {
+                            "strategy": "preflight_skip",
+                            "framing_score": 0.0,
+                            "face_detection_rate": preflight_qc.get("face_presence_rate", 0.0),
+                            "speaker_switches": 0,
+                            "offcenter_reframes": 0,
+                        },
                     }
                     print(" -> Skipping render because the clip does not have a reliable face target.")
                     continue
