@@ -22,6 +22,17 @@ def package_with_effective_youtube_metadata(package):
     return package
 
 
+def refresh_preupload_quality(package):
+    try:
+        from upload import refresh_package_intro_audio_qc, refresh_package_render_qc
+    except Exception:
+        return package
+
+    refresh_package_render_qc(package)
+    refresh_package_intro_audio_qc(package)
+    return package
+
+
 def path_within(path, root):
     try:
         return os.path.commonpath([os.path.abspath(path), os.path.abspath(root)]) == os.path.abspath(root)
@@ -83,6 +94,11 @@ def reconcile_theme(theme, dry_run=False):
     updated = []
 
     for index, package in enumerate(metadata.get("content", []), start=1):
+        status = (package.get("posting_status") or {}).get("youtube_shorts", "")
+
+        if status in {"ready", "failed", "uploaded"}:
+            refresh_preupload_quality(package)
+
         gates = evaluate_editorial_gates(theme, package_with_effective_youtube_metadata(package))
 
         if package.get("editorial_gates") != gates:
@@ -90,8 +106,6 @@ def reconcile_theme(theme, dry_run=False):
 
             if not dry_run:
                 package["editorial_gates"] = gates
-
-        status = (package.get("posting_status") or {}).get("youtube_shorts", "")
 
         if status in {"ready", "failed", "uploaded"} and not gates.get("passed", True):
             changed = True
