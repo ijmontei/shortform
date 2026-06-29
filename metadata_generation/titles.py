@@ -545,6 +545,34 @@ def looks_like_source_title(title):
 
 def weak_template_subject(lower_title):
     text = re.sub(r"\s+", " ", str(lower_title or "").strip().lower())
+
+    changes_math_match = re.search(r"^how\s+(.+?)\s+changes\s+the\s+math$", text)
+
+    if changes_math_match:
+        subject = changes_math_match.group(1)
+        subject_words = [
+            word
+            for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", subject)
+            if word not in TITLE_STOPWORDS
+        ]
+        natural_finance_phrases = {
+            "mortgage rates",
+            "interest rates",
+            "rent growth",
+            "home prices",
+            "housing costs",
+            "cash flow",
+            "down payment",
+            "inflation",
+            "debt",
+        }
+
+        if len(subject_words) < 2:
+            return True
+
+        if len(subject_words) >= 3 and not any(phrase in subject for phrase in natural_finance_phrases):
+            return True
+
     patterns = [
         (r"^what\s+(.+?)\s+reveals\s+about\s+the\s+market$", 1),
         (r"^why\s+investors\s+are\s+watching\s+(.+?)$", 1),

@@ -759,6 +759,31 @@ def title_flags(text):
     if any(phrase in lowered for phrase in GENERIC_TITLE_PHRASES):
         flags.append("mechanical/generic phrasing")
 
+    changes_math_match = re.search(r"^how\s+(.+?)\s+changes\s+the\s+math$", lowered)
+    if changes_math_match:
+        subject_words = [
+            word
+            for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", changes_math_match.group(1))
+            if word not in {"the", "a", "an", "and", "or", "of", "to", "for", "your"}
+        ]
+        natural_finance_phrases = {
+            "mortgage rates",
+            "interest rates",
+            "rent growth",
+            "home prices",
+            "housing costs",
+            "cash flow",
+            "down payment",
+            "inflation",
+            "debt",
+        }
+
+        if len(subject_words) < 2 or (
+            len(subject_words) >= 3
+            and not any(phrase in changes_math_match.group(1) for phrase in natural_finance_phrases)
+        ):
+            flags.append("awkward finance template title")
+
     if re.search(r"^(editor pick|timestamp-backed|viewers replayed)\s*:", lowered):
         flags.append("internal scoring label in public title")
 
