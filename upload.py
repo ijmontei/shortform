@@ -734,11 +734,12 @@ def get_http_error_text(error):
 
 def get_http_error_reasons(error):
     error_text = get_http_error_text(error)
+    combined_text = f"{error_text}\n{error}"
 
     try:
         payload = json.loads(error_text)
     except json.JSONDecodeError:
-        return {reason for reason in FATAL_YOUTUBE_REASON_MESSAGES if reason in str(error)}
+        return {reason for reason in FATAL_YOUTUBE_REASON_MESSAGES if reason in combined_text}
 
     reasons = set()
 
@@ -752,6 +753,10 @@ def get_http_error_reasons(error):
 
     if status:
         reasons.add(status)
+
+    for reason in FATAL_YOUTUBE_REASON_MESSAGES:
+        if reason in combined_text:
+            reasons.add(reason)
 
     return reasons
 
@@ -781,6 +786,10 @@ FATAL_YOUTUBE_REASON_MESSAGES = {
 def get_fatal_youtube_error_message(error):
     status = get_http_error_status(error)
     reasons = get_http_error_reasons(error)
+    error_text = f"{get_http_error_text(error)}\n{error}"
+
+    if "exceeded the number of videos" in error_text:
+        reasons.add("uploadLimitExceeded")
 
     for reason, message in FATAL_YOUTUBE_REASON_MESSAGES.items():
         if reason in reasons:
