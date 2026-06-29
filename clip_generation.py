@@ -110,7 +110,6 @@ def speed_profile_default(key, production, debug=None, premium=None):
 
     return production
 
-MAX_CLIPS_PER_VIDEO = 10
 MIN_CLIP_DURATION = 30
 MAX_CLIP_DURATION = 60
 CANDIDATE_CLIP_DURATIONS = [35, 45, 55]
@@ -119,7 +118,7 @@ MIN_SELECTED_CLIP_SCORE = 0.27
 MIN_WORDS_PER_CANDIDATE = 30
 MIN_CLIP_SPACING_SECONDS = 2
 MAX_TOPIC_SIMILARITY = 0.58
-SCORING_MODEL_VERSION = "2026-06-29-v41-unlimited-quality-hooks"
+SCORING_MODEL_VERSION = "2026-06-29-v42-unlimited-source-candidates"
 MIN_CLIP_READINESS_SCORE = float(os.getenv("SHORTFORM_MIN_CLIP_READINESS_SCORE", "0.62"))
 MIN_SOURCE_DURATION_SECONDS = float(os.getenv("SHORTFORM_MIN_SOURCE_DURATION_SECONDS", "600"))
 ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
@@ -168,10 +167,13 @@ THEME_CLIP_BUDGET = max(0, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "0")))
 ENFORCE_THEME_CLIP_BUDGET = os.getenv("SHORTFORM_ENFORCE_THEME_CLIP_BUDGET", "0") == "1"
 ALLOW_THEME_CLIP_CAP = os.getenv("SHORTFORM_ALLOW_THEME_CLIP_CAP", "0") == "1"
 THEME_CANDIDATES_PER_VIDEO = max(1, int(os.getenv("SHORTFORM_THEME_CANDIDATES_PER_VIDEO", "24")))
-CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(
-    THEME_CANDIDATES_PER_VIDEO,
-    int(os.getenv("SHORTFORM_CLIP_SCORE_CACHE_CANDIDATE_LIMIT", "80")),
-)
+SOURCE_CANDIDATE_CAP = max(0, int(os.getenv("SHORTFORM_SOURCE_CANDIDATE_CAP", "0")))
+RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO = os.getenv(
+    "SHORTFORM_RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO",
+    "0",
+) == "1"
+CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_SCORE_CACHE_CANDIDATE_LIMIT", "0")))
+CLIP_REVIEW_REPORT_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_REVIEW_REPORT_CANDIDATE_LIMIT", "120")))
 RECONSIDER_UNSELECTED_SOURCES = os.getenv("SHORTFORM_RECONSIDER_UNSELECTED", "0") == "1"
 REUSE_CACHED_CLIP_SCORES = os.getenv("SHORTFORM_REUSE_CACHED_CLIP_SCORES", "1") != "0"
 MAX_UNSCORED_SOURCES_PER_THEME = int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "-1"))
@@ -300,13 +302,36 @@ def active_theme_clip_limit(theme_name=None):
 
 
 def active_theme_candidates_per_video(theme_name=None):
+    if SOURCE_CANDIDATE_CAP > 0:
+        return SOURCE_CANDIDATE_CAP
+
+    if not RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO:
+        return None
+
     configured = rule_number(
         "theme_candidates_per_video",
         THEME_CANDIDATES_PER_VIDEO,
         theme_name=theme_name,
         cast=int,
     )
-    return max(CLIP_SCORE_CACHE_CANDIDATE_LIMIT, configured)
+    return max(1, configured)
+
+
+def ranked_candidate_window(candidates, limit=None):
+    ranked = sorted(candidates or [], key=candidate_ranking_key, reverse=True)
+
+    if limit is None:
+        return ranked
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return ranked
+
+    if limit <= 0:
+        return ranked
+
+    return ranked[:limit]
 
 
 def active_candidate_stride(theme_name=None):
@@ -5765,7 +5790,12 @@ def load_cached_scored_source(cleaned_title, video_record, video_url, source_sta
             cache_status="cached_source_disqualified",
         )
 
-    candidates_payload = payload.get("top_candidates") or payload.get("selected") or []
+    candidates_payload = (
+        payload.get("all_candidates")
+        or payload.get("top_candidates")
+        or payload.get("selected")
+        or []
+    )
     candidates = []
     for item in candidates_payload:
         try:
@@ -5784,7 +5814,7 @@ def load_cached_scored_source(cleaned_title, video_record, video_url, source_sta
     if not candidates:
         return None
 
-    top_candidates = sorted(candidates, key=candidate_ranking_key, reverse=True)[:active_theme_candidates_per_video()]
+    top_candidates = ranked_candidate_window(candidates, active_theme_candidates_per_video())
     video_record["_candidate_count"] = int(len(candidates_payload))
     video_record["_theme_ranked_candidate_count"] = int(len(top_candidates))
     video_record["_last_cleaned_title"] = cleaned_title
@@ -5795,7 +5825,8 @@ def load_cached_scored_source(cleaned_title, video_record, video_url, source_sta
 
     print(
         "Reused cached clip scores: "
-        f"{scoring_filepath} ({len(top_candidates)} kept for theme ranking)\n"
+        f"{scoring_filepath} ({len(top_candidates)} kept for theme ranking; "
+        f"source cap={active_theme_candidates_per_video() or 'unlimited'})\n"
     )
 
     return {
@@ -6380,7 +6411,7 @@ def write_clip_review_exports(cleaned_title, selected_clips, candidates=None):
     if candidates is not None:
         top_candidate_payload = [
             candidate_to_dict(clip)
-            for clip in sorted(candidates, key=candidate_ranking_key, reverse=True)[:CLIP_SCORE_CACHE_CANDIDATE_LIMIT]
+            for clip in ranked_candidate_window(candidates, CLIP_REVIEW_REPORT_CANDIDATE_LIMIT)
         ]
         candidate_inventory = build_candidate_inventory(candidates)
     elif os.path.exists(review_json) and os.path.getsize(review_json) > 0:
@@ -7954,10 +7985,17 @@ def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popula
         json.dump({
             "scoring_model_version": SCORING_MODEL_VERSION,
             "candidate_window_policy": candidate_window_policy,
+            "candidate_cache_mode": "all_candidates"
+            if CLIP_SCORE_CACHE_CANDIDATE_LIMIT <= 0
+            else f"top_{CLIP_SCORE_CACHE_CANDIDATE_LIMIT}",
             "selected": [],
+            "all_candidates": [
+                candidate_to_dict(clip)
+                for clip in ranked_candidate_window(candidates, CLIP_SCORE_CACHE_CANDIDATE_LIMIT)
+            ],
             "top_candidates": [
                 candidate_to_dict(clip)
-                for clip in sorted(candidates, key=candidate_ranking_key, reverse=True)[:CLIP_SCORE_CACHE_CANDIDATE_LIMIT]
+                for clip in ranked_candidate_window(candidates, CLIP_REVIEW_REPORT_CANDIDATE_LIMIT)
             ],
         }, f, indent=4)
 
@@ -8009,10 +8047,17 @@ def find_viral_clips(audio_filename, cleaned_title, lang_code="en", popularity_p
                 if candidates and isinstance(candidates[0].rank_signals, dict)
                 else {}
             ),
+            "candidate_cache_mode": "all_candidates"
+            if CLIP_SCORE_CACHE_CANDIDATE_LIMIT <= 0
+            else f"top_{CLIP_SCORE_CACHE_CANDIDATE_LIMIT}",
             "selected": [candidate_to_dict(clip) for clip in clips],
+            "all_candidates": [
+                candidate_to_dict(clip)
+                for clip in ranked_candidate_window(candidates, CLIP_SCORE_CACHE_CANDIDATE_LIMIT)
+            ],
             "top_candidates": [
                 candidate_to_dict(clip)
-                for clip in sorted(candidates, key=candidate_ranking_key, reverse=True)[:CLIP_SCORE_CACHE_CANDIDATE_LIMIT]
+                for clip in ranked_candidate_window(candidates, CLIP_REVIEW_REPORT_CANDIDATE_LIMIT)
             ],
         }, f, indent=4)
 
@@ -8850,7 +8895,7 @@ def score_video_for_theme_ranking(video_record):
             source_record=video_record,
         )
 
-        top_candidates = sorted(candidates, key=candidate_ranking_key, reverse=True)[:active_theme_candidates_per_video()]
+        top_candidates = ranked_candidate_window(candidates, active_theme_candidates_per_video())
 
         for clip in top_candidates:
             clip.source_state_key = source_state_key
@@ -9177,12 +9222,16 @@ def theme_selection_report_path(theme_name=None):
 def write_theme_selection_report(theme_name, selected_clips, all_candidates):
     report_path = theme_selection_report_path(theme_name)
     clip_limit = active_theme_clip_limit(theme_name)
+    source_candidate_cap = active_theme_candidates_per_video(theme_name)
     render_pool = build_theme_render_pool(selected_clips, all_candidates, max_clips=clip_limit)
     payload = {
         "theme": theme_name,
         "scoring_model_version": SCORING_MODEL_VERSION,
         "selection_mode": "quality_threshold" if clip_limit is None else "budget_limited",
         "clip_limit": clip_limit,
+        "source_candidate_cap": source_candidate_cap,
+        "source_candidate_policy": "unlimited" if source_candidate_cap is None else f"top_{source_candidate_cap}_per_source",
+        "review_report_candidate_limit": CLIP_REVIEW_REPORT_CANDIDATE_LIMIT or "unlimited",
         "legacy_clip_budget": active_theme_clip_budget(theme_name),
         "clip_rules": active_clip_rules(theme_name),
         "candidate_count": len(all_candidates),

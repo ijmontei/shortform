@@ -48,11 +48,16 @@ class ReconcileQualityRefreshTests(unittest.TestCase):
                     return_value={"passed": True, "flags": []},
                 ),
             ):
-                reconcile_editorial_gates.reconcile_theme("comedy")
+                result = reconcile_editorial_gates.reconcile_theme("comedy")
 
         self.assertTrue(metadata["content"][0]["preupload_qc_refreshed"])
         self.assertNotIn("preupload_qc_refreshed", metadata["content"][1])
         self.assertEqual(refresh_mock.call_count, 1)
+        self.assertEqual(result["checked_count"], 2)
+        self.assertEqual(result["status_counts"]["ready"], 1)
+        self.assertEqual(result["status_counts"]["needs_revision"], 1)
+        self.assertEqual(result["refreshed_preupload_qc_count"], 1)
+        self.assertTrue(result["report_file"].endswith("reconcile_comedy_latest.json"))
 
 
 if __name__ == "__main__":

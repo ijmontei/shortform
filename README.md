@@ -587,11 +587,13 @@ $env:SHORTFORM_ALLOW_THEME_CLIP_CAP="1"
 $env:SHORTFORM_THEME_CLIP_BUDGET="3"
 ```
 
-To change the number of top candidates retained from each source video before theme-wide ranking:
+Source candidate pruning is also disabled by default. This lets one exceptional interview contribute every distinct clip that clears the minimum upload threshold instead of stopping at an arbitrary top 10 or top 15. For a short debugging smoke test, you can intentionally cap the number of ranked candidates retained from each source:
 
 ```powershell
-$env:SHORTFORM_THEME_CANDIDATES_PER_VIDEO="8"
+$env:SHORTFORM_SOURCE_CANDIDATE_CAP="8"
 ```
+
+Legacy `theme_candidates_per_video` values in theme JSON are kept for metadata compatibility, but production ignores them unless `SHORTFORM_RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO=1` is explicitly set.
 
 To disable theme-wide ranking and return to per-video clip generation:
 

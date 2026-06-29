@@ -4,7 +4,10 @@ import shutil
 import time
 
 from editorial_gates import evaluate_editorial_gates
-from theme_config import clean_theme_name, discover_themes, ensure_theme, load_json_file, write_json_file
+from theme_config import BASE_DIR, clean_theme_name, discover_themes, ensure_theme, load_json_file, write_json_file
+
+
+RECONCILIATION_LOG_DIR = os.path.join(BASE_DIR, "logs", "reconciliation")
 
 
 def utc_now():
@@ -31,6 +34,23 @@ def refresh_preupload_quality(package):
     refresh_package_render_qc(package)
     refresh_package_intro_audio_qc(package)
     return package
+
+
+def write_reconciliation_report(result):
+    os.makedirs(RECONCILIATION_LOG_DIR, exist_ok=True)
+    theme = clean_theme_name(result.get("theme") or "unknown")
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    report = {
+        **result,
+        "generated_at": utc_now(),
+    }
+    latest_path = os.path.join(RECONCILIATION_LOG_DIR, f"reconcile_{theme}_latest.json")
+    history_path = os.path.join(RECONCILIATION_LOG_DIR, f"reconcile_{theme}_{stamp}.json")
+    report["latest_report_file"] = latest_path
+    report["history_report_file"] = history_path
+    write_json_file(latest_path, report)
+    write_json_file(history_path, report)
+    return latest_path
 
 
 def path_within(path, root):
@@ -92,30 +112,46 @@ def reconcile_theme(theme, dry_run=False):
     metadata = load_json_file(paths["final_metadata_file"], {"theme": theme, "content": []})
     changed = False
     updated = []
+    checked_count = 0
+    gate_changed_count = 0
+    refreshed_count = 0
+    quarantined_count = 0
+    status_counts = {}
 
     for index, package in enumerate(metadata.get("content", []), start=1):
         status = (package.get("posting_status") or {}).get("youtube_shorts", "")
+        status_counts[status or "missing"] = status_counts.get(status or "missing", 0) + 1
+        checked_count += 1
 
         if status in {"ready", "failed", "uploaded"}:
             refresh_preupload_quality(package)
+            refreshed_count += 1
 
         gates = evaluate_editorial_gates(theme, package_with_effective_youtube_metadata(package))
 
         if package.get("editorial_gates") != gates:
             changed = True
+            gate_changed_count += 1
 
             if not dry_run:
                 package["editorial_gates"] = gates
 
         if status in {"ready", "failed", "uploaded"} and not gates.get("passed", True):
             changed = True
-            updated.append({
+            update_record = {
                 "index": index,
                 "title": package.get("title", ""),
                 "previous_status": status,
                 "flags": gates.get("flags", []),
                 "video_file": package.get("video_file", ""),
-            })
+                "gate_summary": {
+                    "title_support": gates.get("title_support", {}),
+                    "title_quality": gates.get("title_quality", {}),
+                    "render_qc_passed": gates.get("render_qc_passed"),
+                    "context_evidence": gates.get("context_evidence", {}),
+                },
+            }
+            updated.append(update_record)
 
             if not dry_run:
                 review = package.setdefault("review", {})
@@ -131,13 +167,17 @@ def reconcile_theme(theme, dry_run=False):
                     "status": "open",
                 })
                 package.setdefault("posting_status", {})["youtube_shorts"] = "needs_revision"
-                quarantine_revision_file(paths, package, dry_run=dry_run)
+                quarantine_file = quarantine_revision_file(paths, package, dry_run=dry_run)
+                if quarantine_file:
+                    quarantined_count += 1
+                    update_record["quarantine_file"] = quarantine_file
 
         elif status == "needs_revision" and not gates.get("passed", True):
             quarantine_path = quarantine_revision_file(paths, package, dry_run=dry_run)
 
             if quarantine_path:
                 changed = True
+                quarantined_count += 1
 
         elif not package.get("editorial_gates"):
             changed = True
@@ -145,13 +185,20 @@ def reconcile_theme(theme, dry_run=False):
     if changed and not dry_run:
         write_json_file(paths["final_metadata_file"], metadata)
 
-    return {
+    result = {
         "theme": theme,
         "dry_run": dry_run,
+        "checked_count": checked_count,
+        "status_counts": status_counts,
+        "refreshed_preupload_qc_count": refreshed_count,
+        "gate_changed_count": gate_changed_count,
+        "quarantined_count": quarantined_count,
         "updated_count": len(updated),
         "updated": updated,
         "metadata_file": paths["final_metadata_file"],
     }
+    result["report_file"] = write_reconciliation_report(result)
+    return result
 
 
 def reconcile_all(dry_run=False):
