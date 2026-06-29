@@ -1,4 +1,5 @@
 import os
+import re
 
 from theme_profile import get_risk_controls
 from metadata_generation.titles import score_title_quality
@@ -52,6 +53,26 @@ GENERIC_SOURCE_TITLES = {
     "podcast interview",
     "source episode",
     "podcast channel",
+}
+GENERIC_SCRIPT_PHRASES = {
+    "this is the part people pointed to first",
+    "the audience kept circling this moment",
+    "viewers came back to this moment for a reason",
+    "this is the moment that stood out",
+    "the setup sounds simple, then the real point lands",
+    "this money moment looks simple, then the catch shows up",
+    "this is the part fans are going to replay",
+    "the celebrity answer sounds safe, then it swerves",
+    "the sports debate starts calm, then the edge shows up",
+    "the gaming desk sounds calm, but the take has teeth",
+    "the tech point sounds small, then the bigger problem appears",
+    "this detail changes how the whole story feels",
+    "the case sounds one way, until this part lands",
+}
+SCRIPT_TOPIC_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "for", "your", "this",
+    "that", "moment", "clip", "part", "detail", "question", "inside",
+    "around", "behind", "worth", "people", "case", "story",
 }
 THEME_EVIDENCE_TERMS = {
     "comedy": {
@@ -181,6 +202,52 @@ def _has_time_pair(item):
 def _contains_any(text, terms):
     lowered = _text(text).lower()
     return any(term in lowered for term in terms)
+
+
+def _script_topic_words(topic):
+    return [
+        word
+        for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", str(topic or "").lower())
+        if word not in SCRIPT_TOPIC_STOPWORDS and len(word) >= 3
+    ]
+
+
+def _script_quality_flags(package):
+    content_format = str(package.get("content_format") or "").strip()
+
+    if content_format not in {"daily_editorial_short", "popular_segment_short"}:
+        return []
+
+    script = _text(package.get("editorial_script"))
+    content_signal = package.get("content_signal") or {}
+    topic = (
+        content_signal.get("topic")
+        or package.get("title")
+        or package.get("caption")
+        or ""
+    )
+    lower = script.lower()
+    words = re.findall(r"[a-zA-Z0-9']+", lower)
+    flags = []
+
+    if not script:
+        return ["missing_setup_script"]
+
+    if len(words) < 6:
+        flags.append("setup_script_too_short")
+
+    if any(phrase in lower for phrase in GENERIC_SCRIPT_PHRASES):
+        flags.append("generic_setup_script")
+
+    topic_words = _script_topic_words(topic)
+
+    if topic_words and not any(word in lower for word in topic_words[:5]):
+        flags.append("setup_script_missing_topic")
+
+    if re.search(r"\b(this|that)\s+(part|moment|detail)\b", lower) and not topic_words:
+        flags.append("setup_script_vague_placeholder")
+
+    return flags
 
 
 def _theme_evidence_flags(theme, package, rank_signals):
@@ -423,11 +490,28 @@ def evaluate_editorial_gates(theme, package):
     if title_quality.get("keyword_soup_title"):
         flags.append("keyword_soup_title")
 
+    if title_quality.get("raw_dialogue_fragment"):
+        flags.append("raw_dialogue_fragment_title")
+
     if title_quality.get("contextless_time_fragment"):
         flags.append("contextless_time_fragment_title")
 
+    if title_quality.get("source_suffix_title"):
+        flags.append("source_suffix_title")
+
+    if title_quality.get("machine_label_title"):
+        flags.append("machine_label_title")
+
+    if title_quality.get("malformed_apostrophe_title"):
+        flags.append("malformed_apostrophe_title")
+
+    if title_quality.get("source_only_title") or title_quality.get("source_title_like"):
+        flags.append("source_title_like")
+
     if not title_quality.get("theme_native_title", True):
         flags.append("weak_theme_native_title")
+
+    flags.extend(_script_quality_flags(package))
 
     if _float(title_quality.get("theme_fit"), 1.0) < 0.52:
         flags.append("weak_title_theme_fit")
