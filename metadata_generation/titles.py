@@ -1039,6 +1039,11 @@ def source_context_title(theme, source_title, clip, topic_terms=None):
             return "David Duchovny's Hot Ones Story"
 
     if theme_key == "truecrime":
+        if "cops face off with dangerous suspects" in source:
+            if "passenger" in text and ("evidence" in text or "charge" in text):
+                return "Police Search Turns Into An Evidence Question"
+            if "under here" in text or "back" in text or "floor" in text:
+                return "Police Search Turns Into An Evidence Question"
         if (
             ("ditch school" in text or "ditching school" in text)
             and ("kicked out" in text or "continuations" in text or "fights" in text)

@@ -29,6 +29,7 @@ except ImportError:
 import ytdlp_auth
 from editorial_gates import evaluate_editorial_gates
 from metadata_generation import score_title_quality, title_passes_publishable_bar
+from metadata_generation.titles import source_context_title
 from theme_config import BASE_DIR, DEFAULT_THEME, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, utc_timestamp, write_json_file
 from theme_profile import load_theme_profile, theme_hashtags, theme_tags
 from popularity_signals import (
@@ -2613,6 +2614,47 @@ def popular_sort_score(clip):
     )
 
 
+def popular_segment_publishable_copy(theme, item):
+    clip = item.get("clip") or {}
+    source_title = item.get("source_title") or clip.get("source_title") or "Podcast interview"
+    channel = item.get("channel_label") or "Podcast Channel"
+    raw_topic = clip.get("suggested_title") or clip_summary(clip, source_title)
+    topic = clean_headline_topic(
+        theme,
+        raw_topic,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+    )
+    signal_source = popular_segment_signal_source(item)
+    title = build_social_title(theme, topic, content_format="popular", signal_source=signal_source)
+    title = sanitize_social_title(
+        theme,
+        title,
+        topic,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+        content_format="popular",
+    )
+    script = build_popular_segment_script(theme, item)
+    topic_terms = unique_sequence(
+        [topic, source_title, channel]
+        + [str(term).replace("_", " ") for term in (clip.get("topic_fingerprint") or [])]
+    )
+
+    if not social_title_is_publishable(theme, title, topic_terms=topic_terms):
+        return False
+
+    if re.search(r"^needs\s+specific\s+", title, flags=re.I):
+        return False
+
+    if not public_hook_script_ok(script, topic):
+        return False
+
+    return True
+
+
 def popular_segment_items(theme, paths, rendered_clips):
     records = load_theme_source_records(theme)
     records_by_key = {record_state_key(theme, record): record for record in records}
@@ -2621,6 +2663,9 @@ def popular_segment_items(theme, paths, rendered_clips):
 
     for clip in rendered_clips:
         if not clip.get("output_file") or not os.path.exists(clip.get("output_file", "")):
+            continue
+
+        if not clip_is_popular_segment_usable(clip):
             continue
 
         popularity_score = enrich_clip_popularity(theme, paths, clip)
@@ -2647,6 +2692,7 @@ def popular_segment_items(theme, paths, rendered_clips):
             "thumbnail_file": download_youtube_thumbnail(paths, best_clip.get("source_video_url") or source_record.get("video_url", "")),
         })
 
+    items = [item for item in items if popular_segment_publishable_copy(theme, item)]
     items = sorted(items, key=lambda item: item["sort_score"], reverse=True)
 
     if POPULAR_SEGMENTS_PER_THEME > 0:
@@ -3066,6 +3112,7 @@ def clean_headline_topic(theme, topic, clip=None, source_title="", channel=""):
         topic,
         transcript_topic_phrase(theme, clip),
         phrase_from_topic_terms(theme, clip, clip_topic_terms(clip)),
+        source_context_title(theme, source_title, clip, clip.get("topic_fingerprint") or []),
         source_title_topic(source_title, theme),
         clean_viewer_text(clip.get("suggested_title", "")),
         source_subject_from_title(source_title),
@@ -3605,9 +3652,95 @@ def natural_spoken_hook_topic(topic, clip=None):
     return topic_text
 
 
+def spoken_hook_topic_is_vague(topic):
+    lower = re.sub(r"\s+", " ", str(topic or "").strip().lower())
+    words = re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", lower)
+    meaningful = [
+        word
+        for word in words
+        if word not in {
+            "the", "a", "an", "this", "that", "moment", "detail", "part",
+            "case", "story", "question", "clip", "standout", "thing",
+        }
+    ]
+    return (
+        not lower
+        or lower in {"this detail", "that detail", "this moment", "that moment", "the standout moment"}
+        or len(meaningful) == 0
+    )
+
+
+def repaired_spoken_hook_topic(theme, topic, clip=None):
+    clip = clip or {}
+    hook_topic = natural_spoken_hook_topic(topic, clip)
+
+    if not spoken_hook_topic_is_vague(hook_topic):
+        return hook_topic
+
+    source_title = clip.get("source_title", "")
+    repair_candidates = [
+        transcript_topic_phrase(theme, clip),
+        phrase_from_topic_terms(theme, clip, clip_topic_terms(clip)),
+        source_title_topic(source_title, theme),
+        source_subject_from_title(source_title),
+        clip_summary(clip, source_title or "this moment"),
+    ]
+
+    for candidate in repair_candidates:
+        repaired = natural_spoken_hook_topic(candidate, clip)
+
+        if not spoken_hook_topic_is_vague(repaired):
+            return compact_text(repaired, 44).strip(" .")
+
+    return hook_topic
+
+
+SCRIPT_TOPIC_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "for", "your", "this",
+    "that", "moment", "clip", "part", "detail", "question", "inside",
+    "around", "behind", "worth", "people", "case", "story", "read",
+}
+
+VAGUE_PUBLIC_SCRIPT_PATTERNS = [
+    r"\bthis\s+(detail|moment|part)\s+changes\b",
+    r"\bthis\s+changes\s+the\s+read\b",
+    r"\bthe\s+case\s+sounds\s+one\s+way\b",
+    r"\bthe\s+quiet\s+part\s+is\s+(this|that|the\s+detail|the\s+moment)\b",
+    r"\bthe\s+setup\s+sounds\s+simple\b",
+    r"\bwhy\s+this\s+made\s+the\s+cut\b",
+]
+
+
+def script_topic_words(topic):
+    return [
+        word
+        for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", str(topic or "").lower())
+        if word not in SCRIPT_TOPIC_STOPWORDS and len(word) >= 3
+    ]
+
+
+def public_hook_script_ok(script, topic):
+    lower = str(script or "").strip().lower()
+    if not lower:
+        return False
+
+    words = re.findall(r"[a-zA-Z0-9']+", lower)
+    if len(words) < 7:
+        return False
+
+    if any(re.search(pattern, lower) for pattern in VAGUE_PUBLIC_SCRIPT_PATTERNS):
+        return False
+
+    topic_words = script_topic_words(topic)
+    if topic_words and not any(word in lower for word in topic_words[:5]):
+        return False
+
+    return True
+
+
 def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source=""):
     theme_key = str(theme or "").strip().lower()
-    hook_topic = natural_spoken_hook_topic(topic, clip)
+    hook_topic = repaired_spoken_hook_topic(theme, topic, clip)
     if re.match(r"^(why|how|what|when|where)\b", hook_topic, flags=re.I):
         hook_topic = hook_topic[0].lower() + hook_topic[1:]
 
@@ -3666,10 +3799,10 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
             "If {topic} sounds like hype, listen for the limitation.",
         ],
         "truecrime": [
-            "This changes the read on {topic}.",
+            "The key question is {topic}. Listen to how the detail gets handled.",
             "The case sounds one way, until {topic} lands.",
-            "This is the {topic} moment that makes the timeline feel different.",
-            "The quiet part is {topic}. That changes the read.",
+            "The evidence turns on {topic}. The next line is the part to catch.",
+            "Watch how {topic} shifts what the officer focuses on.",
         ],
     }
 
@@ -3679,8 +3812,28 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
         "The setup is {topic}. The payoff is why this made the cut.",
     ]
 
-    template = templates[title_variant_index(theme_key, hook_topic, adjective_text, signal_source, count=len(templates))]
-    script = template.format(topic=hook_topic, adjective=adjective_text).strip()
+    start_index = title_variant_index(theme_key, hook_topic, adjective_text, signal_source, count=len(templates))
+    ordered_templates = templates[start_index:] + templates[:start_index]
+
+    for template in ordered_templates:
+        script = template.format(topic=hook_topic, adjective=adjective_text).strip()
+        script = compact_text(script, 118).rstrip(".") + "."
+
+        if public_hook_script_ok(script, hook_topic):
+            return script
+
+    fallback_scripts = {
+        "comedy": "The setup is {topic}. Listen for the turn that makes the room react.",
+        "finance": "The key money question is {topic}. The next part is the catch.",
+        "health_fitness": "The useful health point is {topic}. Listen for the practical detail.",
+        "politics": "The argument is {topic}. The next line is where it gets messy.",
+        "popculture": "The question is {topic}. The reaction is what makes the clip work.",
+        "sports": "The debate is {topic}. The reaction tells you why it matters.",
+        "gaming": "The take is {topic}. Watch how quickly the room pushes back.",
+        "technology_ai": "The builder question is {topic}. The limitation is the part to catch.",
+        "truecrime": "The evidence question is {topic}. Listen to what changes in the search.",
+    }
+    script = fallback_scripts.get(theme_key, "The point is {topic}. Listen for the turn.").format(topic=hook_topic)
     return compact_text(script, 118).rstrip(".") + "."
 
 

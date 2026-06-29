@@ -73,6 +73,9 @@ GENERIC_SCRIPT_PHRASES = {
     "the gaming desk sounds calm, but the take has teeth",
     "the tech point sounds small, then the bigger problem appears",
     "this detail changes how the whole story feels",
+    "this changes the read on this detail",
+    "the case sounds one way, until this detail lands",
+    "the quiet part is this detail",
     "the case sounds one way, until this part lands",
 }
 INTERNAL_SIGNAL_PATTERNS = [
