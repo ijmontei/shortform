@@ -165,6 +165,7 @@ CLIP_TRANSCRIBE_BEST_OF = max(1, int(speed_profile_default(
 ENABLE_THEME_GLOBAL_RANKING = os.getenv("SHORTFORM_ENABLE_THEME_GLOBAL_RANKING", "1") != "0"
 THEME_CLIP_BUDGET = max(0, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "0")))
 ENFORCE_THEME_CLIP_BUDGET = os.getenv("SHORTFORM_ENFORCE_THEME_CLIP_BUDGET", "0") == "1"
+ALLOW_THEME_CLIP_CAP = os.getenv("SHORTFORM_ALLOW_THEME_CLIP_CAP", "0") == "1"
 THEME_CANDIDATES_PER_VIDEO = max(1, int(os.getenv("SHORTFORM_THEME_CANDIDATES_PER_VIDEO", "24")))
 CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(
     THEME_CANDIDATES_PER_VIDEO,
@@ -286,7 +287,7 @@ def active_theme_clip_budget(theme_name=None):
 
 
 def active_theme_clip_limit(theme_name=None):
-    if not ENFORCE_THEME_CLIP_BUDGET:
+    if not (ENFORCE_THEME_CLIP_BUDGET and ALLOW_THEME_CLIP_CAP):
         return None
 
     budget = active_theme_clip_budget(theme_name)
@@ -2955,6 +2956,24 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
         else:
             result["flags"].append("tiny final speaker framing")
 
+    if face_offsets:
+        picture_in_picture_lock_suspected = (
+            result["avg_face_height_ratio"] < 0.12
+            and (
+                result["face_presence_rate"] < 0.46
+                or result["alive_no_face_frame_ratio"] > 0.42
+                or result["longest_no_face_run_ratio"] > 0.32
+            )
+            and (
+                result["avg_face_center_offset_ratio"] > 0.26
+                or result["max_face_center_offset_ratio"] > 0.48
+                or result["alive_no_face_frame_ratio"] > 0.50
+            )
+        )
+
+        if picture_in_picture_lock_suspected:
+            result["flags"].append("probable picture-in-picture/background lock")
+
     if (
         result["face_presence_rate"] < 0.24
         and result["alive_no_face_frame_ratio"] > 0.48
@@ -2980,6 +2999,8 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
     quality_score -= result["avg_face_center_offset_ratio"] * 0.18
     quality_score -= max(0.0, result["max_face_center_offset_ratio"] - 0.55) * 0.22
     quality_score -= max(0.0, MIN_FINAL_FACE_HEIGHT_RATIO - result["avg_face_height_ratio"]) * 0.42
+    if "probable picture-in-picture/background lock" in result["flags"]:
+        quality_score -= 0.24
     jitter_penalty_basis = (
         result["continuity_center_jitter_ratio"]
         if result["continuity_center_jitter_ratio"] > 0
@@ -3234,6 +3255,9 @@ def render_attempt_selection_score(render_qc):
     if "probable tiny/background face lock" in flags:
         score -= 0.42
 
+    if "probable picture-in-picture/background lock" in flags:
+        score -= 0.46
+
     if "tiny final speaker framing" in flags:
         score -= 0.14
 
@@ -3314,6 +3338,7 @@ def should_try_alternate_framing(render_qc):
     universal_retry_flags = {
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
         "subject off-center in final crop",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
@@ -3338,6 +3363,7 @@ def should_try_alternate_framing(render_qc):
         "weak final face plausibility",
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
     }
@@ -3359,6 +3385,7 @@ def render_rejection_reasons(render_qc):
     documentary_disqualifying_flags = {
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
         "subject severely off-center in final crop",
         "final render has black frames",
         "final render has low-information frames",
@@ -3380,6 +3407,7 @@ def render_rejection_reasons(render_qc):
         "weak final face plausibility",
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
     }
     hard_flags = {
         "could not open final render",
@@ -3398,6 +3426,7 @@ def render_rejection_reasons(render_qc):
         "weak final face plausibility",
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
         "subject severely off-center in final crop",
     }
 
@@ -3449,6 +3478,23 @@ def render_rejection_reasons(render_qc):
         reasons.append(
             f"speaker face too small for reliable crop ({face_height:.2f} < {MIN_FINAL_FACE_HEIGHT_RATIO:.2f})"
         )
+
+    if (
+        not documentary_non_face_ok
+        and face_height
+        and face_height < 0.12
+        and (
+            face_presence < 0.46
+            or alive_no_face > 0.42
+            or no_face_run > 0.32
+        )
+        and (
+            center_offset > 0.26
+            or max_center_offset > 0.48
+            or alive_no_face > 0.50
+        )
+    ):
+        reasons.append("probable picture-in-picture or background crop lock")
 
     if not documentary_non_face_ok and max_center_offset > 0.78:
         reasons.append(
@@ -8724,7 +8770,7 @@ def candidate_title_is_publishable(candidate):
 
 def build_theme_render_pool(selected_clips, all_candidates, max_clips=None):
     if max_clips is None:
-        pool_limit = len(selected_clips or [])
+        pool_limit = len(all_candidates or selected_clips or [])
     else:
         pool_limit = max(
             max_clips,
@@ -8785,7 +8831,7 @@ def print_theme_rankings(selected_clips):
         print("No clips survived theme-wide ranking.\n")
         return
 
-    print(f"=== Theme-wide top {len(selected_clips)} clips selected ===")
+    print(f"=== Theme-wide publishable clips selected: {len(selected_clips)} ===")
 
     for index, clip in enumerate(selected_clips, start=1):
         title = clip.source_title or clip.source_video_url

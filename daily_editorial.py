@@ -83,6 +83,7 @@ NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_I
 NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
+EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.10")))
 EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
 EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
 EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SECONDS", "58.0"))
@@ -1613,6 +1614,7 @@ def clip_is_editorial_usable(clip):
         "missing audio",
         "unexpected resolution",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
         "subject severely off-center in final crop",
     }
     frame_path = render_qc.get("frame_path") or {}
@@ -1631,6 +1633,7 @@ def clip_is_editorial_usable(clip):
         and "alive frames often miss speaker" not in flags
         and "extended no-speaker run in final crop" not in flags
         and "probable tiny/background face lock" not in flags
+        and "probable picture-in-picture/background lock" not in flags
         and "subject severely off-center in final crop" not in flags
     )
 
@@ -1676,6 +1679,7 @@ def clip_is_editorial_usable(clip):
             "extended no-speaker run in final crop",
             "weak final face plausibility",
             "probable tiny/background face lock",
+            "probable picture-in-picture/background lock",
             "subject severely off-center in final crop",
         } & flags:
             return False
@@ -1706,6 +1710,7 @@ def clip_is_popular_segment_usable(clip):
                 "alive frames often miss speaker",
                 "extended no-speaker run in final crop",
                 "probable tiny/background face lock",
+                "probable picture-in-picture/background lock",
                 "subject severely off-center in final crop",
             } & flags
         ):
@@ -1724,6 +1729,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         "final render has low-information frames",
         "final render has dead visual frames",
         "low final alive-frame rate",
+        "probable picture-in-picture/background lock",
     }
     reasons = sorted(flags & hard_flags)
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
@@ -1746,6 +1752,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
             "probable tiny/background face lock",
+            "probable picture-in-picture/background lock",
             "subject severely off-center in final crop",
         } & flags
     )
@@ -1787,6 +1794,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             "subject off-center in final crop" in flags
             or "unstable final subject position" in flags
             or "probable tiny/background face lock" in flags
+            or "probable picture-in-picture/background lock" in flags
         )
     ):
         reasons.append(
@@ -3849,6 +3857,18 @@ def editorial_intro_duration(audio_path=None):
     return max(3.25, min(EDITORIAL_INTRO_MAX_SECONDS, target))
 
 
+def source_audio_fade_filter(duration):
+    fade_duration = min(
+        EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS,
+        max(0.0, float(duration or 0.0) / 3.0),
+    )
+
+    if fade_duration <= 0.001:
+        return ""
+
+    return f"afade=t=in:st=0:d={fade_duration:.3f},"
+
+
 def pil_font(path, size):
     try:
         return ImageFont.truetype(font_path_or_fallback(path, FONT_FILE), int(size))
@@ -4838,7 +4858,7 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
     for index, duration in enumerate(clip_durations):
         filters.append(
             f"[{index}:a]atrim=0:{duration:.3f},volume={CLIP_SOURCE_AUDIO_VOLUME},asetpts=PTS-STARTPTS,"
-            f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip{index}_a]"
+            f"{source_audio_fade_filter(duration)}aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip{index}_a]"
         )
         audio_labels.append(f"[clip{index}_a]")
 
@@ -5156,7 +5176,7 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
         clip_input_index = input_index_for_path(topic_clips[index]["output_file"], input_paths)
         filters.append(
             f"[{clip_input_index}:a]atrim=0:{duration:.3f},volume={CLIP_SOURCE_AUDIO_VOLUME},asetpts=PTS-STARTPTS,"
-            f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip{index}_a]"
+            f"{source_audio_fade_filter(duration)}aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip{index}_a]"
         )
         audio_labels.append(f"[clip{index}_a]")
 
@@ -5457,7 +5477,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
         f"[0:a]atrim=0:{intro_duration:.3f},volume={INTRO_SOURCE_AUDIO_VOLUME},asetpts=PTS-STARTPTS[intro_bed]",
         f"[1:a]atrim=0:{intro_duration:.3f},volume=1.0,asetpts=PTS-STARTPTS[intro_voice]",
         "[intro_bed][intro_voice]amix=inputs=2:duration=longest:dropout_transition=0,aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[intro_a]",
-        f"[0:a]atrim=0:{clip_duration:.3f},volume={CLIP_SOURCE_AUDIO_VOLUME},asetpts=PTS-STARTPTS,aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip_a]",
+        f"[0:a]atrim=0:{clip_duration:.3f},volume={CLIP_SOURCE_AUDIO_VOLUME},asetpts=PTS-STARTPTS,{source_audio_fade_filter(clip_duration)}aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[clip_a]",
         "[intro_v][clip_v]concat=n=2:v=1:a=0[v]",
         "[intro_a][clip_a]concat=n=2:v=0:a=1[a]",
     ]

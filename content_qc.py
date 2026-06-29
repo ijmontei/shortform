@@ -563,6 +563,21 @@ def summarize_frame_metrics(metrics, asset_type):
         ):
             flags.append("probable tiny/background face lock")
 
+        if (
+            avg_face_height is not None
+            and avg_face_height < 0.12
+            and (
+                face_presence_rate < 0.46
+                or no_face_run_ratio > 0.32
+            )
+            and (
+                (avg_offset is not None and avg_offset > 0.26)
+                or (max_offset is not None and max_offset > 0.48)
+                or no_face_run_ratio > 0.42
+            )
+        ):
+            flags.append("probable picture-in-picture/background lock")
+
     return {
         "sample_count": count,
         "face_presence_rate": round(face_presence_rate, 4),

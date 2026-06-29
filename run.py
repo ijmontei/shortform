@@ -1397,7 +1397,7 @@ def main():
                 print("Clean-slate reset complete; exiting before production stages.")
                 return
 
-        print(f"Default YouTube upload limit per theme: {resolved_youtube_upload_limit(args) or 'unlimited'}\n")
+        print(f"Configured YouTube upload run cap per theme: {resolved_youtube_upload_limit(args) or 'unlimited'}\n")
 
         if run_requires_youtube_upload(themes, args):
             print("YouTube upload routing is configured for at least one requested theme.")

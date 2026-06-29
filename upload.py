@@ -915,7 +915,7 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     validate_authenticated_channel(youtube)
     uploaded_count = 0
 
-    print(f"YouTube upload limit for this run/theme: {effective_limit or 'unlimited'}")
+    print(f"YouTube upload run cap for this theme: {effective_limit or 'unlimited'}")
 
     remaining_content = []
 

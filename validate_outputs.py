@@ -120,6 +120,7 @@ def validate_frame_quality(theme, package, video_file):
         "extended no-speaker run in final crop",
         "weak final face plausibility",
         "probable tiny/background face lock",
+        "probable picture-in-picture/background lock",
     }
 
     for flag in sorted(hard_flags & non_face_hard_flags):
@@ -145,6 +146,7 @@ def validate_frame_quality(theme, package, video_file):
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
             "probable tiny/background face lock",
+            "probable picture-in-picture/background lock",
             "subject severely off-center in final crop",
         } & hard_flags
     )
@@ -171,9 +173,13 @@ def validate_frame_quality(theme, package, video_file):
                 "subject off-center in final crop",
                 "unstable final subject position",
                 "probable tiny/background face lock",
+                "probable picture-in-picture/background lock",
             } & hard_flags
         ):
             issues.append("transformed package likely locked to background instead of speaker")
+
+        if "probable picture-in-picture/background lock" in hard_flags:
+            issues.append("transformed package likely locked to picture-in-picture/background")
 
     return frame_qc, issues
 
