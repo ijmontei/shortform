@@ -38,6 +38,9 @@ TRANSCRIPTIONS_PATH = None
 SUBTITLE_TEMP_PATH = None
 METADATA_PATH = None
 FINAL_METADATA_FILE = None
+YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
+if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
+    YOUTUBE_PRIVACY_STATUS = "public"
 
 
 def configure_theme(theme_name):
@@ -808,7 +811,7 @@ def build_social_package(clip_path, output_path, words, clip_metadata):
                 "title": title,
                 "description": f"{description}\n\n{' '.join(hashtags)}",
                 "tags": all_tags,
-                "privacy_status": "private",
+                "privacy_status": YOUTUBE_PRIVACY_STATUS,
             },
             "tiktok": {
                 "caption": platform_caption[:2200],

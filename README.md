@@ -9,7 +9,7 @@ Version 1.1 short-form clip generation pipeline.
 1. `video_fetch.py` reads theme JSON files from `src/themes` and records latest videos in `src/pulled.json`.
 2. `clip_generation.py` downloads/reuses media, scores clips, and renders vertical working clips.
 3. `subtitle_generation.py` burns subtitles, saves finished clips, writes theme metadata, and marks completed videos in `src/executed_id.json`.
-4. `upload.py` uploads ready clips to the theme's configured YouTube channel as private drafts.
+4. `upload.py` uploads ready clips to the theme's configured YouTube channel. Uploads are public by default unless `SHORTFORM_YOUTUBE_PRIVACY_STATUS` is set to `private` or `unlisted`.
 
 Use `--skip-youtube` when you want to prepare upload-ready clips without uploading.
 
@@ -72,7 +72,7 @@ Approve or reject generated packages before upload:
 .\venv_313\Scripts\python.exe .\review_queue.py request --theme comedy --index 3 --action try_alternate_framing
 ```
 
-Rejected clips and clips with open revision requests are always skipped by `upload.py`. Private-draft uploading still works without manual approvals by default; enable stricter gating when you want only approved clips to upload:
+Rejected clips and clips with open revision requests are always skipped by `upload.py`. Public uploading works without manual approvals by default; enable stricter gating when you want only approved clips to upload:
 
 ```powershell
 $env:SHORTFORM_REQUIRE_REVIEW_APPROVAL_FOR_UPLOAD="1"
@@ -653,7 +653,7 @@ The uploader checks the authenticated YouTube channel before uploading. If a the
 
 Every uploading theme must have a `youtube.channel_handle` in its theme JSON; this prevents a theme from accidentally uploading to the wrong channel.
 
-YouTube uploads are created with `privacyStatus=private`, which makes them draft-like: they are uploaded with title, description, tags, and metadata, but are not public until you publish them in YouTube Studio.
+YouTube uploads are created with `privacyStatus=public` by default so they are instantly viewable. Set `SHORTFORM_YOUTUBE_PRIVACY_STATUS=private` or `SHORTFORM_YOUTUBE_PRIVACY_STATUS=unlisted` when you intentionally want a non-public test run.
 
 ## Output
 

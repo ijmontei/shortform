@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import time
 
 from editorial_gates import evaluate_editorial_gates
@@ -19,6 +20,59 @@ def package_with_effective_youtube_metadata(package):
         package["title"] = youtube_title
 
     return package
+
+
+def path_within(path, root):
+    try:
+        return os.path.commonpath([os.path.abspath(path), os.path.abspath(root)]) == os.path.abspath(root)
+    except ValueError:
+        return False
+
+
+def unique_destination(path):
+    if not os.path.exists(path):
+        return path
+
+    directory = os.path.dirname(path)
+    stem, extension = os.path.splitext(os.path.basename(path))
+
+    for index in range(1, 1000):
+        candidate = os.path.join(directory, f"{stem}_{index}{extension}")
+
+        if not os.path.exists(candidate):
+            return candidate
+
+    raise RuntimeError(f"Could not choose a unique quarantine path for {path}")
+
+
+def quarantine_revision_file(paths, package, dry_run=False):
+    video_file = package.get("video_file", "")
+
+    if not video_file or not os.path.exists(video_file):
+        return ""
+
+    output_root = paths["output_path"]
+    content_root = paths["final_videos_path"]
+    quarantine_root = os.path.join(output_root, "needs_revision")
+    absolute_video = os.path.abspath(video_file)
+
+    if not path_within(absolute_video, output_root):
+        return ""
+
+    if not path_within(absolute_video, content_root):
+        return ""
+
+    destination = unique_destination(os.path.join(quarantine_root, os.path.basename(video_file)))
+
+    if dry_run:
+        return destination
+
+    os.makedirs(quarantine_root, exist_ok=True)
+    shutil.move(absolute_video, destination)
+    package["video_file"] = destination
+    package.setdefault("review", {})["quarantine_file"] = destination
+    package["review"]["quarantined_at"] = utc_now()
+    return destination
 
 
 def reconcile_theme(theme, dry_run=False):
@@ -63,6 +117,13 @@ def reconcile_theme(theme, dry_run=False):
                     "status": "open",
                 })
                 package.setdefault("posting_status", {})["youtube_shorts"] = "needs_revision"
+                quarantine_revision_file(paths, package, dry_run=dry_run)
+
+        elif status == "needs_revision" and not gates.get("passed", True):
+            quarantine_path = quarantine_revision_file(paths, package, dry_run=dry_run)
+
+            if quarantine_path:
+                changed = True
 
         elif not package.get("editorial_gates"):
             changed = True

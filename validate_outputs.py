@@ -23,6 +23,9 @@ EDITORIAL_FACE_QA_FORMATS = {"raw_subtitled_clip", "classic_clip"}
 MIN_DOCUMENTARY_FINAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_DOCUMENTARY_FINAL_VISUAL_QUALITY", "0.60"))
 MAX_TRANSFORMED_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_TRANSFORMED_NO_FACE_RUN", "0.50"))
 MAX_TRANSFORMED_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_TRANSFORMED_ALIVE_NO_FACE", "0.62"))
+DEFAULT_YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
+if DEFAULT_YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
+    DEFAULT_YOUTUBE_PRIVACY_STATUS = "public"
 
 
 def package_with_effective_youtube_metadata(package):
@@ -222,7 +225,7 @@ def validate_theme(theme):
         gate_package = package_with_effective_youtube_metadata(package)
         editorial_gates = evaluate_editorial_gates(theme, gate_package)
         youtube_package = (package.get("platforms") or {}).get("youtube_shorts") or {}
-        privacy_status = str(youtube_package.get("privacy_status") or "private").lower()
+        privacy_status = str(youtube_package.get("privacy_status") or DEFAULT_YOUTUBE_PRIVACY_STATUS).lower()
         review = package.get("review") or {}
         content_format = package.get("content_format", "")
         upload_candidate_status = status in {"ready", "uploaded", "failed"}
