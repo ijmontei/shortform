@@ -282,6 +282,7 @@ WEAK_TOPIC_WORDS = STOPWORDS | {
     "very", "government", "million", "parents", "caps", "overweight",
     "wealth", "destroy", "sentiment", "terror", "rooting", "country",
     "president", "express", "subjective", "hard", "panel", "working",
+    "both",
 }
 
 GENERIC_TOPIC_PHRASES = {
@@ -358,7 +359,7 @@ NOUN_SOUP_WORDS = WEAK_TOPIC_WORDS | {
     "christine", "dakota", "defense", "dom", "hard", "helen", "however",
     "jameson", "king", "nancy", "paris", "phoenix", "potty", "reason",
     "room", "ruin", "russo", "sears", "solid", "students", "subjective",
-    "town", "van", "ways",
+    "town", "van", "ways", "passenger", "passengers",
 }
 
 MOJIBAKE_REPLACEMENTS = {
@@ -496,6 +497,17 @@ def topic_phrase_is_keyword_soup(theme, phrase):
     theme_key = str(theme or "").strip().lower()
 
     if theme_key == "technology_ai" and {"data", "black", "hole"}.issubset(set(words)):
+        return False
+
+    if (
+        theme_key == "truecrime"
+        and "evidence" in meaningful
+        and set(words) & {
+            "dna", "blood", "gun", "guns", "towel", "truck", "phone", "phones",
+            "fingerprint", "fingerprints", "forensic", "forensics", "video",
+            "surveillance", "custody", "testimony",
+        }
+    ):
         return False
 
     if (
@@ -1628,6 +1640,7 @@ def clip_is_editorial_usable(clip):
         "missing audio",
         "unexpected resolution",
         "probable tiny/background face lock",
+        "probable background lock instead of speaker",
         "probable picture-in-picture/background lock",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
@@ -1650,6 +1663,7 @@ def clip_is_editorial_usable(clip):
         and "alive frames often miss speaker" not in flags
         and "extended no-speaker run in final crop" not in flags
         and "probable tiny/background face lock" not in flags
+        and "probable background lock instead of speaker" not in flags
         and "probable picture-in-picture/background lock" not in flags
         and "probable flat-surface false face lock" not in flags
         and "probable small-object/background face lock" not in flags
@@ -1699,6 +1713,7 @@ def clip_is_editorial_usable(clip):
             "extended no-speaker run in final crop",
             "weak final face plausibility",
             "probable tiny/background face lock",
+            "probable background lock instead of speaker",
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
@@ -1733,6 +1748,7 @@ def clip_is_popular_segment_usable(clip):
                 "alive frames often miss speaker",
                 "extended no-speaker run in final crop",
                 "probable tiny/background face lock",
+                "probable background lock instead of speaker",
                 "probable picture-in-picture/background lock",
                 "probable flat-surface false face lock",
                 "probable small-object/background face lock",
@@ -1756,6 +1772,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         "final render has dead visual frames",
         "low final alive-frame rate",
         "probable picture-in-picture/background lock",
+        "probable background lock instead of speaker",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
         "probable broadcast/b-roll montage instead of speaker clip",
@@ -1781,6 +1798,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             "alive frames often miss speaker",
             "extended no-speaker run in final crop",
             "probable tiny/background face lock",
+            "probable background lock instead of speaker",
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
@@ -2084,6 +2102,14 @@ def group_clips_by_topic(clips, theme=""):
         topic = topic_label_from_clip(clip, theme=theme)
 
         if topic == "The Standout Moment" or not topic_supported_by_clip(topic, clip):
+            continue
+
+        if not public_editorial_topic_ok(
+            theme,
+            topic,
+            topic_terms=clip.get("topic_fingerprint") or [topic],
+            allow_short_topic=False,
+        ):
             continue
 
         key = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_") or "takeaway"
@@ -3018,7 +3044,7 @@ def theme_specific_direct_title(theme_key, topic):
         if "debt" in lower and "rates" in lower:
             return "Debt And Rates Are Back In Focus"
         if "spacex" in lower:
-            return "The SpaceX IPO Question"
+            return topic if public_editorial_topic_ok("finance", topic, topic_terms=[topic], allow_short_topic=False) else ""
 
     if theme_key == "technology_ai":
         if "steam machine" in lower:

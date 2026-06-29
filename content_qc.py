@@ -164,7 +164,14 @@ def theme_from_output_path(path):
 def classify_asset(path):
     lower = path.lower()
 
-    if os.sep + "output" + os.sep + "themes" + os.sep in lower and os.sep + "content" + os.sep in lower:
+    if (
+        os.sep + "output" + os.sep + "themes" + os.sep in lower
+        and (
+            os.sep + "content" + os.sep in lower
+            or os.sep + "needs_revision" + os.sep in lower
+            or os.sep + "rejected" + os.sep in lower
+        )
+    ):
         return "final_upload"
 
     if "_countdown_intro.mp4" in lower:
@@ -913,18 +920,22 @@ def audit_titles(themes=None):
             status = ((item.get("posting_status") or {}).get("youtube_shorts") or "").lower()
             output_file = item.get("video_file", "")
             upload_candidate = status in {"ready", "failed", "uploaded"}
+            review_candidate = upload_candidate or status in {"needs_revision", "rejected"}
 
             if output_file and upload_candidate:
                 upload_candidate_outputs.add(os.path.abspath(output_file))
             elif output_file:
                 quarantined_outputs.add(os.path.abspath(output_file))
 
-            if not upload_candidate:
+            if not review_candidate:
                 continue
 
             youtube_package = (item.get("platforms") or {}).get("youtube_shorts") or {}
             text = youtube_package.get("title") or item.get("title") or ""
             flags = title_flags(text)
+
+            if not upload_candidate:
+                flags.append(f"package status is {status or 'not_upload_ready'}")
 
             if daily_editorial and item.get("transcript_excerpt"):
                 if not daily_editorial.clip_has_theme_relevance(theme_name, item):
@@ -936,7 +947,7 @@ def audit_titles(themes=None):
             seen[text.lower()].add(output_file or f"{theme_name}:final_metadata:{index}")
             records.append({
                 "theme": theme_name,
-                "kind": "final_metadata",
+                "kind": "final_metadata" if upload_candidate else f"final_metadata_{status or 'not_upload_ready'}",
                 "rank": index,
                 "text": text,
                 "source": item.get("source_title", ""),
@@ -949,7 +960,7 @@ def audit_titles(themes=None):
                 script_topic = ((item.get("content_signal") or {}).get("topic") or item.get("title") or text)
                 records.append({
                     "theme": theme_name,
-                    "kind": "final_metadata_script",
+                    "kind": "final_metadata_script" if upload_candidate else f"final_metadata_{status or 'not_upload_ready'}_script",
                     "rank": index,
                     "text": script,
                     "source": item.get("source_title", ""),
@@ -1199,6 +1210,27 @@ def audit_prospective_titles(themes=None, max_per_theme=30):
                 countdown_slot=max(1, 6 - inspected),
                 total_count=5,
             )
+            flags = title_flags(title)
+            topic_terms = clip.get("topic_fingerprint") or [topic]
+
+            if not daily_editorial.public_editorial_topic_ok(
+                theme_name,
+                topic,
+                topic_terms=topic_terms,
+                allow_short_topic=False,
+            ):
+                flags.append("prospective topic is weak/generic")
+
+            if not daily_editorial.topic_supported_by_clip(topic, clip):
+                flags.append("prospective topic not supported by clip transcript")
+
+            if not daily_editorial.social_title_is_publishable(
+                theme_name,
+                title,
+                topic_terms=[topic, title],
+            ):
+                flags.append("prospective title fails publishable bar")
+
             seen[title.lower()] += 1
             records.append({
                 "theme": theme_name,
@@ -1208,7 +1240,7 @@ def audit_prospective_titles(themes=None, max_per_theme=30):
                 "topic": topic,
                 "source": clip.get("source_title", ""),
                 "output_file": clip.get("output_file", ""),
-                "flags": title_flags(title),
+                "flags": sorted(set(flags)),
             })
 
     for record in records:

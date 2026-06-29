@@ -154,6 +154,7 @@ WEAK_TOPIC_TERMS = {
     "breaks", "surprising", "reveal", "self", "own",
     "away", "fast", "pennsylvania", "entire", "analysis", "failure",
     "word", "terror", "will", "approximately", "changing", "chose",
+    "both", "passenger", "passengers",
     "according", "rooting", "asking", "iranian", "syria", "secretary",
     "gross", "whole", "worldwide", "having", "center", "learn", "hours",
     "drive", "difference", "quite", "knows", "reveals", "real", "point",
@@ -649,6 +650,7 @@ def keyword_soup_title(theme, title, topic_terms=None):
         for word in re.findall(r"[a-zA-Z][a-zA-Z']+", item.lower())
     }
     theme_hits = set(words) & theme_tokens
+    theme_key = str(theme or "").strip().lower()
     topic_words = {
         word
         for term in topic_terms or []
@@ -668,6 +670,15 @@ def keyword_soup_title(theme, title, topic_terms=None):
         or "'s" in lower
         or re.search(r"\b(is|are|was|were|got|gets|became|becomes|changed|changes|started|starts|met|reacts|moved)\b", lower)
         or re.search(r"^the\s+(jackass|world cup|nba|nfl|ufc|ai|vr|k-pop)\b", lower)
+        or (
+            theme_key == "truecrime"
+            and "evidence" in words
+            and set(words) & {
+                "dna", "blood", "gun", "guns", "towel", "truck", "phone", "phones",
+                "fingerprint", "fingerprints", "forensic", "forensics", "video",
+                "surveillance", "custody", "testimony",
+            }
+        )
     )
 
     if len(words) <= 3 and not natural_short_title:
