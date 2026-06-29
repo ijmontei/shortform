@@ -26,6 +26,7 @@ MAX_TRANSFORMED_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_TRANSFORMED_ALIVE
 DEFAULT_YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
 if DEFAULT_YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     DEFAULT_YOUTUBE_PRIVACY_STATUS = "public"
+ALLOW_REVISION_OUTPUTS = os.getenv("SHORTFORM_VALIDATE_ALLOW_REVISION_OUTPUTS", "0") == "1"
 
 
 def package_with_effective_youtube_metadata(package):
@@ -245,6 +246,11 @@ def validate_theme(theme):
         if status not in {"ready", "failed", "uploaded", "needs_revision", "rejected"}:
             item_issues.append(f"unexpected YouTube posting status '{status}'")
 
+        if status in {"needs_revision", "rejected"} and not ALLOW_REVISION_OUTPUTS:
+            item_issues.append(
+                f"package is {status}; generated outputs must be upload-ready or uploaded"
+            )
+
         gate_package = package_with_effective_youtube_metadata(package)
         editorial_gates = evaluate_editorial_gates(theme, gate_package)
         youtube_package = (package.get("platforms") or {}).get("youtube_shorts") or {}
@@ -354,6 +360,9 @@ def validate_outputs(theme=None):
 
     report = {
         "validated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "policy": {
+            "allow_revision_outputs": ALLOW_REVISION_OUTPUTS,
+        },
         "themes": theme_reports,
         "ignored_inactive_output_dirs": ignored_output_dirs,
         "checked": total_checked,

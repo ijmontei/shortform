@@ -543,6 +543,12 @@ $env:SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS="0"
 $env:SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY="0.55"
 ```
 
+`run.py --validate-outputs` fails if final metadata still contains `needs_revision` or `rejected` packages, because those are not upload-ready. To inspect revision artifacts during debugging without failing validation:
+
+```powershell
+$env:SHORTFORM_VALIDATE_ALLOW_REVISION_OUTPUTS="1"
+```
+
 ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. The setup line is intentionally short, faster-paced, and clip-specific, then the source audio takes over. The pipeline adds a small lead-in pad and fade so the first syllable is not cut off. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
 
 Popular-segment videos are controlled separately:
