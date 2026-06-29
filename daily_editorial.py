@@ -3419,13 +3419,20 @@ def spoken_hook_topic(topic, clip=None):
         candidate,
         flags=re.I,
     )
-    candidate = re.sub(r"^(the|a|an)\s+", "", candidate, flags=re.I).strip()
     return compact_text(candidate, 44).strip(" .") or "this moment"
+
+
+def natural_spoken_hook_topic(topic, clip=None):
+    topic_text = spoken_hook_topic(topic, clip)
+    topic_text = re.sub(r"^The\s+", "the ", topic_text)
+    topic_text = re.sub(r"^A\s+", "a ", topic_text)
+    topic_text = re.sub(r"^An\s+", "an ", topic_text)
+    return topic_text
 
 
 def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source=""):
     theme_key = str(theme or "").strip().lower()
-    hook_topic = spoken_hook_topic(topic, clip)
+    hook_topic = natural_spoken_hook_topic(topic, clip)
     if re.match(r"^(why|how|what|when|where)\b", hook_topic, flags=re.I):
         hook_topic = hook_topic[0].lower() + hook_topic[1:]
 
@@ -3460,54 +3467,54 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
             "This is the moment where {topic} stops being a talking point.",
         ],
         "popculture": [
-            "This {topic} answer sounds safe, then it swerves.",
-            "The celebrity moment gets awkward faster than expected.",
-            "This is the part fans are going to replay.",
+            "The answer on {topic} sounds safe, then it swerves.",
+            "This {topic} moment gets awkward faster than expected.",
+            "This {topic} clip is the part fans are going to replay.",
             "The question is {topic}. The reaction is the clip.",
         ],
         "sports": [
             "This take on {topic} gets competitive fast.",
-            "The debate starts calm, then the locker-room edge shows up.",
+            "The {topic} debate starts calm, then the locker-room edge shows up.",
             "This is the part that makes the {topic} argument real.",
             "If {topic} is the take, the reaction tells you everything.",
         ],
         "gaming": [
             "This take on {topic} is exactly what gamers argue about.",
-            "The gaming desk sounds calm, but the take has teeth.",
+            "The gaming desk sounds calm on {topic}, but the take has teeth.",
             "This starts as {topic}, then turns into the real debate.",
             "If {topic} is the headline, the reaction is the real story.",
         ],
         "technology_ai": [
             "This take on {topic} is where the builder room splits.",
-            "The tech point sounds small, then the bigger problem appears.",
-            "This is the AI detail people are going to argue about.",
+            "The tech point inside {topic} sounds small, then the bigger problem appears.",
+            "This is where {topic} becomes the detail people argue about.",
             "If {topic} sounds like hype, listen for the limitation.",
         ],
         "truecrime": [
-            "This detail in {topic} changes how the whole story feels.",
+            "This changes the read on {topic}.",
             "The case sounds one way, until {topic} lands.",
-            "This is the moment in {topic} that makes the timeline feel different.",
-            "The key detail in {topic} is not loud, but it changes the read.",
+            "This is the {topic} moment that makes the timeline feel different.",
+            "The quiet part is {topic}. That changes the read.",
         ],
     }
 
     if signal_source == "youtube_heatmap":
         templates = [
-            "People kept replaying this part: {topic}. Watch the turn.",
-            "This is the replay spike, and the reason is obvious in a second.",
-            "Viewers came back to this moment for a reason.",
+            "People kept replaying {topic}. Watch the turn.",
+            "This replay spike centers on {topic}, and the reason is obvious in a second.",
+            "Viewers came back to {topic} for a reason.",
         ]
     elif signal_source in {"timestamp_mentions", "chapters", "public_popularity_signal"}:
         templates = [
             "This timestamp kept showing up: {topic}.",
-            "This is the part people pointed to first.",
-            "The audience kept circling this moment.",
+            "People pointed to {topic} first.",
+            "The audience kept circling {topic}.",
         ]
     else:
         templates = theme_templates.get(theme_key) or [
             "This {adjective} moment is the part that earns the replay.",
-            "The setup sounds simple, then the real point lands.",
-            "This is the moment that stood out.",
+            "{topic} sounds simple, then the real point lands.",
+            "This is the {topic} moment that stood out.",
         ]
 
     template = templates[title_variant_index(theme_key, hook_topic, adjective_text, signal_source, count=len(templates))]

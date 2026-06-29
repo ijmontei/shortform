@@ -826,6 +826,62 @@ def title_flags(text):
     return flags
 
 
+GENERIC_SCRIPT_PHRASES = {
+    "this is the part people pointed to first",
+    "the audience kept circling this moment",
+    "viewers came back to this moment for a reason",
+    "this is the moment that stood out",
+    "the setup sounds simple, then the real point lands",
+    "this money moment looks simple, then the catch shows up",
+    "this is the part fans are going to replay",
+    "the celebrity answer sounds safe, then it swerves",
+    "the sports debate starts calm, then the edge shows up",
+    "the gaming desk sounds calm, but the take has teeth",
+    "the tech point sounds small, then the bigger problem appears",
+    "this detail changes how the whole story feels",
+    "the case sounds one way, until this part lands",
+}
+
+
+def script_topic_words(topic):
+    return [
+        word
+        for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", str(topic or "").lower())
+        if word not in {
+            "the", "a", "an", "and", "or", "of", "to", "for", "your", "this",
+            "that", "moment", "clip", "part", "detail", "question", "inside",
+            "around", "behind", "worth", "people", "case", "story",
+        }
+        and len(word) >= 3
+    ]
+
+
+def script_flags(text, topic=""):
+    text = str(text or "").strip()
+    lowered = text.lower()
+    words = re.findall(r"[a-zA-Z0-9']+", lowered)
+    flags = []
+
+    if not text:
+        return ["missing setup script"]
+
+    if len(words) < 6:
+        flags.append("setup script too short/generic")
+
+    if any(phrase in lowered for phrase in GENERIC_SCRIPT_PHRASES):
+        flags.append("generic/repetitive setup script")
+
+    topic_words = script_topic_words(topic)
+
+    if topic_words and not any(word in lowered for word in topic_words[:5]):
+        flags.append("setup script does not name the clip topic")
+
+    if re.search(r"\b(this|that)\s+(part|moment|detail)\b", lowered) and not topic_words:
+        flags.append("setup script relies on vague placeholder")
+
+    return flags
+
+
 def audit_titles(themes=None):
     selected = {clean_theme_name(theme) for theme in themes or []}
     output_root = os.path.join(BASE_DIR, "output", "themes")
@@ -888,6 +944,19 @@ def audit_titles(themes=None):
                 "flags": sorted(set(flags)),
             })
 
+            script = item.get("editorial_script") or ""
+            if script:
+                script_topic = ((item.get("content_signal") or {}).get("topic") or item.get("title") or text)
+                records.append({
+                    "theme": theme_name,
+                    "kind": "final_metadata_script",
+                    "rank": index,
+                    "text": script,
+                    "source": item.get("source_title", ""),
+                    "output_file": output_file,
+                    "flags": sorted(set(script_flags(script, script_topic))),
+                })
+
         for item in daily.get("items") or []:
             output_file = item.get("output_file", "")
 
@@ -915,6 +984,19 @@ def audit_titles(themes=None):
                 "output_file": output_file,
                 "flags": sorted(set(flags)),
             })
+
+            script = item.get("script") or ""
+            if script:
+                records.append({
+                    "theme": theme_name,
+                    "kind": "countdown_setup_script",
+                    "rank": item.get("rank"),
+                    "countdown_slot": item.get("countdown_slot"),
+                    "text": script,
+                    "source": source,
+                    "output_file": output_file,
+                    "flags": sorted(set(script_flags(script, topic or text))),
+                })
 
         popular_items = list(daily.get("popular_segments") or [])
         popular_items.extend(daily.get("popular_segment_items") or [])
@@ -944,6 +1026,17 @@ def audit_titles(themes=None):
                 "output_file": output_file,
                 "flags": sorted(set(flags)),
             })
+
+            if script:
+                records.append({
+                    "theme": theme_name,
+                    "kind": "popular_setup_script",
+                    "rank": item.get("rank"),
+                    "text": script,
+                    "source": item.get("source_title", ""),
+                    "output_file": output_file,
+                    "flags": sorted(set(script_flags(script, item.get("title") or item.get("source_title") or ""))),
+                })
 
     temp_root = os.path.join(BASE_DIR, "output", "temp")
 
@@ -988,6 +1081,19 @@ def audit_titles(themes=None):
                         "flags": sorted(set(flags)),
                     })
 
+                    script = item.get("script") or ""
+                    if script:
+                        records.append({
+                            "theme": theme_name,
+                            "kind": "temp_daily_countdown_script",
+                            "rank": item.get("rank"),
+                            "countdown_slot": item.get("countdown_slot"),
+                            "text": script,
+                            "source": source,
+                            "output_file": output_file,
+                            "flags": sorted(set(script_flags(script, topic or text))),
+                        })
+
                 popular_items = list(daily.get("popular_segments") or [])
                 popular_items.extend(daily.get("popular_segment_items") or [])
 
@@ -1010,6 +1116,17 @@ def audit_titles(themes=None):
                         "output_file": output_file,
                         "flags": sorted(set(flags)),
                     })
+
+                    if script:
+                        records.append({
+                            "theme": theme_name,
+                            "kind": "temp_daily_popular_script",
+                            "rank": item.get("rank"),
+                            "text": script,
+                            "source": item.get("source_title", ""),
+                            "output_file": output_file,
+                            "flags": sorted(set(script_flags(script, item.get("title") or item.get("source_title") or ""))),
+                        })
 
     for record in records:
         if len(seen[record["text"].lower()]) > 1:
@@ -1155,7 +1272,7 @@ def build_markdown(report):
         lines.append(f"  - flags: {', '.join(item.get('flags') or ['none'])}")
         lines.append(f"  - sheet: {item.get('contact_sheet', '')}")
 
-    lines.extend(["", "## Title/Topic Flags", ""])
+    lines.extend(["", "## Title/Topic/Setup Script Flags", ""])
 
     for item in report["title_audit_flagged"][:60]:
         lines.append(f"- {item['theme']} / {item['kind']} / rank {item.get('rank')}: {item['text']}")
