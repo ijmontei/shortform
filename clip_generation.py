@@ -119,7 +119,7 @@ MIN_SELECTED_CLIP_SCORE = 0.27
 MIN_WORDS_PER_CANDIDATE = 30
 MIN_CLIP_SPACING_SECONDS = 2
 MAX_TOPIC_SIMILARITY = 0.58
-SCORING_MODEL_VERSION = "2026-06-28-v40-upload-quality-gaming"
+SCORING_MODEL_VERSION = "2026-06-29-v41-unlimited-quality-hooks"
 MIN_CLIP_READINESS_SCORE = float(os.getenv("SHORTFORM_MIN_CLIP_READINESS_SCORE", "0.62"))
 MIN_SOURCE_DURATION_SECONDS = float(os.getenv("SHORTFORM_MIN_SOURCE_DURATION_SECONDS", "600"))
 ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
@@ -7691,7 +7691,8 @@ def build_candidate_clips(transcript_payload, audio_payload, popularity_profile=
 def select_non_overlapping_clips(candidates, max_clips=None, existing_fingerprints=None):
     selected = []
     existing_fingerprints = existing_fingerprints or []
-    max_clips = max_clips or int(active_clip_rules().get("default_clip_count") or MAX_CLIPS_PER_VIDEO)
+    if max_clips is None:
+        max_clips = active_theme_clip_limit()
     min_selected_score = active_min_selected_score()
     max_topic_similarity = active_max_topic_similarity()
 
@@ -7733,7 +7734,7 @@ def select_non_overlapping_clips(candidates, max_clips=None, existing_fingerprin
 
         selected.append(candidate)
 
-        if len(selected) >= max_clips:
+        if max_clips is not None and len(selected) >= max_clips:
             break
 
     return sorted(selected, key=lambda item: item.start_time)

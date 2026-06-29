@@ -78,8 +78,8 @@ ELEVENLABS_SPEAKER_BOOST = os.getenv("ELEVENLABS_SPEAKER_BOOST", "1") != "0"
 NARRATION_PITCH = float(os.getenv("SHORTFORM_NARRATION_PITCH", "0.92"))
 NARRATION_BASS_GAIN = float(os.getenv("SHORTFORM_NARRATION_BASS_GAIN", "3.0"))
 NARRATION_LOUDNESS_I = float(os.getenv("SHORTFORM_NARRATION_LOUDNESS_I", "-16.0"))
-NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "3.55"))
-NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_IN_SECONDS", "0.20")))
+NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "3.40"))
+NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_IN_SECONDS", "0.28")))
 NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
@@ -2665,7 +2665,8 @@ def elevenlabs_tts_text(text):
 
     return (
         "[fast-paced social video host, deeper voice, high inflection, sharp curiosity, "
-        f"natural pauses, not monotone, confident but conversational] {text}"
+        "slightly faster rhythm, creator-style tease, natural pauses, not monotone, "
+        f"confident but conversational] {text}"
     )
 
 
@@ -3435,49 +3436,58 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
 
     theme_templates = {
         "comedy": [
-            "Wait for the turn in {topic}. It gets ridiculous fast.",
-            "This starts with {topic}. Then it goes completely sideways.",
-            "The funniest part is not the first line. It is the turn after it.",
+            "They thought WHAT about {topic}? Wait for the turn.",
+            "This starts with {topic}, then the room loses the plot.",
+            "The setup is {topic}. The payoff is why this made the cut.",
+            "Watch how fast {topic} turns into the actual joke.",
         ],
         "finance": [
-            "This money moment looks simple, then the catch shows up.",
-            "Here is the part of {topic} that changes the take.",
-            "Here is the catch inside {topic}.",
+            "The money question is {topic}. The catch is the part worth hearing.",
+            "This sounds like a normal take on {topic}, then the math changes.",
+            "Here is the part of {topic} that most people skip.",
+            "If {topic} sounds obvious, this is the wrinkle.",
         ],
         "health_fitness": [
-            "This detail about {topic} is the part people skip.",
-            "The useful part is tiny, but it changes the whole takeaway.",
-            "This sounds basic until the health detail clicks.",
+            "The detail inside {topic} is the part people usually miss.",
+            "{topic} sounds basic, then the health takeaway actually clicks.",
+            "If {topic} feels obvious, listen for the one practical detail.",
+            "This is the tiny {topic} point that changes the advice.",
         ],
         "politics": [
             "This is where the {topic} argument gets uncomfortable.",
-            "The policy point is simple. The implication is not.",
-            "Listen to the part that makes this debate messy.",
+            "The claim about {topic} sounds clean. The implication does not.",
+            "Listen for the part that makes {topic} messy.",
+            "This is the moment where {topic} stops being a talking point.",
         ],
         "popculture": [
-            "This {topic} moment gets awkward fast.",
-            "The celebrity answer sounds safe, then it swerves.",
+            "This {topic} answer sounds safe, then it swerves.",
+            "The celebrity moment gets awkward faster than expected.",
             "This is the part fans are going to replay.",
+            "The question is {topic}. The reaction is the clip.",
         ],
         "sports": [
             "This take on {topic} gets competitive fast.",
-            "The sports debate starts calm, then the edge shows up.",
-            "This is the part that makes the locker room argument real.",
+            "The debate starts calm, then the locker-room edge shows up.",
+            "This is the part that makes the {topic} argument real.",
+            "If {topic} is the take, the reaction tells you everything.",
         ],
         "gaming": [
             "This take on {topic} is exactly what gamers argue about.",
-            "The gaming desk sounds calm here, but the take has teeth.",
-            "This starts as creator talk, then turns into the real gaming debate.",
+            "The gaming desk sounds calm, but the take has teeth.",
+            "This starts as {topic}, then turns into the real debate.",
+            "If {topic} is the headline, the reaction is the real story.",
         ],
         "technology_ai": [
             "This take on {topic} is where the builder room splits.",
             "The tech point sounds small, then the bigger problem appears.",
             "This is the AI detail people are going to argue about.",
+            "If {topic} sounds like hype, listen for the limitation.",
         ],
         "truecrime": [
-            "This detail changes how the whole story feels.",
-            "The case sounds one way, until this part lands.",
-            "This is the moment that makes the timeline feel different.",
+            "This detail in {topic} changes how the whole story feels.",
+            "The case sounds one way, until {topic} lands.",
+            "This is the moment in {topic} that makes the timeline feel different.",
+            "The key detail in {topic} is not loud, but it changes the read.",
         ],
     }
 
@@ -3662,6 +3672,15 @@ THEME_VISUAL_STYLES = {
         "blue": "0x23A6FF",
         "dark": "0x0F1D22",
         "name": "sports_scoreboard_countdown",
+    },
+    "gaming": {
+        "accent": "0x00F5D4",
+        "accent2": "0xFF2E63",
+        "cream": "0xFEE440",
+        "mint": "0x8BFFEC",
+        "blue": "0x7B2CBF",
+        "dark": "0x050914",
+        "name": "neon_arcade_esports_countdown",
     },
     "finance": {
         "accent": "0xD8FF65",

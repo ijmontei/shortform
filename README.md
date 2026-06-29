@@ -355,7 +355,7 @@ $env:SHORTFORM_MAX_NETWORK_FAILURES="4"
 
 Themes are JSON files in `src/themes`. They now use the theme-engine schema: every theme can define its own source list, clip duration rules, scoring signals, packaging/intro style, metadata style, risk controls, review policy, and analytics targets.
 
-Phase-one production runs default to eight themes: comedy, sports, finance/business, technology/AI, health and self-improvement, politics/news, pop culture/entertainment, and true crime/legal. Other JSON theme files are retained as future inventory. They do not run in default production, and even `--theme`, `SHORTFORM_ACTIVE_THEMES`, or `SHORTFORM_RUN_ALL_THEMES=1` stay phase-one unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is also set.
+Phase-one production runs default to nine upload-routed themes: comedy, sports, gaming, finance/business, technology/AI, health and self-improvement, politics/news, pop culture/entertainment, and true crime/legal. Other JSON theme files are retained as future inventory. They do not run in default production, and even `--theme`, `SHORTFORM_ACTIVE_THEMES`, or `SHORTFORM_RUN_ALL_THEMES=1` stay phase-one unless `SHORTFORM_ALLOW_FUTURE_THEMES=1` is also set.
 
 Example:
 
@@ -491,10 +491,10 @@ By default, each theme/channel produces an original ranked countdown package ins
 2. Transcribe and score clips across the whole theme.
 3. Keep the strongest evidence clips.
 4. Download only the selected video timestamp sections.
-5. Cluster rendered clips into a top-five ranked countdown.
+5. Cluster rendered clips into a ranked countdown package.
 6. Rotate one daily reel angle automatically, such as `most surprising`, `most heated`, `smartest`, or `most controversial`.
-7. Generate the AI setup line: `I watched XX hours of <theme> interviews this week, so you don't have to...`
-8. Render countdown Shorts with an animated scan board, interview banners, top-five survivor board, played/future state, rank card, and full source audio after the setup.
+7. Generate a short AI setup hook that tees up the specific clip topic instead of repeating watched-hours narration.
+8. Render countdown Shorts with an animated scan board, interview banners, survivor board, played/future state, rank card, and full source audio after the setup. The watched-hours/source-count context stays visual only.
 9. Render a separate popular-segment video type when replay/popularity signals exist for a source interview.
 10. Optionally stitch the countdown Shorts into a full daily recap compilation.
 
@@ -518,10 +518,11 @@ $env:SHORTFORM_EDITORIAL_RENDER_RECAP="1"
 $env:SHORTFORM_EDITORIAL_APPEND_METADATA="0"
 $env:SHORTFORM_TTS_PROVIDER="elevenlabs"
 $env:ELEVENLABS_API_KEY="your_elevenlabs_api_key"
-$env:ELEVENLABS_VOICE_ID="hnhZe040y4V3QPXXZVDO"
+$env:ELEVENLABS_VOICE_ID="HAM2nE4sbHnPgMji6JqB"
 $env:ELEVENLABS_MODEL_ID="eleven_v3"
-$env:ELEVENLABS_OUTPUT_FORMAT="mp3_44100_128"
-$env:SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS="11.5"
+$env:ELEVENLABS_OUTPUT_FORMAT="mp3_44100_192"
+$env:SHORTFORM_EDITORIAL_INTRO_SECONDS="5.2"
+$env:SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS="6.25"
 $env:SHORTFORM_EDITORIAL_RANK_CARD_SECONDS="1"
 $env:SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME="0.025"
 $env:SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME="1.0"
@@ -542,7 +543,7 @@ $env:SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS="0"
 $env:SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY="0.55"
 ```
 
-ElevenLabs is the production default for the setup voice. The default voice ID is `hnhZe040y4V3QPXXZVDO`. The pipeline does not pitch that voice down by default; set `SHORTFORM_NARRATION_PITCH` only if you intentionally want post-processing. No alternate ElevenLabs voices are used by default. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
+ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. The setup line is intentionally short, faster-paced, and clip-specific, then the source audio takes over. The pipeline adds a small lead-in pad and fade so the first syllable is not cut off. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
 
 Popular-segment videos are controlled separately:
 
@@ -566,7 +567,7 @@ Each generated editorial Short consumes the next adjective and moves it to the e
 
 ## Clip Volume And Upload Limits
 
-The pipeline defaults to quality-threshold selection: each theme generates every clip that clears the scoring, framing, title, caption, and editorial upload gates. `theme_clip_budget: 0` means unlimited. Use a positive budget only when you intentionally want a local cap for a test run.
+The pipeline defaults to quality-threshold selection: each theme generates every clip that clears the scoring, framing, title, caption, and editorial upload gates. `theme_clip_budget: 0` means unlimited, and the legacy per-video fallback now follows the same rule. Use a positive budget only when you intentionally want a local cap for a test run.
 
 To force an explicit clip selection budget:
 
