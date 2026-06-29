@@ -580,6 +580,7 @@ def refresh_package_render_qc(package):
 
     package["render_qc"] = {
         **existing_qc,
+        "frame_qc_version": frame_qc.get("frame_qc_version", existing_qc.get("frame_qc_version", "")),
         "passed": passed,
         "rejected": bool(rejections) or bool(existing_qc.get("rejected", False)),
         "flags": sorted(set(existing_flags + frame_flags + rejections)),

@@ -87,6 +87,7 @@ EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDI
 EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
 EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
 EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SECONDS", "58.0"))
+CURRENT_FRAME_QC_VERSION = "2026-06-broll-montage-v2"
 EDITORIAL_TRANSITION_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TRANSITION_SECONDS", "0.45"))
 EDITORIAL_RANK_CARD_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_RANK_CARD_SECONDS", "0.0"))
 EDITORIAL_CLIP_MIN_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_MIN_SECONDS", "7.0"))
@@ -1551,17 +1552,17 @@ def load_rendered_clip_reviews(metadata_path):
 def clip_render_qc(clip):
     value = clip.get("render_qc")
 
-    if (
-        isinstance(value, dict)
-        and value
-        and (
-            value.get("visual_quality_score") is not None
-            or value.get("frame_path")
-        )
-    ):
-        return value
-
     output_file = clip.get("output_file", "")
+
+    if isinstance(value, dict) and value:
+        frame_path = value.get("frame_path") if isinstance(value.get("frame_path"), dict) else {}
+        cached_version = value.get("frame_qc_version") or frame_path.get("frame_qc_version")
+
+        if cached_version == CURRENT_FRAME_QC_VERSION:
+            return value
+
+        if not output_file or not os.path.exists(output_file):
+            return value
 
     if not output_file or not os.path.exists(output_file):
         return {}
@@ -1580,6 +1581,7 @@ def clip_render_qc(clip):
             ]
 
         render_qc = {
+            "frame_qc_version": frame_qc.get("frame_qc_version", ""),
             "passed": not frame_qc.get("flags"),
             "flags": sorted(set(existing_flags + list(frame_qc.get("flags", [])))),
             "visual_quality_score": frame_qc.get("visual_quality_score", 0.0),
@@ -1837,6 +1839,28 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
     return reasons
 
 
+def editorial_audio_qc_for(output_file):
+    try:
+        import content_qc
+
+        return content_qc.analyze_audio_start(output_file)
+    except Exception as error:
+        return {
+            "flags": [f"final editorial audio QA failed: {error}"],
+        }
+
+
+def editorial_audio_rejection_reasons(audio_qc):
+    flags = set((audio_qc or {}).get("flags") or [])
+    hard_flags = {
+        "audio start is empty",
+        "no clear audio onset in first five seconds",
+        "slow audio/narration start",
+        "possible clipped/distorted intro audio",
+    }
+    return sorted(flags & hard_flags)
+
+
 def finalize_editorial_package(package, label):
     output_file = package.get("video_file", "")
 
@@ -1856,12 +1880,17 @@ def finalize_editorial_package(package, label):
             "visual_quality_score": 0.0,
         }
 
+    audio_qc = editorial_audio_qc_for(output_file)
     rejection_reasons = editorial_output_rejection_reasons(frame_qc, package.get("theme", DEFAULT_THEME))
+    rejection_reasons.extend(editorial_audio_rejection_reasons(audio_qc))
+    rejection_reasons = sorted(set(rejection_reasons))
     package["render_qc"] = {
+        "frame_qc_version": frame_qc.get("frame_qc_version", CURRENT_FRAME_QC_VERSION),
         "passed": not rejection_reasons,
-        "flags": sorted(set(list(frame_qc.get("flags") or []) + rejection_reasons)),
+        "flags": sorted(set(list(frame_qc.get("flags") or []) + list(audio_qc.get("flags") or []) + rejection_reasons)),
         "visual_quality_score": frame_qc.get("visual_quality_score", 0.0),
         "frame_path": frame_qc,
+        "intro_audio": audio_qc,
         "rejected": bool(rejection_reasons),
         "rejection_reasons": rejection_reasons,
         "render_strategy": "editorial_post_render_gate",

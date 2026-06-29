@@ -69,6 +69,7 @@ except Exception:
 base_dir = BASE_DIR
 
 CURRENT_THEME = None
+FRAME_QC_VERSION = "2026-06-broll-montage-v2"
 
 videos_path = None
 audio_path = None
@@ -2744,6 +2745,7 @@ def create_frame_audit_contact_sheet(video_path, audit_path, face_cascades=None,
 def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
     cap = cv2.VideoCapture(video_path)
     result = {
+        "frame_qc_version": FRAME_QC_VERSION,
         "sampled_frames": 0,
         "black_frame_ratio": 1.0,
         "low_information_frame_ratio": 1.0,
@@ -3116,6 +3118,7 @@ def build_render_qc(video_path, crop_stats, expected_duration, face_cascades=Non
         flags.append("noticeable camera jump")
 
     return {
+        "frame_qc_version": frame_path_qc.get("frame_qc_version", FRAME_QC_VERSION),
         **probe,
         "black_frame_ratio": float(black_frame_ratio),
         "frame_path": frame_path_qc,
@@ -3608,6 +3611,7 @@ def audit_existing_final_clip(video_path, expected_duration=0.0, face_cascades=N
         )
 
     render_qc = {
+        "frame_qc_version": frame_qc.get("frame_qc_version", FRAME_QC_VERSION),
         "passed": True,
         "flags": list(frame_qc.get("flags") or []),
         "visual_quality_score": frame_qc.get("visual_quality_score", 0.0),
