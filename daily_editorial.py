@@ -4327,6 +4327,13 @@ def countdown_intro_timing(intro_duration):
     return spin_end, final_start, final_lock
 
 
+def countdown_handoff_timing(spin_end, final_lock):
+    handoff_start = max(0.0, float(spin_end) - 0.05)
+    available = max(0.4, float(final_lock) - handoff_start)
+    handoff_duration = max(0.68, min(1.05, available * 0.62))
+    return handoff_start, handoff_duration
+
+
 def wheel_offset_at(t, spin_end):
     accel_end = min(0.46, spin_end * 0.26)
     cruise_end = max(accel_end + 0.4, spin_end * 0.68)
@@ -4747,8 +4754,9 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                 draw_morph_energy(draw, accent, accent2, t, final_progress)
 
                 offset = wheel_offset_at(min(t, spin_end), spin_end)
-                lock_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
-                wheel_exit_progress = ease_out_cubic((t - spin_end) / 0.46)
+                handoff_start, handoff_duration = countdown_handoff_timing(spin_end, final_lock)
+                lock_progress = ease_in_out_cubic((t - handoff_start) / handoff_duration)
+                wheel_exit_progress = ease_out_cubic((t - handoff_start) / 0.38)
 
                 for index, (banner, card) in enumerate(zip(source_banners, scan_cards)):
                     layout = wheel_card_layout(
@@ -4777,7 +4785,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
 
                     if display_index is not None:
                         display_morph_progress = ease_in_out_cubic(
-                            (t - spin_end - display_index * 0.035) / max(0.1, final_lock - spin_end)
+                            (t - handoff_start - display_index * 0.026) / handoff_duration
                         )
 
                     if alpha <= 0.025:
@@ -4788,7 +4796,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     elif lock_progress > 0:
                         alpha *= max(0.46, 1 - wheel_exit_progress * 0.36)
 
-                    if key in display_keys and display_morph_progress > 0.44:
+                    if key in display_keys and display_morph_progress > 0.26:
                         continue
 
                     if lock_progress > 0 and key not in display_keys:
@@ -4818,6 +4826,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     paste_rotated(frame, scaled, x, y, angle, alpha)
 
             if final_progress > 0:
+                handoff_start, handoff_duration = countdown_handoff_timing(spin_end, final_lock)
                 for index, card in enumerate(final_cards):
                     entry = display_entries[index]
                     key = entry.get("source_state_key")
@@ -4825,7 +4834,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
                     source_card = scan_cards[source_index] if source_index < len(scan_cards) else card
                     target_x = 58
                     target_y = top_board_y(index)
-                    card_progress = ease_in_out_cubic((t - spin_end - index * 0.018) / max(0.1, final_lock - spin_end))
+                    card_progress = ease_in_out_cubic((t - handoff_start - index * 0.016) / handoff_duration)
                     if card_progress <= 0.01:
                         continue
                     start_pose = selected_card_start_pose(
