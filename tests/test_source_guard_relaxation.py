@@ -42,13 +42,26 @@ class SourceGuardRelaxationTests(unittest.TestCase):
         self.assertFalse(disqualified)
         self.assertEqual(hits, [])
 
-    def test_hard_negative_still_blocks_configured_source(self):
+    def test_hard_negative_does_not_block_configured_source_by_default(self):
         disqualified, hits = theme_profile.source_guard_disqualification(
             profile(),
             {
                 "title": "Full match replay with no interview",
                 "channel_url": "https://www.youtube.com/@TrustedShow/videos",
                 "source_tier": "priority",
+            },
+        )
+
+        self.assertFalse(disqualified)
+        self.assertEqual(hits, [])
+
+    def test_hard_negative_blocks_unconfigured_source(self):
+        disqualified, hits = theme_profile.source_guard_disqualification(
+            profile(),
+            {
+                "title": "Full match replay with no interview",
+                "channel_url": "https://www.youtube.com/@RandomShow/videos",
+                "source_tier": "",
             },
         )
 

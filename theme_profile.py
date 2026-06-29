@@ -1219,17 +1219,16 @@ def source_guard_disqualification(profile, source_record):
             "video_url",
         )
     )
-    hard_hits = [keyword for keyword in hard_negative_keywords if keyword_in_text(source_text, keyword)]
-
-    if hard_hits:
-        return True, hard_hits[:6]
-
     source_tier = str(source_record.get("source_tier") or "").strip().lower()
     relaxed_configured_source = (
         RELAX_CONFIGURED_SOURCE_GUARD
         and not STRICT_SOURCE_GUARD
         and source_tier in CONFIGURED_SOURCE_TIERS
     )
+    hard_hits = [keyword for keyword in hard_negative_keywords if keyword_in_text(source_text, keyword)]
+
+    if hard_hits and not relaxed_configured_source:
+        return True, hard_hits[:6]
 
     hits = [keyword for keyword in negative_keywords if keyword_in_text(source_text, keyword)]
     positive_keywords = list(signal_config.get("positive_keywords") or [])
