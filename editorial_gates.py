@@ -231,6 +231,8 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
             "subject off-center in final crop",
             "unstable final subject position",
             "probable picture-in-picture/background lock",
+            "probable flat-surface false face lock",
+            "probable small-object/background face lock",
         } & render_flags
     ):
         flags.append("final_package_probable_background_lock")
@@ -245,6 +247,12 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
         flags.append("final_package_probable_background_lock")
 
     if "probable picture-in-picture/background lock" in render_flags:
+        flags.append("final_package_probable_background_lock")
+
+    if "probable flat-surface false face lock" in render_flags:
+        flags.append("final_package_probable_background_lock")
+
+    if "probable small-object/background face lock" in render_flags:
         flags.append("final_package_probable_background_lock")
 
     if "subject severely off-center in final crop" in render_flags:

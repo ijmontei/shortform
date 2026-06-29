@@ -2759,6 +2759,9 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
         "avg_face_center_offset_ratio": 0.0,
         "max_face_center_offset_ratio": 0.0,
         "avg_face_height_ratio": 0.0,
+        "flat_skin_false_face_ratio": 0.0,
+        "flat_skin_false_face_ratio_of_faces": 0.0,
+        "small_face_frame_ratio_of_faces": 0.0,
         "center_jitter_ratio": 0.0,
         "visual_cut_ratio": 0.0,
         "continuity_center_jitter_ratio": 0.0,
@@ -2794,6 +2797,7 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
     previous_analysis_gray = None
     previous_face_center = None
     face_plausibilities = []
+    flat_skin_false_face_frames = 0
     alive_no_face_frames = 0
     current_no_face_run = 0
     longest_no_face_run = 0
@@ -2863,9 +2867,27 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
 
         center_offset = abs(face["center_x"] - detection_frame.shape[1] / 2) / max(1, detection_frame.shape[1] / 2)
         face_offsets.append(float(center_offset))
-        face_heights.append(float(face["h"] / max(1, detection_frame.shape[0])))
+        face_height_ratio = float(face["h"] / max(1, detection_frame.shape[0]))
+        face_heights.append(face_height_ratio)
         normalized_face_center = float(face["center_x"] / max(1, detection_frame.shape[1]))
         face_centers.append(normalized_face_center)
+
+        roi_x1 = max(0, int(face["x"] - face["w"] * 0.12))
+        roi_y1 = max(0, int(face["y"] - face["h"] * 0.12))
+        roi_x2 = min(detection_frame.shape[1], int(face["x"] + face["w"] * 1.12))
+        roi_y2 = min(detection_frame.shape[0], int(face["y"] + face["h"] * 1.12))
+
+        if roi_x2 > roi_x1 and roi_y2 > roi_y1:
+            face_roi = detection_frame[roi_y1:roi_y2, roi_x1:roi_x2]
+            face_roi_features = compute_frame_visual_features(face_roi)
+            face_skin_tone_ratio = estimate_skin_tone_ratio(face_roi)
+
+            if (
+                face_height_ratio >= 0.14
+                and face_skin_tone_ratio > 0.82
+                and face_roi_features["edge_density"] < 0.04
+            ):
+                flat_skin_false_face_frames += 1
 
         if (
             previous_face_center is not None
@@ -2902,6 +2924,9 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
         result["max_face_center_offset_ratio"] = float(np.max(face_offsets))
         result["avg_face_height_ratio"] = float(np.mean(face_heights))
         result["avg_face_plausibility"] = float(np.mean(face_plausibilities)) if face_plausibilities else 0.0
+        result["flat_skin_false_face_ratio"] = flat_skin_false_face_frames / result["sampled_frames"]
+        result["flat_skin_false_face_ratio_of_faces"] = flat_skin_false_face_frames / len(face_offsets)
+        result["small_face_frame_ratio_of_faces"] = sum(1 for height in face_heights if height < 0.12) / len(face_heights)
 
     if len(face_centers) > 1:
         result["center_jitter_ratio"] = float(np.percentile(np.abs(np.diff(face_centers)), 90))
@@ -2958,21 +2983,39 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
 
     if face_offsets:
         picture_in_picture_lock_suspected = (
-            result["avg_face_height_ratio"] < 0.12
+            result["avg_face_height_ratio"] < 0.10
             and (
-                result["face_presence_rate"] < 0.46
-                or result["alive_no_face_frame_ratio"] > 0.42
-                or result["longest_no_face_run_ratio"] > 0.32
+                result["face_presence_rate"] < 0.34
+                or result["alive_no_face_frame_ratio"] > 0.50
+                or result["longest_no_face_run_ratio"] > 0.40
             )
             and (
-                result["avg_face_center_offset_ratio"] > 0.26
-                or result["max_face_center_offset_ratio"] > 0.48
-                or result["alive_no_face_frame_ratio"] > 0.50
+                result["max_face_center_offset_ratio"] > 0.48
+                or result["longest_no_face_run_ratio"] > 0.52
+                or (
+                    result["avg_face_height_ratio"] < 0.075
+                    and result["longest_no_face_run_ratio"] > 0.48
+                )
             )
         )
 
         if picture_in_picture_lock_suspected:
             result["flags"].append("probable picture-in-picture/background lock")
+
+    if (
+        result["flat_skin_false_face_ratio"] > 0.42
+        and result["face_presence_rate"] > 0.55
+        and result["avg_face_height_ratio"] < 0.24
+        and result["visual_cut_ratio"] < 0.18
+    ):
+        result["flags"].append("probable flat-surface false face lock")
+
+    if (
+        result["small_face_frame_ratio_of_faces"] > 0.55
+        and result["face_presence_rate"] > 0.50
+        and result["avg_face_height_ratio"] < 0.13
+    ):
+        result["flags"].append("probable small-object/background face lock")
 
     if (
         result["face_presence_rate"] < 0.24
@@ -3001,6 +3044,10 @@ def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
     quality_score -= max(0.0, MIN_FINAL_FACE_HEIGHT_RATIO - result["avg_face_height_ratio"]) * 0.42
     if "probable picture-in-picture/background lock" in result["flags"]:
         quality_score -= 0.24
+    if "probable flat-surface false face lock" in result["flags"]:
+        quality_score -= 0.28
+    if "probable small-object/background face lock" in result["flags"]:
+        quality_score -= 0.26
     jitter_penalty_basis = (
         result["continuity_center_jitter_ratio"]
         if result["continuity_center_jitter_ratio"] > 0
@@ -3258,6 +3305,12 @@ def render_attempt_selection_score(render_qc):
     if "probable picture-in-picture/background lock" in flags:
         score -= 0.46
 
+    if "probable flat-surface false face lock" in flags:
+        score -= 0.48
+
+    if "probable small-object/background face lock" in flags:
+        score -= 0.44
+
     if "tiny final speaker framing" in flags:
         score -= 0.14
 
@@ -3339,6 +3392,8 @@ def should_try_alternate_framing(render_qc):
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
         "subject off-center in final crop",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
@@ -3364,6 +3419,8 @@ def should_try_alternate_framing(render_qc):
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
         "subject severely off-center in final crop",
         "tiny final speaker framing",
     }
@@ -3386,6 +3443,8 @@ def render_rejection_reasons(render_qc):
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
         "subject severely off-center in final crop",
         "final render has black frames",
         "final render has low-information frames",
@@ -3408,6 +3467,8 @@ def render_rejection_reasons(render_qc):
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
     }
     hard_flags = {
         "could not open final render",
@@ -3427,6 +3488,8 @@ def render_rejection_reasons(render_qc):
         "probable background lock instead of speaker",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
         "subject severely off-center in final crop",
     }
 
@@ -3482,16 +3545,16 @@ def render_rejection_reasons(render_qc):
     if (
         not documentary_non_face_ok
         and face_height
-        and face_height < 0.12
+        and face_height < 0.10
         and (
-            face_presence < 0.46
-            or alive_no_face > 0.42
-            or no_face_run > 0.32
+            face_presence < 0.34
+            or alive_no_face > 0.50
+            or no_face_run > 0.40
         )
         and (
-            center_offset > 0.26
-            or max_center_offset > 0.48
-            or alive_no_face > 0.50
+            max_center_offset > 0.48
+            or no_face_run > 0.52
+            or (face_height < 0.075 and no_face_run > 0.48)
         )
     ):
         reasons.append("probable picture-in-picture or background crop lock")

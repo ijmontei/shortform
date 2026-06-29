@@ -388,6 +388,8 @@ def frame_metrics(frame, faces):
     face_count = len(faces)
     largest_face_area = 0.0
     largest_face_height_ratio = 0.0
+    largest_face_skin_ratio = 0.0
+    largest_face_edge_density = 0.0
     center_offset = None
 
     if faces:
@@ -401,6 +403,17 @@ def frame_metrics(frame, faces):
             ((face_center_x - width / 2) / width) ** 2
             + ((face_center_y - height / 2) / height) ** 2
         )
+        x1 = max(0, int(x - w * 0.12))
+        y1 = max(0, int(y - h * 0.12))
+        x2 = min(width, int(x + w * 1.12))
+        y2 = min(height, int(y + h * 1.12))
+
+        if x2 > x1 and y2 > y1:
+            face_roi = frame[y1:y2, x1:x2]
+            face_gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+            face_edges = cv2.Canny(face_gray, 80, 160)
+            largest_face_edge_density = float(np.mean(face_edges > 0))
+            largest_face_skin_ratio = estimate_skin_tone_ratio(face_roi)
 
     is_black = mean_luma < 8.0
     low_info = edge_density < 0.010 and laplacian < 18.0
@@ -413,6 +426,8 @@ def frame_metrics(frame, faces):
         "face_count": face_count,
         "largest_face_area": round(largest_face_area, 5),
         "largest_face_height_ratio": round(largest_face_height_ratio, 4),
+        "largest_face_skin_ratio": round(largest_face_skin_ratio, 4),
+        "largest_face_edge_density": round(largest_face_edge_density, 5),
         "face_center_offset": round(center_offset, 4) if center_offset is not None else None,
         "is_black": is_black,
         "low_info": low_info,
@@ -503,6 +518,27 @@ def longest_false_run(values):
     return longest
 
 
+def estimate_skin_tone_ratio(frame):
+    if frame is None or frame.size <= 0:
+        return 0.0
+
+    ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+    y_channel, cr_channel, cb_channel = cv2.split(ycrcb)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    _, saturation, value = cv2.split(hsv)
+    skin_mask = (
+        (y_channel > 28)
+        & (cr_channel >= 118)
+        & (cr_channel <= 190)
+        & (cb_channel >= 58)
+        & (cb_channel <= 158)
+        & (saturation >= 12)
+        & (value >= 32)
+    )
+
+    return float(np.count_nonzero(skin_mask) / max(1, skin_mask.size))
+
+
 def summarize_frame_metrics(metrics, asset_type):
     count = len(metrics)
 
@@ -518,6 +554,14 @@ def summarize_frame_metrics(metrics, asset_type):
     low_info_count = sum(1 for item in metrics if item.get("low_info"))
     offsets = [float(item["face_center_offset"]) for item in metrics if item.get("face_center_offset") is not None]
     face_heights = [float(item["largest_face_height_ratio"]) for item in metrics if item.get("largest_face_height_ratio")]
+    flat_skin_false_faces = [
+        item
+        for item in metrics
+        if float(item.get("largest_face_height_ratio") or 0.0) >= 0.14
+        and float(item.get("largest_face_skin_ratio") or 0.0) > 0.82
+        and float(item.get("largest_face_edge_density") or 0.0) < 0.04
+    ]
+    small_face_count = sum(1 for height in face_heights if height < 0.12)
     flags = []
     face_presence_rate = face_count / count
     no_face_run_ratio = longest_false_run(plausible) / count
@@ -526,6 +570,8 @@ def summarize_frame_metrics(metrics, asset_type):
     avg_offset = sum(offsets) / len(offsets) if offsets else None
     max_offset = max(offsets) if offsets else None
     avg_face_height = sum(face_heights) / len(face_heights) if face_heights else None
+    flat_skin_false_face_ratio = len(flat_skin_false_faces) / count
+    small_face_ratio_of_faces = small_face_count / len(face_heights) if face_heights else 0.0
 
     if black_ratio > 0.04:
         flags.append("black/dead frames present")
@@ -565,18 +611,26 @@ def summarize_frame_metrics(metrics, asset_type):
 
         if (
             avg_face_height is not None
-            and avg_face_height < 0.12
+            and avg_face_height < 0.10
             and (
-                face_presence_rate < 0.46
-                or no_face_run_ratio > 0.32
+                face_presence_rate < 0.34
+                or no_face_run_ratio > 0.40
             )
             and (
-                (avg_offset is not None and avg_offset > 0.26)
-                or (max_offset is not None and max_offset > 0.48)
-                or no_face_run_ratio > 0.42
+                (max_offset is not None and max_offset > 0.48)
+                or no_face_run_ratio > 0.52
+                or (avg_face_height < 0.075 and no_face_run_ratio > 0.48)
             )
         ):
             flags.append("probable picture-in-picture/background lock")
+
+        if (
+            small_face_ratio_of_faces > 0.55
+            and face_presence_rate > 0.50
+            and avg_face_height is not None
+            and avg_face_height < 0.13
+        ):
+            flags.append("probable small-object/background face lock")
 
     return {
         "sample_count": count,
@@ -587,6 +641,8 @@ def summarize_frame_metrics(metrics, asset_type):
         "avg_face_center_offset": round(avg_offset, 4) if avg_offset is not None else None,
         "max_face_center_offset": round(max_offset, 4) if max_offset is not None else None,
         "avg_face_height_ratio": round(avg_face_height, 4) if avg_face_height is not None else None,
+        "flat_skin_false_face_ratio": round(flat_skin_false_face_ratio, 4),
+        "small_face_ratio_of_faces": round(small_face_ratio_of_faces, 4),
         "avg_edge_density": round(sum(item.get("edge_density", 0.0) for item in metrics) / count, 5),
         "avg_laplacian": round(sum(item.get("laplacian", 0.0) for item in metrics) / count, 3),
         "flags": flags,

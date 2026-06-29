@@ -1615,6 +1615,8 @@ def clip_is_editorial_usable(clip):
         "unexpected resolution",
         "probable tiny/background face lock",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
         "subject severely off-center in final crop",
     }
     frame_path = render_qc.get("frame_path") or {}
@@ -1634,6 +1636,8 @@ def clip_is_editorial_usable(clip):
         and "extended no-speaker run in final crop" not in flags
         and "probable tiny/background face lock" not in flags
         and "probable picture-in-picture/background lock" not in flags
+        and "probable flat-surface false face lock" not in flags
+        and "probable small-object/background face lock" not in flags
         and "subject severely off-center in final crop" not in flags
     )
 
@@ -1680,6 +1684,8 @@ def clip_is_editorial_usable(clip):
             "weak final face plausibility",
             "probable tiny/background face lock",
             "probable picture-in-picture/background lock",
+            "probable flat-surface false face lock",
+            "probable small-object/background face lock",
             "subject severely off-center in final crop",
         } & flags:
             return False
@@ -1711,6 +1717,8 @@ def clip_is_popular_segment_usable(clip):
                 "extended no-speaker run in final crop",
                 "probable tiny/background face lock",
                 "probable picture-in-picture/background lock",
+                "probable flat-surface false face lock",
+                "probable small-object/background face lock",
                 "subject severely off-center in final crop",
             } & flags
         ):
@@ -1730,6 +1738,8 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         "final render has dead visual frames",
         "low final alive-frame rate",
         "probable picture-in-picture/background lock",
+        "probable flat-surface false face lock",
+        "probable small-object/background face lock",
     }
     reasons = sorted(flags & hard_flags)
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
@@ -1753,6 +1763,8 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             "extended no-speaker run in final crop",
             "probable tiny/background face lock",
             "probable picture-in-picture/background lock",
+            "probable flat-surface false face lock",
+            "probable small-object/background face lock",
             "subject severely off-center in final crop",
         } & flags
     )
@@ -1795,6 +1807,8 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
             or "unstable final subject position" in flags
             or "probable tiny/background face lock" in flags
             or "probable picture-in-picture/background lock" in flags
+            or "probable flat-surface false face lock" in flags
+            or "probable small-object/background face lock" in flags
         )
     ):
         reasons.append(
