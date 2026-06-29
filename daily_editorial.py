@@ -390,6 +390,21 @@ MOJIBAKE_REPLACEMENTS = {
 }
 
 
+MOJIBAKE_REPLACEMENTS.update({
+    "\u0432\u0402\u201c": "-",
+    "\u0432\u0402\u201d": "-",
+    "\u00e2\u20ac\u2122": "'",
+    "\u00e2\u20ac\u02dc": "'",
+    "\u00e2\u20ac\u0153": '"',
+    "\u00e2\u20ac\u009d": '"',
+    "\u00e2\u20ac\u015d": '"',
+    "\u00e2\u20ac\u201c": "-",
+    "\u00e2\u20ac\u201d": "-",
+    "\u00e2\u20ac\u00a6": "...",
+    "\u00c3\u201a": "",
+})
+
+
 def run_subprocess(cmd, label):
     result = subprocess.run(
         cmd,

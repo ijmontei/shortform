@@ -7,6 +7,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import daily_editorial
+import upload
 from metadata_generation.titles import score_title_quality, source_context_title
 
 
@@ -24,6 +25,29 @@ TRUECRIME_PASSENGER_CLIP = {
 
 
 class PublicCopyQualityTests(unittest.TestCase):
+    def test_public_text_cleanup_removes_common_mojibake(self):
+        broken_source_title = (
+            "Cops Face Off With Dangerous Suspects "
+            "\u0432\u0402\u201d On Patrol: Live"
+        )
+        broken_hook = (
+            "That\u00e2\u20ac\u2122s why this moment "
+            "\u00e2\u20ac\u201d changed the whole stop"
+        )
+
+        self.assertEqual(
+            daily_editorial.clean_viewer_text(broken_source_title),
+            "Cops Face Off With Dangerous Suspects - On Patrol: Live",
+        )
+        self.assertEqual(
+            daily_editorial.clean_viewer_text(broken_hook),
+            "That's why this moment - changed the whole stop",
+        )
+        self.assertEqual(
+            upload.clean_public_text(broken_hook),
+            "That's why this moment - changed the whole stop",
+        )
+
     def test_truecrime_source_context_repairs_template_title(self):
         repaired = source_context_title(
             "truecrime",
