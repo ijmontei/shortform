@@ -88,6 +88,25 @@ SCRIPT_TOPIC_STOPWORDS = {
     "that", "moment", "clip", "part", "detail", "question", "inside",
     "around", "behind", "worth", "people", "case", "story",
 }
+TITLE_SUPPORT_CONTEXT_WORDS = SCRIPT_TOPIC_STOPWORDS | {
+    "show", "episode", "podcast", "interview", "guest", "channel", "archive",
+    "take", "fight", "room", "top", "best", "week", "watch", "listen",
+    "key", "thing", "things", "point", "points", "file", "note", "turn",
+}
+TITLE_SUPPORT_ALIASES = {
+    "police": {"cop", "cops", "officer", "officers", "patrol"},
+    "officer": {"cop", "cops", "police", "patrol"},
+    "search": {"search", "searched", "looking", "under", "floor", "back"},
+    "evidence": {"evidence", "charge", "charges", "found", "floor"},
+    "nascar": {"nascar", "race", "racing", "racer", "cars", "car", "track", "horsepower"},
+    "racing": {"race", "racing", "racer", "cars", "car", "track", "horsepower", "nascar"},
+    "amino": {"amino", "acid", "acids", "eaa", "eaas", "leucine", "protein", "grams"},
+    "acids": {"amino", "acid", "acids", "eaa", "eaas", "leucine", "protein", "grams"},
+    "protein": {"protein", "amino", "acid", "acids", "eaa", "eaas", "leucine"},
+    "abs": {"abs", "core", "hip", "hips", "flexor", "flexors", "physio", "ball", "range", "motion"},
+    "strength": {"strength", "training", "lift", "lifts", "squat", "bench", "deadlift", "press", "row", "reps"},
+    "lifts": {"strength", "training", "lift", "lifts", "squat", "bench", "deadlift", "press", "row", "reps"},
+}
 THEME_EVIDENCE_TERMS = {
     "comedy": {
         "comedy", "comic", "comedian", "joke", "laugh", "roast", "funny",
@@ -216,6 +235,117 @@ def _has_time_pair(item):
 def _contains_any(text, terms):
     lowered = _text(text).lower()
     return any(term in lowered for term in terms)
+
+
+def _normalize_support_word(word):
+    word = str(word or "").lower().strip("'")
+    word = word.replace("'s", "").replace("’s", "")
+
+    if len(word) > 3 and word.endswith("s"):
+        word = word[:-1]
+
+    return word
+
+
+def _support_word_set(text):
+    words = set()
+
+    for word in re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", str(text or "").lower()):
+        normalized = _normalize_support_word(word)
+
+        if (
+            not normalized
+            or normalized in TITLE_SUPPORT_CONTEXT_WORDS
+            or len(normalized) < 3
+        ):
+            continue
+
+        words.add(normalized)
+
+    return words
+
+
+def _title_support_details(package, rank_signals):
+    title = _text(package.get("title"))
+    items = _context_items(package, rank_signals)
+    transcript_text = " ".join(_text(item.get("transcript_excerpt")) for item in items)
+    source_text = " ".join(
+        " ".join([
+            _text(item.get("source_title")),
+            _text(item.get("source_channel")),
+            _text(item.get("channel_label")),
+        ])
+        for item in items
+    )
+    topic_text = " ".join([
+        _text((package.get("content_signal") or {}).get("topic")),
+        _text(package.get("caption")),
+        _text(package.get("hook_reason")),
+        " ".join(str(term).replace("_", " ") for term in package.get("topic_fingerprint") or []),
+        " ".join(str(term).replace("_", " ") for term in (_rank_signal_dict(rank_signals).get("topic_fingerprint") or [])),
+    ])
+    title_words = _support_word_set(title)
+    transcript_words = _support_word_set(transcript_text)
+    source_words = _support_word_set(source_text)
+    topic_words = _support_word_set(topic_text)
+    checked_words = title_words - source_words or title_words
+    exact_support = title_words & transcript_words
+    source_support = title_words & source_words
+    topic_support = checked_words & topic_words & (transcript_words | source_words)
+    alias_support = set()
+    support_pool = transcript_words | source_words
+
+    for word in checked_words:
+        aliases = TITLE_SUPPORT_ALIASES.get(word, set())
+
+        if aliases and support_pool & {_normalize_support_word(alias) for alias in aliases}:
+            alias_support.add(word)
+
+    supported_checked = (exact_support | topic_support | alias_support) & checked_words
+    support_ratio = len(supported_checked) / max(1, len(checked_words))
+
+    return {
+        "title_words": sorted(title_words),
+        "transcript_words": sorted(transcript_words),
+        "source_words": sorted(source_words),
+        "topic_words": sorted(topic_words),
+        "checked_words": sorted(checked_words),
+        "exact_support": sorted(exact_support),
+        "source_support": sorted(source_support),
+        "topic_support": sorted(topic_support),
+        "alias_support": sorted(alias_support),
+        "support_ratio": float(support_ratio),
+    }
+
+
+def _title_supported_by_context(package, rank_signals):
+    details = _title_support_details(package, rank_signals)
+    checked_words = set(details["checked_words"])
+
+    if not checked_words:
+        return False, details
+
+    exact_count = len(details["exact_support"])
+    alias_count = len(details["alias_support"])
+    topic_count = len(details["topic_support"])
+    source_count = len(details["source_support"])
+
+    if exact_count >= 2:
+        return True, details
+
+    if exact_count >= 1 and len(checked_words) <= 3:
+        return True, details
+
+    if exact_count >= 1 and details["support_ratio"] >= 0.34:
+        return True, details
+
+    if exact_count + alias_count + topic_count >= 2:
+        return True, details
+
+    if source_count >= 2 and (exact_count or alias_count):
+        return True, details
+
+    return False, details
 
 
 def _script_topic_words(topic):
@@ -445,6 +575,7 @@ def evaluate_editorial_gates(theme, package):
         ),
     )
     context_evidence = context_evidence_for(package, raw_rank_signals)
+    title_supported, title_support = _title_supported_by_context(package, raw_rank_signals)
     allow_raw_clip_uploads = os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") == "1"
     flags = []
 
@@ -528,6 +659,13 @@ def evaluate_editorial_gates(theme, package):
     if not title_quality.get("theme_native_title", True):
         flags.append("weak_theme_native_title")
 
+    if (
+        content_format in {"daily_editorial_short", "popular_segment_short"}
+        and context_evidence["has_transcript_excerpt"]
+        and not title_supported
+    ):
+        flags.append("title_not_supported_by_clip_context")
+
     flags.extend(_script_quality_flags(package))
 
     if _float(title_quality.get("theme_fit"), 1.0) < 0.52:
@@ -601,6 +739,7 @@ def evaluate_editorial_gates(theme, package):
         "reused_content_risk": reused_content_risk,
         "captionability_score": captionability_score,
         "title_quality": title_quality,
+        "title_support": title_support,
         "context_evidence": context_evidence,
         "first_second_passed": first_second_passed,
         "render_qc_passed": render_passed,
