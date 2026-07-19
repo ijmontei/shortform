@@ -1,0 +1,184 @@
+{
+    "theme": "education_science",
+    "profile": "education",
+    "brand": {
+        "channel_name": "The Science Archive",
+        "positioning": "The clearest science, education, and expert explanation moments from long-form interviews.",
+        "audience": "Curious viewers who want smart beginner-friendly explanations.",
+        "viewer_promise": "One complete concept, misconception, or mental model per clip.",
+        "voice": "clear teacher",
+        "risk_tolerance": "low"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@bigthink/videos",
+        "https://www.youtube.com/@TED/videos",
+        "https://www.youtube.com/@WorldScienceFestival/videos",
+        "https://www.youtube.com/@StarTalk/videos",
+        "https://www.youtube.com/@lexfridman/videos",
+        "https://www.youtube.com/@TheRoyalInstitution/videos",
+        "https://www.youtube.com/@CloserToTruthTV/videos",
+        "https://www.youtube.com/@hubermanlab/videos",
+        "https://www.youtube.com/@TheoriesofEverything/videos",
+        "https://www.youtube.com/@veritasium/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "The clearest science, education, and expert explanation moments from long-form interviews.",
+        "source_strategy": "Science explainers and expert interview channels with complete concepts."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            25,
+            40,
+            58
+        ],
+        "min_clip_duration": 20,
+        "max_clip_duration": 60,
+        "default_clip_count": 8,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 6,
+        "min_readiness_score": 0.7,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 5,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": false,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "definition",
+            "misconception_correction",
+            "mental_model",
+            "simple_analogy",
+            "framework"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "science",
+            "study",
+            "example",
+            "misconception",
+            "physics",
+            "brain",
+            "theory"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "definition",
+            "misconception_correction",
+            "mental_model",
+            "simple_analogy",
+            "framework"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "explain_then_clip",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "explain_then_clip",
+        "max_intro_seconds": 3,
+        "caption_style": "clean_learning",
+        "framing_style": "speaker_context",
+        "overlay_style": "definition_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Simple Explanation Of {topic}",
+            "This Misconception Changes {topic}",
+            "A Better Way To Understand {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#science",
+            "#education",
+            "#learning",
+            "#shorts"
+        ],
+        "tags": [
+            "science",
+            "education",
+            "learning",
+            "physics",
+            "psychology"
+        ],
+        "topic_tags": {
+            "science": "#science",
+            "study": "#study",
+            "example": "#example",
+            "misconception": "#misconception",
+            "physics": "#physics",
+            "brain": "#brain",
+            "theory": "#theory"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": true,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "misleading science claims",
+            "historical misinformation"
+        ],
+        "manual_review_topics": [
+            "health/science claims",
+            "current events"
+        ],
+        "minimum_transformation_score": 0.65
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

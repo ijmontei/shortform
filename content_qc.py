@@ -33,6 +33,7 @@ CONTACT_DIR = os.path.join(REPORT_DIR, "contact_sheets")
 LATEST_JSON = os.path.join(REPORT_DIR, "content_qc_latest.json")
 LATEST_MD = os.path.join(REPORT_DIR, "content_qc_latest.md")
 _CLIP_REVIEW_INDEX = None
+RELAX_THEME_RELEVANCE_GATES = os.getenv("SHORTFORM_RELAX_THEME_RELEVANCE_GATES", "1") != "0"
 
 GENERIC_TITLE_PHRASES = {
     "most popular moment",
@@ -176,15 +177,21 @@ def theme_from_output_path(path):
         return ""
 
 
-def classify_asset(path):
+def classify_asset(path, include_revision_assets=False):
     lower = path.lower()
 
     if (
         os.sep + "output" + os.sep + "themes" + os.sep in lower
         and (
             os.sep + "content" + os.sep in lower
-            or os.sep + "needs_revision" + os.sep in lower
-            or os.sep + "rejected" + os.sep in lower
+            or os.sep + "archive" + os.sep in lower
+            or (
+                include_revision_assets
+                and (
+                    os.sep + "needs_revision" + os.sep in lower
+                    or os.sep + "rejected" + os.sep in lower
+                )
+            )
         )
     ):
         return "final_upload"
@@ -197,6 +204,9 @@ def classify_asset(path):
 
     if os.sep + "clips" + os.sep in lower:
         return "raw_clip"
+
+    if os.sep + "downloads" + os.sep + "videos" + os.sep in lower:
+        return "downloaded_source_section"
 
     return "other"
 
@@ -249,7 +259,7 @@ def clip_review_index():
     return index
 
 
-def discover_assets(themes=None, asset_types=None):
+def discover_assets(themes=None, asset_types=None, include_revision_assets=False):
     selected = {clean_theme_name(theme) for theme in themes or []}
     selected_asset_types = set(asset_types or [])
     roots = [
@@ -268,7 +278,7 @@ def discover_assets(themes=None, asset_types=None):
                     continue
 
                 path = os.path.join(dirpath, filename)
-                asset_type = classify_asset(path)
+                asset_type = classify_asset(path, include_revision_assets=include_revision_assets)
 
                 if asset_type == "other":
                     continue
@@ -290,6 +300,62 @@ def discover_assets(themes=None, asset_types=None):
                 })
 
     return sorted(assets, key=lambda item: (item["theme"], item["asset_type"], item["filename"]))
+
+
+def final_upload_package_for_asset(asset):
+    if not asset or asset.get("asset_type") != "final_upload":
+        return {}
+
+    theme = clean_theme_name(asset.get("theme") or "")
+    path_key = normalized_path_key(asset.get("path") or "")
+
+    if not theme or not path_key:
+        return {}
+
+    metadata_path = os.path.join(BASE_DIR, "output", "themes", theme, "metadata.json")
+    metadata = load_json_file(metadata_path, {})
+
+    for collection in ("content", "archive", "needs_revision", "rejected"):
+        for item in metadata.get(collection) or []:
+            if normalized_path_key(item.get("video_file") or "") == path_key:
+                return item
+
+    return {}
+
+
+def frame_sample_window_for_asset(asset, media):
+    asset_type = asset.get("asset_type") or "other"
+    media_duration = float((media or {}).get("duration") or 0.0)
+
+    if asset_type != "final_upload":
+        return {
+            "asset_type": asset_type,
+            "start_seconds": 0.0,
+            "end_seconds": None,
+            "package": {},
+        }
+
+    package = asset.get("package") or final_upload_package_for_asset(asset)
+    intro_duration = float(package.get("intro_duration") or 0.0)
+    rank_card_duration = float(package.get("rank_card_duration") or 0.0)
+    source_play_duration = float(package.get("source_play_duration") or 0.0)
+    sample_start = max(0.0, intro_duration + rank_card_duration)
+    sample_end = min(media_duration, sample_start + source_play_duration) if media_duration else sample_start + source_play_duration
+
+    if source_play_duration >= 3.0 and sample_end - sample_start >= 1.0:
+        return {
+            "asset_type": "final_upload_source",
+            "start_seconds": sample_start,
+            "end_seconds": sample_end,
+            "package": package,
+        }
+
+    return {
+        "asset_type": asset_type,
+        "start_seconds": 0.0,
+        "end_seconds": None,
+        "package": package,
+    }
 
 
 def load_face_cascades():
@@ -489,7 +555,13 @@ def frame_metrics(frame, faces):
             largest_face_skin_ratio = estimate_skin_tone_ratio(face_roi)
 
     is_black = mean_luma < 8.0
-    low_info = edge_density < 0.010 and laplacian < 18.0
+    low_texture = edge_density < 0.010 and laplacian < 18.0
+    low_info = (
+        mean_luma < 18.0
+        or std_luma < 7.0
+        or (low_texture and std_luma < 24.0)
+        or (edge_density < 0.0035 and laplacian < 5.0 and std_luma < 32.0)
+    )
     plausible_face = largest_face_area >= 0.012
     return {
         "mean_luma": round(mean_luma, 3),
@@ -514,7 +586,16 @@ def draw_label(draw, xy, text, font):
     draw.text((x + 6, y + 6), text, fill=(255, 255, 255), font=font)
 
 
-def create_contact_sheet(path, theme, asset_type, media, interval_seconds=2.0, max_frames=36):
+def create_contact_sheet(
+    path,
+    theme,
+    asset_type,
+    media,
+    interval_seconds=2.0,
+    max_frames=36,
+    start_seconds=0.0,
+    end_seconds=None,
+):
     os.makedirs(os.path.join(CONTACT_DIR, asset_type, theme), exist_ok=True)
     output_path = os.path.join(
         CONTACT_DIR,
@@ -532,7 +613,13 @@ def create_contact_sheet(path, theme, asset_type, media, interval_seconds=2.0, m
     metrics = []
     font = ImageFont.load_default()
 
-    for timestamp in sample_times(media["duration"], interval_seconds=interval_seconds, max_frames=max_frames):
+    media_duration = float(media.get("duration") or 0.0)
+    start_seconds = max(0.0, float(start_seconds or 0.0))
+    end_seconds = media_duration if end_seconds is None else min(media_duration, max(start_seconds, float(end_seconds or 0.0)))
+    sample_duration = max(0.0, end_seconds - start_seconds)
+
+    for relative_timestamp in sample_times(sample_duration, interval_seconds=interval_seconds, max_frames=max_frames):
+        timestamp = min(end_seconds, start_seconds + relative_timestamp)
         capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
         ok, frame = capture.read()
 
@@ -591,6 +678,18 @@ def longest_false_run(values):
     return longest
 
 
+def trailing_false_run(values):
+    current = 0
+
+    for value in reversed(values):
+        if value:
+            break
+
+        current += 1
+
+    return current
+
+
 def estimate_skin_tone_ratio(frame):
     if frame is None or frame.size <= 0:
         return 0.0
@@ -638,10 +737,12 @@ def summarize_frame_metrics(metrics, asset_type):
     flags = []
     face_presence_rate = face_count / count
     no_face_run_ratio = longest_false_run(plausible) / count
+    trailing_no_face_run_ratio = trailing_false_run(plausible) / count
     low_info_ratio = low_info_count / count
     black_ratio = black_count / count
     avg_offset = sum(offsets) / len(offsets) if offsets else None
     max_offset = max(offsets) if offsets else None
+    severe_offset_ratio = 0.0
     avg_face_height = sum(face_heights) / len(face_heights) if face_heights else None
     flat_skin_false_face_ratio = len(flat_skin_false_faces) / count
     small_face_ratio_of_faces = small_face_count / len(face_heights) if face_heights else 0.0
@@ -652,11 +753,27 @@ def summarize_frame_metrics(metrics, asset_type):
     if low_info_ratio > 0.18:
         flags.append("too many low-information frames")
 
-    if asset_type in {"raw_clip", "captioned_source", "final_upload"}:
-        min_face = 0.35 if asset_type != "final_upload" else 0.42
-        max_no_face_run = 0.32 if asset_type != "final_upload" else 0.36
-        avg_offset_limit = 0.22 if asset_type != "final_upload" else 0.26
-        severe_offset_limit = 0.35 if asset_type != "final_upload" else 0.40
+    if asset_type in {"raw_clip", "captioned_source", "final_upload", "final_upload_source", "downloaded_source_section"}:
+        if asset_type == "final_upload":
+            min_face = 0.42
+            max_no_face_run = 0.36
+            avg_offset_limit = 0.26
+            severe_offset_limit = 0.42
+        elif asset_type == "final_upload_source":
+            min_face = 0.35
+            max_no_face_run = 0.36
+            avg_offset_limit = 0.30
+            severe_offset_limit = 0.46
+        else:
+            min_face = 0.35
+            max_no_face_run = 0.32
+            avg_offset_limit = 0.22
+            severe_offset_limit = 0.35
+        severe_offset_ratio = (
+            sum(1 for offset in offsets if offset > severe_offset_limit) / len(offsets)
+            if offsets
+            else 0.0
+        )
 
         if face_presence_rate < min_face:
             flags.append("low speaker/face presence")
@@ -664,10 +781,22 @@ def summarize_frame_metrics(metrics, asset_type):
         if no_face_run_ratio > max_no_face_run:
             flags.append("extended run without a strong face")
 
+        if (
+            asset_type == "final_upload_source"
+            and count >= 6
+            and trailing_no_face_run_ratio > 0.0
+            and face_presence_rate >= 0.70
+        ):
+            flags.append("source playback ends without a strong face")
+
         if avg_offset is not None and avg_offset > avg_offset_limit:
             flags.append("subject often off center")
 
-        if max_offset is not None and max_offset > severe_offset_limit:
+        if max_offset is not None and max_offset > severe_offset_limit and (
+            max_offset > severe_offset_limit + 0.06
+            or severe_offset_ratio >= 0.10
+            or (avg_offset is not None and avg_offset > avg_offset_limit)
+        ):
             flags.append("severe off-center frames")
 
         if (
@@ -722,10 +851,12 @@ def summarize_frame_metrics(metrics, asset_type):
         "sample_count": count,
         "face_presence_rate": round(face_presence_rate, 4),
         "longest_no_face_run_ratio": round(no_face_run_ratio, 4),
+        "trailing_no_face_run_ratio": round(trailing_no_face_run_ratio, 4),
         "black_frame_ratio": round(black_ratio, 4),
         "low_info_frame_ratio": round(low_info_ratio, 4),
         "avg_face_center_offset": round(avg_offset, 4) if avg_offset is not None else None,
         "max_face_center_offset": round(max_offset, 4) if max_offset is not None else None,
+        "severe_face_center_offset_ratio": round(severe_offset_ratio, 4),
         "avg_face_height_ratio": round(avg_face_height, 4) if avg_face_height is not None else None,
         "flat_skin_false_face_ratio": round(flat_skin_false_face_ratio, 4),
         "small_face_ratio_of_faces": round(small_face_ratio_of_faces, 4),
@@ -1097,7 +1228,10 @@ def audit_titles(themes=None):
                 flags.append(f"package status is {status or 'not_upload_ready'}")
 
             if daily_editorial and item.get("transcript_excerpt"):
-                if not daily_editorial.clip_has_theme_relevance(theme_name, item):
+                if (
+                    not RELAX_THEME_RELEVANCE_GATES
+                    and not daily_editorial.clip_has_theme_relevance(theme_name, item)
+                ):
                     flags.append("transcript appears off-theme for channel")
 
                 if theme_name in support_audit_themes and not daily_editorial.topic_supported_by_clip(text, item):
@@ -1377,6 +1511,15 @@ def audit_prospective_titles(themes=None, max_per_theme=30):
                 countdown_slot=max(1, 6 - inspected),
                 total_count=5,
             )
+            title = daily_editorial.sanitize_social_title(
+                theme_name,
+                title,
+                topic,
+                clip=clip,
+                source_title=clip.get("source_title", ""),
+                channel=clip.get("source_channel", ""),
+                content_format="countdown",
+            )
             flags = audit_title_flags(theme_name, title, topic_terms=[title, topic, clip.get("source_title", "")])
             topic_terms = clip.get("topic_fingerprint") or [topic]
 
@@ -1420,15 +1563,24 @@ def audit_prospective_titles(themes=None, max_per_theme=30):
 def analyze_asset(asset, interval_seconds=2.0, max_frames=36):
     path = asset["path"]
     media = ffprobe_media(path)
+    frame_window = frame_sample_window_for_asset(asset, media)
+    sampled_asset_type = frame_window["asset_type"]
     contact_sheet, frame_samples = create_contact_sheet(
         path,
         asset["theme"],
-        asset["asset_type"],
+        sampled_asset_type,
         media,
         interval_seconds=interval_seconds,
         max_frames=max_frames,
+        start_seconds=frame_window["start_seconds"],
+        end_seconds=frame_window["end_seconds"],
     )
-    frame_qc = summarize_frame_metrics(frame_samples, asset["asset_type"])
+    frame_qc = summarize_frame_metrics(frame_samples, sampled_asset_type)
+    frame_qc["sampled_asset_type"] = sampled_asset_type
+    frame_qc["sample_start_seconds"] = round(float(frame_window["start_seconds"] or 0.0), 3)
+    if frame_window["end_seconds"] is not None:
+        frame_qc["sample_end_seconds"] = round(float(frame_window["end_seconds"] or 0.0), 3)
+
     if media.get("has_audio"):
         audio_qc = analyze_audio_start(path)
     elif asset["asset_type"] == "countdown_intro":
@@ -1465,6 +1617,12 @@ def analyze_asset(asset, interval_seconds=2.0, max_frames=36):
         "media": media,
         "contact_sheet": contact_sheet,
         "frame_qc": frame_qc,
+        "frame_sample_window": {
+            "asset_type": sampled_asset_type,
+            "start_seconds": frame_qc.get("sample_start_seconds"),
+            "end_seconds": frame_qc.get("sample_end_seconds"),
+            "source_play_duration": frame_window["package"].get("source_play_duration"),
+        },
         "audio_qc": audio_qc,
         "core_render_qc": core_render_qc,
         "core_render_review_file": clip_review.get("review_file", ""),
@@ -1602,9 +1760,14 @@ def run_content_qc(
     asset_types=None,
     report_suffix="",
     skip_title_audit=False,
+    include_revision_assets=False,
 ):
     os.makedirs(REPORT_DIR, exist_ok=True)
-    assets = [] if titles_only else discover_assets(themes=themes, asset_types=asset_types)
+    assets = [] if titles_only else discover_assets(
+        themes=themes,
+        asset_types=asset_types,
+        include_revision_assets=include_revision_assets,
+    )
 
     if limit:
         assets = assets[:int(limit)]
@@ -1653,13 +1816,14 @@ def run_content_qc(
 def parse_args():
     parser = argparse.ArgumentParser(description="Review generated clips with frame-contact sheets, audio intro checks, and title audits.")
     parser.add_argument("--theme", action="append", help="Theme to inspect. Repeat for multiple themes. Defaults to all themes.")
-    parser.add_argument("--asset-type", action="append", choices=["final_upload", "countdown_intro", "captioned_source", "raw_clip"], help="Asset type to inspect. Repeat for multiple types.")
+    parser.add_argument("--asset-type", action="append", choices=["final_upload", "countdown_intro", "captioned_source", "raw_clip", "downloaded_source_section"], help="Asset type to inspect. Repeat for multiple types.")
     parser.add_argument("--final-only", action="store_true", help="Inspect only final upload files.")
     parser.add_argument("--interval-seconds", type=float, default=2.0, help="Frame sampling interval.")
     parser.add_argument("--max-frames", type=int, default=36, help="Maximum sampled frames per video.")
     parser.add_argument("--limit", type=int, help="Limit assets for quick smoke tests.")
     parser.add_argument("--titles-only", action="store_true", help="Only audit existing and prospective titles; skip frame/audio sampling.")
     parser.add_argument("--skip-title-audit", action="store_true", help="Skip title/prospective-title audits for faster frame/audio sampling.")
+    parser.add_argument("--include-revision-assets", action="store_true", help="Include needs_revision/rejected final-upload packages in frame/audio sampling.")
     parser.add_argument("--report-suffix", help="Write content_qc_SUFFIX.json/.md instead of content_qc_latest.*")
     return parser.parse_args()
 
@@ -1676,6 +1840,7 @@ def main():
         asset_types=["final_upload"] if args.final_only else args.asset_type,
         report_suffix=args.report_suffix or "",
         skip_title_audit=args.skip_title_audit,
+        include_revision_assets=args.include_revision_assets,
     )
 
 

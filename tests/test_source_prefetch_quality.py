@@ -47,6 +47,33 @@ class SourcePrefetchQualityTests(unittest.TestCase):
         self.assertFalse(disqualified)
         self.assertEqual(reasons, [])
 
+    def test_recent_future_premiere_failure_is_temporarily_skipped(self):
+        record = {
+            "last_clip_generation_error_type": "blocked",
+            "last_clip_generation_error_message": "ERROR: [youtube] abc123: Premieres in 2 hours",
+            "last_clip_generation_attempt_at": clip_generation.utc_timestamp(),
+        }
+
+        self.assertIn("Premieres in 2 hours", clip_generation.recent_blocked_skip_reason(record))
+
+    def test_old_future_premiere_failure_can_retry(self):
+        record = {
+            "last_clip_generation_error_type": "blocked",
+            "last_clip_generation_error_message": "ERROR: [youtube] abc123: Premieres in 2 hours",
+            "last_clip_generation_attempt_at": "2000-01-01T00:00:00Z",
+        }
+
+        self.assertEqual(clip_generation.recent_blocked_skip_reason(record), "")
+
+    def test_cached_audio_duration_guard_rejects_oversized_source(self):
+        record = {}
+
+        with patch.object(clip_generation, "get_media_duration_seconds", return_value=clip_generation.MAX_SOURCE_DURATION_SECONDS + 1):
+            with self.assertRaises(clip_generation.SkippableVideoError):
+                clip_generation.reject_audio_file_duration("cached_audio.m4a", record, "cached_audio")
+
+        self.assertGreater(record.get("duration_seconds", 0), clip_generation.MAX_SOURCE_DURATION_SECONDS)
+
 
 if __name__ == "__main__":
     unittest.main()

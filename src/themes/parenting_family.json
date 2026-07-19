@@ -1,0 +1,186 @@
+{
+    "theme": "parenting_family",
+    "profile": "parenting_family",
+    "brand": {
+        "channel_name": "The Parenting Archive",
+        "positioning": "Practical parenting, family, child psychology, and communication clips with careful safety framing.",
+        "audience": "Parents and caregivers who want useful, non-shaming advice.",
+        "viewer_promise": "One practical family communication or child-development insight per clip.",
+        "voice": "warm practical editor",
+        "risk_tolerance": "low"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@GoodInsideDrBecky/videos",
+        "https://www.youtube.com/@TheMomRoom/videos",
+        "https://www.youtube.com/@RaisingGoodHumansPodcast/videos",
+        "https://www.youtube.com/@MelRobbins/videos",
+        "https://www.youtube.com/@JayShettyPodcast/videos",
+        "https://www.youtube.com/@TheSchoolOfLife/videos",
+        "https://www.youtube.com/@hubermanlab/videos",
+        "https://www.youtube.com/@DrShefali/videos",
+        "https://www.youtube.com/@BigLittleFeelings/videos",
+        "https://www.youtube.com/@JanetLansbury/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Practical parenting, family, child psychology, and communication clips with careful safety framing.",
+        "source_strategy": "Parenting experts and family interview channels with evergreen advice and high trust requirements."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            18,
+            28,
+            40,
+            55
+        ],
+        "min_clip_duration": 14,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.55,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": true,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "parenting_script",
+            "family_pattern",
+            "child_development",
+            "communication_rule",
+            "emotional_regulation"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "parenting",
+            "kids",
+            "child",
+            "family",
+            "tantrum",
+            "communication",
+            "emotion"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "parenting_script",
+            "family_pattern",
+            "child_development",
+            "communication_rule",
+            "emotional_regulation"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "clip_then_takeaway",
+            "context_card",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "clip_then_takeaway",
+        "max_intro_seconds": 2.5,
+        "caption_style": "calm_takeaway",
+        "framing_style": "clean_speaker",
+        "overlay_style": "takeaway_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "A Better Parenting Response To {topic}",
+            "The Family Pattern Behind {topic}",
+            "Why {topic} Is So Hard For Parents"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#parenting",
+            "#family",
+            "#childdevelopment",
+            "#shorts"
+        ],
+        "tags": [
+            "parenting",
+            "family",
+            "child psychology",
+            "communication",
+            "kids"
+        ],
+        "topic_tags": {
+            "parenting": "#parenting",
+            "kids": "#kids",
+            "child": "#child",
+            "family": "#family",
+            "tantrum": "#tantrum",
+            "communication": "#communication",
+            "emotion": "#emotion"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": true,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "medical cure claims",
+            "supplement claims",
+            "mental-health crisis advice"
+        ],
+        "manual_review_topics": [
+            "medical protocols",
+            "diet claims",
+            "therapy claims"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

@@ -9,8 +9,11 @@ output/
 logs/
 src/id.json
 src/pulled.json
+src/.pulled.json*.tmp
 src/executed_id.json
 src/adjective_rotation.json
+
+state_backups/
 
 *.pt
 *.onnx

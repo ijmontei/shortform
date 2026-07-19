@@ -13,6 +13,35 @@ Version 1.1 short-form clip generation pipeline.
 
 Use `--skip-youtube` when you want to prepare upload-ready clips without uploading.
 
+## Travel-Safe / Resumable Runs
+
+When internet may cut out, use travel-safe mode to front-load the network-heavy work across all themes before local rendering and packaging starts:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --travel-safe
+```
+
+For hotel/travel workflows, split the run into three resumable blocks:
+
+```powershell
+# 1. Good internet: fetch metadata, download audio, score, and prefetch selected video sections.
+.\venv_313\Scripts\python.exe .\run.py --acquisition-only
+
+# 2. Weak internet is okay: render, package, reconcile, and build the upload manifest.
+.\venv_313\Scripts\python.exe .\run.py --package-only
+
+# 3. Good internet again: upload the prepared queue.
+.\venv_313\Scripts\python.exe .\run.py --upload-only
+```
+
+For a fresh production run, combine clean slate with the first block:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --clean-slate --acquisition-only
+.\venv_313\Scripts\python.exe .\run.py --package-only
+.\venv_313\Scripts\python.exe .\run.py --upload-only
+```
+
 Run a health check before a long production run:
 
 ```powershell
@@ -547,13 +576,15 @@ $env:SHORTFORM_SECONDARY_FINAL_FRAME_QC_MAX_FRAMES="10"
 
 The secondary final-frame QC samples the completed upload package with the same contact-sheet analyzer used by `content_qc.py`. It catches issues such as off-center speakers, weak face/speaker continuity, and background/object locks that may not be obvious from the source clip alone.
 
+Editorial gating prioritizes watchability over perfect brand/topic purity. `SHORTFORM_RELAX_THEME_RELEVANCE_GATES=1` is the default: configured source channels are treated as enough brand context, so clips are not rejected just because the transcript does not contain theme keywords. Title/caption QA, burned captions, duplicate source prevention, dead/black frames, obvious background locks, and intro-audio safety remain hard gates. A final source segment ending without a strong face is recorded for review, but it is no longer a standalone upload blocker.
+
 `run.py --validate-outputs` fails if final metadata still contains `needs_revision` or `rejected` packages, because those are not upload-ready. To inspect revision artifacts during debugging without failing validation:
 
 ```powershell
 $env:SHORTFORM_VALIDATE_ALLOW_REVISION_OUTPUTS="1"
 ```
 
-ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. The setup line is intentionally short, faster-paced, and clip-specific, then the source audio takes over. The pipeline fits and masters the voice first, then adds a preserved lead-in, fade-in, and tail pad so the first and last syllables are not clipped. Tune those with `SHORTFORM_NARRATION_LEAD_IN_SECONDS`, `SHORTFORM_NARRATION_FADE_IN_SECONDS`, and `SHORTFORM_NARRATION_TAIL_PAD_SECONDS`. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
+ElevenLabs is the production default for the setup voice. The default voice ID is `HAM2nE4sbHnPgMji6JqB`. Countdown setup narration is intentionally short and clear: `Number X: [short hook]`, then the viewer reads the on-screen title and the source audio takes over. Popular-segment shorts use the same restraint with a brief `Standout: [short hook]` line. The pipeline no longer speeds narration aggressively, pitches it down, or adds artificial bass; `SHORTFORM_NARRATION_MAX_TEMPO` defaults to natural speed and is capped to keep speech understandable, while `SHORTFORM_NARRATION_PITCH=1.0` and `SHORTFORM_NARRATION_BASS_GAIN=0.0` preserve the cloned voice. It still adds a preserved lead-in, fade-in, and tail pad so the first and last syllables are not clipped. Tune those with `SHORTFORM_NARRATION_LEAD_IN_SECONDS`, `SHORTFORM_NARRATION_FADE_IN_SECONDS`, and `SHORTFORM_NARRATION_TAIL_PAD_SECONDS`. Set `SHORTFORM_ELEVENLABS_FALLBACK_VOICE_IDS` only if you intentionally want backup ElevenLabs voices. If `ELEVENLABS_API_KEY` is missing, the script falls back to the local Windows voice so test renders can still complete, but that fallback should not be used for channel uploads.
 
 Popular-segment videos are controlled separately:
 

@@ -1,0 +1,187 @@
+{
+    "theme": "food_hospitality",
+    "profile": "food_hospitality",
+    "brand": {
+        "channel_name": "The Food Archive",
+        "positioning": "Chef, restaurant, food-culture, and hospitality interview moments with strong story and craft.",
+        "audience": "Food viewers who love chef stories, restaurant lessons, and food-culture context.",
+        "viewer_promise": "A concrete chef story, restaurant lesson, or food insight per clip.",
+        "voice": "hungry culture curator",
+        "risk_tolerance": "medium"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@FirstWeFeast/videos",
+        "https://www.youtube.com/@mythicalkitchen/videos",
+        "https://www.youtube.com/@Eater/videos",
+        "https://www.youtube.com/@munchies/videos",
+        "https://www.youtube.com/@bonappetit/videos",
+        "https://www.youtube.com/@TheSporkful/videos",
+        "https://www.youtube.com/@RestaurantUnstoppable/videos",
+        "https://www.youtube.com/@chefrush/videos",
+        "https://www.youtube.com/@SortedFood/videos",
+        "https://www.youtube.com/@FoodInsider/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Chef, restaurant, food-culture, and hospitality interview moments with strong story and craft.",
+        "source_strategy": "Food interview shows and chef/hospitality channels with story-rich clips."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            18,
+            28,
+            40,
+            55
+        ],
+        "min_clip_duration": 12,
+        "max_clip_duration": 60,
+        "default_clip_count": 8,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 6,
+        "min_readiness_score": 0.66,
+        "min_selected_score": 0.28,
+        "max_topic_similarity": 0.56,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": true,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "chef_story",
+            "restaurant_lesson",
+            "food_culture",
+            "hospitality_mistake",
+            "craft_explainer"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "chef",
+            "restaurant",
+            "service",
+            "menu",
+            "kitchen",
+            "hospitality",
+            "food"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "chef_story",
+            "restaurant_lesson",
+            "food_culture",
+            "hospitality_mistake",
+            "craft_explainer"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.5,
+        "caption_style": "place_specific",
+        "framing_style": "speaker_context",
+        "overlay_style": "map_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Chef Lesson Behind {topic}",
+            "Why Restaurants Struggle With {topic}",
+            "This Food Story Explains {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#food",
+            "#chef",
+            "#restaurants",
+            "#shorts"
+        ],
+        "tags": [
+            "food",
+            "chef",
+            "restaurants",
+            "hospitality",
+            "cooking"
+        ],
+        "topic_tags": {
+            "chef": "#chef",
+            "restaurant": "#restaurant",
+            "service": "#service",
+            "menu": "#menu",
+            "kitchen": "#kitchen",
+            "hospitality": "#hospitality",
+            "food": "#food"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "visa claims",
+            "border claims",
+            "safety claims",
+            "current prices"
+        ],
+        "manual_review_topics": [
+            "travel safety",
+            "political conflict",
+            "visa rules"
+        ],
+        "minimum_transformation_score": 0.55
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

@@ -6,6 +6,7 @@ from theme_config import clean_theme_name, ensure_theme, load_json_file, write_j
 
 
 UPLOADABLE_STATUSES = {"ready", "failed"}
+REVISION_STATUSES = {"needs_revision", "rejected"}
 
 
 def utc_timestamp():
@@ -107,10 +108,149 @@ def uploadable_content_count(content, content_dir):
     )
 
 
+def drop_missing_video_packages(metadata):
+    metadata = metadata if isinstance(metadata, dict) else {}
+    dropped = []
+
+    for collection in ("content", "archive"):
+        retained = []
+
+        for package in metadata.get(collection) or []:
+            if not isinstance(package, dict):
+                continue
+
+            video_file = str(package.get("video_file") or "").strip()
+
+            if video_file and os.path.exists(video_file):
+                retained.append(package)
+                continue
+
+            dropped.append({
+                "collection": collection,
+                "title": package.get("title", ""),
+                "video_file": video_file,
+                "posting_status": package_status(package),
+                "source_state_key": package.get("source_state_key", ""),
+                "dropped_at": utc_timestamp(),
+            })
+
+        metadata[collection] = retained
+
+    if dropped:
+        existing = metadata.get("dropped_missing_outputs") or []
+        metadata["dropped_missing_outputs"] = (existing + dropped)[-200:]
+
+    return dropped
+
+
+def package_video_paths(metadata):
+    paths = set()
+
+    for collection in ("content", "archive", "needs_revision"):
+        for package in metadata.get(collection) or []:
+            if not isinstance(package, dict):
+                continue
+
+            video_file = str(package.get("video_file") or "").strip()
+
+            if not video_file:
+                continue
+
+            paths.add(os.path.normcase(os.path.abspath(video_file)))
+
+    return paths
+
+
+def title_from_filename(filename):
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    stem = stem.removesuffix("_upload")
+    parts = stem.split("_")
+
+    while parts and (
+        parts[0].isdigit()
+        or parts[0].count("-") == 2
+        or parts[0] in {"countdown", "popular", "daily", "scan"}
+        or parts[0].lower() in {"comedy", "finance", "popculture", "technology", "ai", "gaming"}
+    ):
+        parts.pop(0)
+
+    title = " ".join(parts).replace("  ", " ").strip()
+    return title or stem.replace("_", " ").strip()
+
+
+def rescue_orphan_video_packages(theme, metadata, content_dir, archive_dir):
+    metadata = metadata if isinstance(metadata, dict) else {}
+    known_paths = package_video_paths(metadata)
+    rescued = []
+
+    for directory, collection in ((content_dir, "content"), (archive_dir, "archive")):
+        if not os.path.isdir(directory):
+            continue
+
+        for filename in os.listdir(directory):
+            if not filename.lower().endswith(".mp4"):
+                continue
+
+            path = os.path.abspath(os.path.join(directory, filename))
+            normalized = os.path.normcase(path)
+
+            if normalized in known_paths:
+                continue
+
+            package = {
+                "theme": theme,
+                "title": title_from_filename(filename),
+                "video_file": path,
+                "posting_status": {"youtube_shorts": "ready"},
+                "upload_status": "pending",
+                "content_has_burned_captions": True,
+                "upload_ready_requires_burned_captions": True,
+                "archive_status": "rescued_orphan_file" if collection == "archive" else "",
+                "rescued_from_orphan_file_at": utc_timestamp(),
+                "source_state_key": f"rescued_orphan|{theme}|{filename}",
+                "content_format": "rescued_editorial_output",
+            }
+            metadata.setdefault(collection, []).append(package)
+            known_paths.add(normalized)
+            rescued.append(package)
+
+    return rescued
+
+
+def separate_revision_packages(metadata):
+    metadata = metadata if isinstance(metadata, dict) else {}
+    revision_packages = metadata.get("needs_revision") if isinstance(metadata.get("needs_revision"), list) else []
+    moved = []
+
+    for collection in ("content", "archive"):
+        retained = []
+
+        for package in metadata.get(collection) or []:
+            if not isinstance(package, dict):
+                continue
+
+            if package_status(package) in REVISION_STATUSES:
+                package["revision_collection_source"] = collection
+                revision_packages.append(package)
+                moved.append(package)
+                continue
+
+            retained.append(package)
+
+        metadata[collection] = retained
+
+    metadata["needs_revision"] = dedupe_packages(revision_packages)
+    return moved
+
+
 def promote_archive_packages(archive, content, content_dir, queue_limit):
     promoted = []
     remaining_archive = []
-    max_promotions = queue_limit if queue_limit and queue_limit > 0 else len(archive or [])
+    if queue_limit and queue_limit > 0:
+        existing_uploadable = uploadable_content_count(content, content_dir)
+        max_promotions = max(0, queue_limit - existing_uploadable)
+    else:
+        max_promotions = len(archive or [])
 
     for package in archive or []:
         if len(promoted) >= max_promotions:
@@ -180,11 +320,18 @@ def prepare_upload_queue(theme, queue_limit=15):
     archive = metadata.get("archive") if isinstance(metadata, dict) else []
     content = dedupe_packages(content if isinstance(content, list) else [])
     archive = dedupe_packages(archive if isinstance(archive, list) else [])
+    metadata["content"] = content
+    metadata["archive"] = archive
+    rescued = rescue_orphan_video_packages(theme, metadata, content_dir, archive_dir)
+    dropped_missing = drop_missing_video_packages(metadata)
+    revision_moved = separate_revision_packages(metadata)
+    content = metadata["content"]
+    archive = metadata["archive"]
 
     promoted = []
     archived = []
 
-    if uploadable_content_count(content, content_dir) == 0 and archive:
+    if archive and (not queue_limit or queue_limit <= 0 or uploadable_content_count(content, content_dir) < queue_limit):
         archive, promoted = promote_archive_packages(archive, content, content_dir, queue_limit)
 
     content, archive, archived = archive_overflow_packages(content, archive, archive_dir, queue_limit)
@@ -205,6 +352,9 @@ def prepare_upload_queue(theme, queue_limit=15):
         "archive_count": len(metadata["archive"]),
         "promoted_count": len(promoted),
         "archived_count": len(archived),
+        "rescued_orphan_count": len(rescued),
+        "dropped_missing_count": len(dropped_missing),
+        "revision_moved_count": len(revision_moved),
         "content_dir": content_dir,
         "archive_dir": archive_dir,
     }

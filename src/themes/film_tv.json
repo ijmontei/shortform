@@ -1,0 +1,188 @@
+{
+    "theme": "film_tv",
+    "profile": "film_tv",
+    "brand": {
+        "channel_name": "The Screen Archive",
+        "positioning": "Actor, director, TV, and film interview moments with craft, behind-the-scenes, and fandom context.",
+        "audience": "Film and TV fans who care about actors, scenes, characters, and production stories.",
+        "viewer_promise": "A behind-the-scenes story, craft insight, or fan-recognizable moment per clip.",
+        "voice": "cinematic culture editor",
+        "risk_tolerance": "medium"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@hollywoodreporter/videos",
+        "https://www.youtube.com/@Variety/videos",
+        "https://www.youtube.com/@VanityFair/videos",
+        "https://www.youtube.com/@GQVideos/videos",
+        "https://www.youtube.com/@FilmThreat/videos",
+        "https://www.youtube.com/@ColliderVideos/videos",
+        "https://www.youtube.com/@RottenTomatoesTV/videos",
+        "https://www.youtube.com/@IMDb/videos",
+        "https://www.youtube.com/@ScreenRantPlus/videos",
+        "https://www.youtube.com/@WIRED/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Actor, director, TV, and film interview moments with craft, behind-the-scenes, and fandom context.",
+        "source_strategy": "Entertainment interview channels with recognizable IP/fandom hooks and behind-the-scenes value."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            8,
+            12,
+            18,
+            24,
+            32,
+            45
+        ],
+        "min_clip_duration": 7,
+        "max_clip_duration": 50,
+        "default_clip_count": 10,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 3,
+        "allow_cold_open": true,
+        "prefer_context": false,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "behind_the_scenes",
+            "actor_story",
+            "director_insight",
+            "scene_breakdown",
+            "fandom_moment"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "movie",
+            "scene",
+            "actor",
+            "director",
+            "character",
+            "script",
+            "set"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "behind_the_scenes",
+            "actor_story",
+            "director_insight",
+            "scene_breakdown",
+            "fandom_moment"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "cold_open",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "cold_open",
+        "max_intro_seconds": 1.8,
+        "caption_style": "comedy_punchline",
+        "framing_style": "speaker_reaction",
+        "overlay_style": "bold_arcade"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Scene Story Behind {topic}",
+            "This Actor Explained {topic}",
+            "Why {topic} Worked On Screen"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#movies",
+            "#tv",
+            "#film",
+            "#shorts"
+        ],
+        "tags": [
+            "movies",
+            "film",
+            "tv",
+            "actor interview",
+            "director"
+        ],
+        "topic_tags": {
+            "movie": "#movie",
+            "scene": "#scene",
+            "actor": "#actor",
+            "director": "#director",
+            "character": "#character",
+            "script": "#script",
+            "set": "#set"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "targeted harassment",
+            "protected-class insults"
+        ],
+        "manual_review_topics": [
+            "edgy identity jokes",
+            "sexual content",
+            "drug stories"
+        ],
+        "minimum_transformation_score": 0.45
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.2,
+        "payoff": 0.24,
+        "standalone_context": 0.1,
+        "theme_signal": 0.22,
+        "public_popularity": 0.08,
+        "captionability": 0.05,
+        "visual_quality": 0.07,
+        "pacing": 0.04,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

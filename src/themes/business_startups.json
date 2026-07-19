@@ -1,0 +1,202 @@
+{
+    "theme": "business_startups",
+    "profile": "business_startups",
+    "brand": {
+        "channel_name": "The Founder Archive",
+        "positioning": "Founder, operator, and startup lessons from long interviews, filtered for specific tactics and tradeoffs.",
+        "audience": "Entrepreneurs and startup-curious viewers looking for useful lessons.",
+        "viewer_promise": "A concrete business model, growth, hiring, or product lesson per clip.",
+        "voice": "operator curator",
+        "risk_tolerance": "medium"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@MyFirstMillionPod/videos",
+        "https://www.youtube.com/@allin/videos",
+        "https://www.youtube.com/@ThisWeekinStartups/videos",
+        "https://www.youtube.com/@LennysPodcast/videos",
+        "https://www.youtube.com/@20VC/videos",
+        "https://www.youtube.com/@ycombinator/videos",
+        "https://www.youtube.com/@AcquiredFM/videos",
+        "https://www.youtube.com/@NoahKagan/videos",
+        "https://www.youtube.com/@Foundr/videos",
+        "https://www.youtube.com/@TheDiaryOfACEO/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Founder, operator, and startup lessons from long interviews, filtered for specific tactics and tradeoffs.",
+        "source_strategy": "Founder and operator channels with repeatable lessons and high commercial audience value."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            24,
+            35,
+            45,
+            58
+        ],
+        "min_clip_duration": 18,
+        "max_clip_duration": 60,
+        "default_clip_count": 10,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.7,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": true,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "founder_lesson",
+            "growth_loop",
+            "product_strategy",
+            "business_breakdown",
+            "hiring_mistake"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "founder",
+            "startup",
+            "growth",
+            "customer",
+            "product",
+            "revenue",
+            "hiring"
+        ],
+        "negative_keywords": [
+            "hrt",
+            "menopause",
+            "doctor",
+            "doctors",
+            "medical",
+            "medicine",
+            "hormone",
+            "hormones",
+            "clitoris",
+            "orgasm",
+            "sexual health",
+            "women's bodies",
+            "fertility"
+        ],
+        "archetypes": [
+            "founder_lesson",
+            "growth_loop",
+            "product_strategy",
+            "business_breakdown",
+            "hiring_mistake"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.8,
+        "caption_style": "precise_numbers",
+        "framing_style": "speaker_data_card",
+        "overlay_style": "credible_context"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Startup Bet Behind {topic}",
+            "Why Founders Obsess Over {topic}",
+            "The Business Mistake Hidden In {topic}",
+            "How {topic} Became The Growth Lever"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#startups",
+            "#business",
+            "#founder",
+            "#shorts"
+        ],
+        "tags": [
+            "startups",
+            "business",
+            "founder",
+            "entrepreneurship",
+            "growth"
+        ],
+        "topic_tags": {
+            "founder": "#founder",
+            "startup": "#startup",
+            "growth": "#growth",
+            "customer": "#customer",
+            "product": "#product",
+            "revenue": "#revenue",
+            "hiring": "#hiring"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": true,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "specific stock recommendation",
+            "get-rich-quick language",
+            "unsupported prediction",
+            "crypto hype"
+        ],
+        "manual_review_topics": [
+            "named investments",
+            "market predictions",
+            "tax/legal advice"
+        ],
+        "minimum_transformation_score": 0.6
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.14,
+        "payoff": 0.12,
+        "standalone_context": 0.18,
+        "theme_signal": 0.18,
+        "public_popularity": 0.08,
+        "captionability": 0.06,
+        "visual_quality": 0.06,
+        "pacing": 0.04,
+        "transformation": 0.14
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

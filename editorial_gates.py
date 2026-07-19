@@ -15,7 +15,15 @@ RAW_RECYCLER_CONTENT_FORMATS = {
     "classic_clip",
     "selected_clip",
 }
+NON_SPEAKER_VISUAL_THEMES = {
+    "politics",
+    "truecrime",
+    "sports",
+    "gaming",
+    "popculture",
+}
 TRUST_CONFIGURED_SOURCE_RELEVANCE = os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") != "0"
+RELAX_THEME_RELEVANCE_GATES = os.getenv("SHORTFORM_RELAX_THEME_RELEVANCE_GATES", "1") != "0"
 CONFIGURED_SOURCE_TIERS = {"priority", "secondary", "legacy"}
 FINANCIAL_CLAIM_TERMS = {
     "buy",
@@ -460,23 +468,41 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
     alive_no_face = _float(frame_path.get("alive_no_face_frame_ratio"), 0.0)
     max_center_offset = _float(frame_path.get("max_face_center_offset_ratio"), 0.0)
     low_information = _float(frame_path.get("low_information_frame_ratio"), 0.0)
+    dead_frames = _float(frame_path.get("dead_frame_ratio"), 0.0)
+    black_frames = _float(frame_path.get("black_frame_ratio"), 0.0)
     theme_key = str(theme or "").strip().lower().replace("-", "_").replace(" ", "_")
-    documentary_theme = theme_key in {"politics", "truecrime"}
+    non_speaker_visual_theme = theme_key in NON_SPEAKER_VISUAL_THEMES
+    visual_non_speaker_ok = (
+        non_speaker_visual_theme
+        and visual_score >= 0.58
+        and low_information <= 0.18
+        and dead_frames <= 0.02
+        and black_frames <= 0.02
+        and no_face_run <= 0.62
+        and alive_no_face <= 0.72
+        and not {
+            "probable background lock instead of speaker",
+            "probable tiny/background face lock",
+            "probable picture-in-picture/background lock",
+            "probable flat-surface false face lock",
+            "probable small-object/background face lock",
+        } & render_flags
+    )
     flags = []
 
     if visual_score and visual_score < 0.52:
         flags.append("final_package_low_visual_quality")
 
-    if low_information > (0.18 if documentary_theme else 0.12):
+    if low_information > (0.18 if non_speaker_visual_theme else 0.12):
         flags.append("final_package_low_information_frames")
 
-    if no_face_run > (0.50 if documentary_theme else 0.34):
+    if no_face_run > (0.62 if visual_non_speaker_ok else 0.34):
         flags.append("final_package_long_no_speaker_run")
 
-    if alive_no_face > (0.62 if documentary_theme else 0.46):
+    if alive_no_face > (0.72 if visual_non_speaker_ok else 0.46):
         flags.append("final_package_misses_speaker_too_often")
 
-    if face_presence and face_presence < (0.22 if documentary_theme else 0.36) and alive_no_face > 0.48:
+    if not visual_non_speaker_ok and face_presence and face_presence < 0.36 and alive_no_face > 0.48:
         flags.append("final_package_low_speaker_presence")
 
     if (
@@ -484,7 +510,9 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
         and alive_no_face > 0.30
         and {
             "subject off-center in final crop",
+            "subject severely off-center in final crop",
             "unstable final subject position",
+            "probable background lock instead of speaker",
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
@@ -493,10 +521,10 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
     ):
         flags.append("final_package_probable_background_lock")
 
-    if "alive frames often miss speaker" in render_flags and alive_no_face > 0.40:
+    if "alive frames often miss speaker" in render_flags and alive_no_face > (0.72 if visual_non_speaker_ok else 0.40):
         flags.append("final_package_alive_frames_miss_speaker")
 
-    if "extended no-speaker run in final crop" in render_flags and no_face_run > 0.24:
+    if "extended no-speaker run in final crop" in render_flags and no_face_run > (0.62 if visual_non_speaker_ok else 0.24):
         flags.append("final_package_extended_no_speaker_run")
 
     if "probable tiny/background face lock" in render_flags:
@@ -513,9 +541,6 @@ def transformed_render_quality_flags(theme, content_format, render_qc):
 
     if "probable broadcast/b-roll montage instead of speaker clip" in render_flags:
         flags.append("final_package_probable_background_lock")
-
-    if "subject severely off-center in final crop" in render_flags:
-        flags.append("final_package_severe_off_center")
 
     return flags
 
@@ -596,6 +621,7 @@ def evaluate_editorial_gates(theme, package):
     trusted_source_relevance = TRUST_CONFIGURED_SOURCE_RELEVANCE and _configured_source_package(package, raw_rank_signals)
     allow_raw_clip_uploads = os.getenv("SHORTFORM_ALLOW_RAW_CLIP_UPLOADS", "0") == "1"
     flags = []
+    advisory_flags = []
 
     if (
         content_format in RAW_RECYCLER_CONTENT_FORMATS
@@ -625,75 +651,87 @@ def evaluate_editorial_gates(theme, package):
     flags.extend(transformed_render_quality_flags(theme, content_format, render_qc))
 
     if transformation_score < minimum_transformation:
-        flags.append("transformation_below_theme_minimum")
+        if trusted_source_relevance and content_format in TRANSFORMED_CONTENT_FORMATS:
+            advisory_flags.append("transformation_below_theme_minimum")
+        else:
+            flags.append("transformation_below_theme_minimum")
 
     if reused_content_risk >= 0.42:
         flags.append("high_reused_content_risk")
 
-    if theme_signal_score < 0.18 and not trusted_source_relevance:
+    if not RELAX_THEME_RELEVANCE_GATES and theme_signal_score < 0.18 and not trusted_source_relevance:
         flags.append("weak_theme_signal")
 
-    flags.extend(_theme_evidence_flags(theme, package, raw_rank_signals))
+    if not RELAX_THEME_RELEVANCE_GATES:
+        flags.extend(_theme_evidence_flags(theme, package, raw_rank_signals))
 
     if captionability_score < 0.58:
         flags.append("weak_captionability")
 
     if not title_quality.get("length_ok", True):
-        flags.append("title_length_outside_quality_range")
+        advisory_flags.append("title_length_outside_quality_range")
 
     if title_quality.get("generic_title"):
-        flags.append("generic_title")
+        advisory_flags.append("generic_title")
 
     if title_quality.get("mechanical_title"):
-        flags.append("mechanical_title")
+        advisory_flags.append("mechanical_title")
 
     if title_quality.get("repetitive_title"):
-        flags.append("repetitive_title")
+        advisory_flags.append("repetitive_title")
 
     if title_quality.get("weak_template_title"):
-        flags.append("weak_template_title")
+        advisory_flags.append("weak_template_title")
 
     if title_quality.get("keyword_soup_title"):
-        flags.append("keyword_soup_title")
+        advisory_flags.append("keyword_soup_title")
 
     if title_quality.get("raw_dialogue_fragment"):
-        flags.append("raw_dialogue_fragment_title")
+        advisory_flags.append("raw_dialogue_fragment_title")
 
     if title_quality.get("contextless_time_fragment"):
-        flags.append("contextless_time_fragment_title")
+        advisory_flags.append("contextless_time_fragment_title")
 
     if title_quality.get("source_suffix_title"):
-        flags.append("source_suffix_title")
+        advisory_flags.append("source_suffix_title")
 
     if title_quality.get("machine_label_title"):
-        flags.append("machine_label_title")
+        advisory_flags.append("machine_label_title")
 
     if title_quality.get("malformed_apostrophe_title"):
-        flags.append("malformed_apostrophe_title")
+        advisory_flags.append("malformed_apostrophe_title")
 
     if title_quality.get("source_only_title") or title_quality.get("source_title_like"):
-        flags.append("source_title_like")
+        advisory_flags.append("source_title_like")
 
-    if not title_quality.get("theme_native_title", True):
-        flags.append("weak_theme_native_title")
+    if (
+        not RELAX_THEME_RELEVANCE_GATES
+        and not trusted_source_relevance
+        and not title_quality.get("theme_native_title", True)
+    ):
+        advisory_flags.append("weak_theme_native_title")
 
     if (
         content_format in {"daily_editorial_short", "popular_segment_short"}
         and context_evidence["has_transcript_excerpt"]
         and not title_supported
     ):
-        flags.append("title_not_supported_by_clip_context")
+        advisory_flags.append("title_not_supported_by_clip_context")
 
     flags.extend(_script_quality_flags(package))
 
-    if _float(title_quality.get("theme_fit"), 1.0) < 0.52:
-        flags.append("weak_title_theme_fit")
+    if (
+        not RELAX_THEME_RELEVANCE_GATES
+        and not trusted_source_relevance
+        and _float(title_quality.get("theme_fit"), 1.0) < 0.52
+    ):
+        advisory_flags.append("weak_title_theme_fit")
 
     if _float(title_quality.get("specificity"), 1.0) < 0.28:
-        flags.append("low_title_specificity")
+        advisory_flags.append("low_title_specificity")
 
     if not title_quality.get("not_clickbait", True):
-        flags.append("clickbait_title")
+        advisory_flags.append("clickbait_title")
 
     if risk_controls.get("requires_claim_context"):
         intro_mode = (
@@ -703,7 +741,10 @@ def evaluate_editorial_gates(theme, package):
         )
 
         if intro_mode == "cold_open":
-            flags.append("claim_context_theme_using_cold_open")
+            if trusted_source_relevance and context_evidence["has_transcript_excerpt"]:
+                advisory_flags.append("claim_context_theme_using_cold_open")
+            else:
+                flags.append("claim_context_theme_using_cold_open")
 
         if not context_evidence["has_source_url"]:
             flags.append("missing_claim_source_url")
@@ -741,6 +782,7 @@ def evaluate_editorial_gates(theme, package):
 
     review_required = bool(
         flags
+        or advisory_flags
         or (risk_controls.get("requires_fact_check"))
         or (risk_controls.get("requires_financial_review"))
         or (risk_controls.get("requires_medical_review"))
@@ -751,6 +793,7 @@ def evaluate_editorial_gates(theme, package):
         "passed": not flags,
         "review_required": review_required,
         "flags": flags,
+        "advisory_flags": advisory_flags,
         "minimum_transformation_score": minimum_transformation,
         "theme_signal_score": theme_signal_score,
         "transformation_score": transformation_score,
@@ -769,4 +812,5 @@ def evaluate_editorial_gates(theme, package):
         },
         "content_format": content_format,
         "allow_raw_clip_uploads": allow_raw_clip_uploads,
+        "relax_theme_relevance_gates": RELAX_THEME_RELEVANCE_GATES,
     }

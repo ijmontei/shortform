@@ -1,0 +1,183 @@
+{
+    "theme": "outdoors_adventure",
+    "profile": "outdoors_adventure",
+    "brand": {
+        "channel_name": "The Outdoors Archive",
+        "positioning": "Outdoor, hunting, endurance, survival, and adventure interview stories with strong identity and stakes.",
+        "audience": "Outdoor viewers who care about adventure stories, survival lessons, and rugged personal challenges.",
+        "viewer_promise": "One vivid story, risk lesson, or outdoor skill insight per clip.",
+        "voice": "rugged storyteller",
+        "risk_tolerance": "medium"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@MeatEaterTV/videos",
+        "https://www.youtube.com/@joerogan/videos",
+        "https://www.youtube.com/@TheRichOutdoors/videos",
+        "https://www.youtube.com/@TheHuntingPublic/videos",
+        "https://www.youtube.com/@GrittyPodcast/videos",
+        "https://www.youtube.com/@BackpackerRadio/videos",
+        "https://www.youtube.com/@OutsideWatch/videos",
+        "https://www.youtube.com/@JockoPodcastOfficial/videos",
+        "https://www.youtube.com/@CameronHanes/videos",
+        "https://www.youtube.com/@BearGrylls/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Outdoor, hunting, endurance, survival, and adventure interview stories with strong identity and stakes.",
+        "source_strategy": "Outdoor/adventure interview channels with strong identity communities and story stakes."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            15,
+            24,
+            35,
+            45
+        ],
+        "min_clip_duration": 12,
+        "max_clip_duration": 55,
+        "default_clip_count": 10,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.66,
+        "min_selected_score": 0.29,
+        "max_topic_similarity": 0.54,
+        "candidate_stride_seconds": 4,
+        "allow_cold_open": true,
+        "prefer_context": true,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "survival_story",
+            "outdoor_risk",
+            "endurance_lesson",
+            "hunting_ethics",
+            "adventure_moment"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "hunt",
+            "mountain",
+            "survival",
+            "endurance",
+            "wild",
+            "danger",
+            "backcountry"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "survival_story",
+            "outdoor_risk",
+            "endurance_lesson",
+            "hunting_ethics",
+            "adventure_moment"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "context_card",
+        "max_intro_seconds": 2.2,
+        "caption_style": "bold_sports",
+        "framing_style": "debate_reaction",
+        "overlay_style": "scoreboard"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Adventure Lesson Behind {topic}",
+            "This Outdoor Story Got Dangerous",
+            "Why {topic} Matters In The Wild"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#outdoors",
+            "#adventure",
+            "#hunting",
+            "#shorts"
+        ],
+        "tags": [
+            "outdoors",
+            "adventure",
+            "hunting",
+            "survival",
+            "endurance"
+        ],
+        "topic_tags": {
+            "hunt": "#hunt",
+            "mountain": "#mountain",
+            "survival": "#survival",
+            "endurance": "#endurance",
+            "wild": "#wild",
+            "danger": "#danger",
+            "backcountry": "#backcountry"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "rights-protected game footage"
+        ],
+        "manual_review_topics": [
+            "injury claims",
+            "allegations about athletes"
+        ],
+        "minimum_transformation_score": 0.5
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.18,
+        "payoff": 0.18,
+        "standalone_context": 0.12,
+        "theme_signal": 0.22,
+        "public_popularity": 0.1,
+        "captionability": 0.05,
+        "visual_quality": 0.08,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

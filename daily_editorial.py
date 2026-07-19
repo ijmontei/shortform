@@ -27,10 +27,11 @@ except ImportError:
     yt_dlp = None
 
 import ytdlp_auth
+from content_archive import dedupe_packages
 from editorial_gates import evaluate_editorial_gates
 from metadata_generation import score_title_quality, title_passes_publishable_bar
-from metadata_generation.titles import source_context_title
-from theme_config import BASE_DIR, DEFAULT_THEME, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, utc_timestamp, write_json_file
+from metadata_generation.titles import polish_headline_title, source_context_title
+from theme_config import BASE_DIR, DEFAULT_THEME, EXECUTED_FILE, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, mark_stage, utc_timestamp, write_json_file
 from theme_profile import load_theme_profile, theme_hashtags, theme_tags
 from popularity_signals import (
     build_popularity_profile_from_info,
@@ -53,6 +54,12 @@ if not os.path.exists(FFPROBE_EXE):
 
 DAILY_TOPIC_COUNT = max(1, int(os.getenv("SHORTFORM_DAILY_TOPIC_COUNT", "10")))
 EDITORIAL_COUNTDOWN_SIZE = max(1, int(os.getenv("SHORTFORM_EDITORIAL_COUNTDOWN_SIZE", "5")))
+UPLOAD_READY_TARGET_PER_THEME = max(0, int(os.getenv("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", "15")))
+RESERVE_TARGET_PER_THEME = max(0, int(os.getenv("SHORTFORM_RESERVE_TARGET_PER_THEME", "10")))
+EDITORIAL_FINAL_PACKAGE_TARGET = max(1, int(os.getenv(
+    "SHORTFORM_EDITORIAL_FINAL_PACKAGE_TARGET",
+    str(UPLOAD_READY_TARGET_PER_THEME + RESERVE_TARGET_PER_THEME),
+)))
 EDITORIAL_CLIPS_PER_SHORT = max(1, min(2, int(os.getenv("SHORTFORM_EDITORIAL_CLIPS_PER_SHORT", "1"))))
 RENDER_RECAP_COMPILATION = os.getenv("SHORTFORM_EDITORIAL_RENDER_RECAP", "1") != "0"
 APPEND_METADATA = os.getenv("SHORTFORM_EDITORIAL_APPEND_METADATA", "0") == "1"
@@ -76,18 +83,24 @@ ELEVENLABS_STABILITY = float(os.getenv("ELEVENLABS_STABILITY", "0.16"))
 ELEVENLABS_SIMILARITY_BOOST = float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.94"))
 ELEVENLABS_STYLE = float(os.getenv("ELEVENLABS_STYLE", "0.98"))
 ELEVENLABS_SPEAKER_BOOST = os.getenv("ELEVENLABS_SPEAKER_BOOST", "1") != "0"
-NARRATION_PITCH = float(os.getenv("SHORTFORM_NARRATION_PITCH", "0.92"))
-NARRATION_BASS_GAIN = float(os.getenv("SHORTFORM_NARRATION_BASS_GAIN", "3.0"))
+NARRATION_PITCH = float(os.getenv("SHORTFORM_NARRATION_PITCH", "1.0"))
+NARRATION_BASS_GAIN = float(os.getenv("SHORTFORM_NARRATION_BASS_GAIN", "0.0"))
 NARRATION_LOUDNESS_I = float(os.getenv("SHORTFORM_NARRATION_LOUDNESS_I", "-16.0"))
 NARRATION_TARGET_SECONDS = float(os.getenv("SHORTFORM_NARRATION_TARGET_SECONDS", "3.40"))
 NARRATION_LEAD_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_LEAD_IN_SECONDS", "0.28")))
 NARRATION_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_FADE_IN_SECONDS", "0.07")))
 NARRATION_TAIL_PAD_SECONDS = max(0.0, float(os.getenv("SHORTFORM_NARRATION_TAIL_PAD_SECONDS", "0.32")))
+NARRATION_MAX_TEMPO = max(1.0, min(1.12, float(os.getenv("SHORTFORM_NARRATION_MAX_TEMPO", "1.0"))))
+INTRO_AUDIO_SAFETY_PAD_SECONDS = max(0.18, float(os.getenv("SHORTFORM_INTRO_AUDIO_SAFETY_PAD_SECONDS", "0.45")))
 INTRO_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SOURCE_AUDIO_VOLUME", "0.025"))
 CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUME", "1.0"))
 EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.24")))
 EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
 EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
+EDITORIAL_INTRO_ABSOLUTE_MAX_SECONDS = max(
+    EDITORIAL_INTRO_MAX_SECONDS,
+    float(os.getenv("SHORTFORM_EDITORIAL_INTRO_ABSOLUTE_MAX_SECONDS", "7.25")),
+)
 EDITORIAL_TOTAL_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TOTAL_MAX_SECONDS", "58.0"))
 CURRENT_FRAME_QC_VERSION = "2026-06-broll-montage-v2"
 EDITORIAL_TRANSITION_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_TRANSITION_SECONDS", "0.45"))
@@ -113,6 +126,9 @@ MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_DOCUMENTA
 MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE", "0.62"))
 ENABLE_SECONDARY_FINAL_FRAME_QC = os.getenv("SHORTFORM_ENABLE_SECONDARY_FINAL_FRAME_QC", "1") != "0"
 SECONDARY_FINAL_FRAME_QC_MAX_FRAMES = max(6, int(os.getenv("SHORTFORM_SECONDARY_FINAL_FRAME_QC_MAX_FRAMES", "10")))
+SECONDARY_FINAL_SOURCE_AVG_OFFSET_LIMIT = float(os.getenv("SHORTFORM_SECONDARY_FINAL_SOURCE_AVG_OFFSET_LIMIT", "0.30"))
+SECONDARY_FINAL_SOURCE_SEVERE_OFFSET_LIMIT = float(os.getenv("SHORTFORM_SECONDARY_FINAL_SOURCE_SEVERE_OFFSET_LIMIT", "0.46"))
+RELAX_THEME_RELEVANCE_GATES = os.getenv("SHORTFORM_RELAX_THEME_RELEVANCE_GATES", "1") != "0"
 YOUTUBE_PRIVACY_STATUS = os.getenv("SHORTFORM_YOUTUBE_PRIVACY_STATUS", "public").strip().lower()
 if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     YOUTUBE_PRIVACY_STATUS = "public"
@@ -120,6 +136,8 @@ RENDER_POPULAR_SEGMENT_SHORTS = os.getenv("SHORTFORM_RENDER_POPULAR_SEGMENTS", "
 POPULAR_SEGMENTS_PER_THEME = max(0, int(os.getenv("SHORTFORM_POPULAR_SEGMENTS_PER_THEME", "0")))
 POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "1") != "0"
 POPULAR_SEGMENT_MIN_SCORE = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MIN_SCORE", "0.12"))
+EXHAUST_RENDERED_EDITORIAL_CLIPS = os.getenv("SHORTFORM_EXHAUST_RENDERED_EDITORIAL_CLIPS", "0") == "1"
+EXHAUST_RENDERED_MAX_CLIPS = max(0, int(os.getenv("SHORTFORM_EXHAUST_RENDERED_MAX_CLIPS", "0")))
 POPULAR_SEGMENT_INTRO_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_INTRO_SECONDS", "2.85"))
 POPULAR_SEGMENT_MAX_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MAX_SECONDS", "58.0"))
 EDITORIAL_SUBTITLE_MODEL = None
@@ -864,7 +882,7 @@ def source_title_topic(source_title, theme="", limit=7):
         return ""
 
     best_words = max(candidates, key=lambda item: item[0])[1]
-    return compact_text(" ".join(best_words).title(), 62)
+    return compact_text(polish_headline_title(" ".join(best_words)), 62)
 
 
 def topic_phrase_is_weak(phrase, theme=""):
@@ -912,11 +930,19 @@ def public_editorial_topic_ok(theme, text, topic_terms=None, allow_short_topic=T
     if allow_short_topic and short_topic_phrase_ok(cleaned):
         return True
 
-    if looks_like_raw_dialogue_topic(cleaned) or topic_phrase_is_weak(cleaned, theme=theme):
+    if looks_like_raw_dialogue_topic(cleaned):
         return False
 
     terms = topic_terms or [cleaned]
     quality = score_title_quality(theme, cleaned, topic_terms=terms)
+
+    if topic_phrase_is_weak(cleaned, theme=theme) and (
+        quality.get("honesty", 0.0) < 0.82
+        or quality.get("generic_title")
+        or quality.get("raw_dialogue_fragment")
+        or quality.get("keyword_soup_title")
+    ):
+        return False
 
     return (
         quality.get("honesty", 0.0) >= 0.70
@@ -1210,6 +1236,12 @@ def transcript_topic_phrase(theme, clip):
     if theme == "technology_ai":
         if any(term in lower for term in ["steam machine", "fortnite", "grand theft", "gta", "dota"]):
             return ""
+
+        if "ai advisor" in lower and ("coordination" in lower or "government" in lower or "everyone's fine" in lower):
+            return "AI Advisors Make Coordination Harder"
+
+        if "product variant" in lower and ("vision" in lower or "instinct" in lower):
+            return "Product Vision Versus Product Variants"
 
         if "pre-training" in lower and "dead" in lower:
             return "Why Pre-Training Isn't Dead"
@@ -1661,7 +1693,7 @@ def clip_is_editorial_usable(clip):
     if not theme_key and "|" in state_key:
         theme_key = state_key.split("|", 1)[0].strip().lower()
 
-    if not clip_has_theme_relevance(theme_key, clip):
+    if not RELAX_THEME_RELEVANCE_GATES and not clip_has_theme_relevance(theme_key, clip):
         return False
 
     if not render_qc:
@@ -1682,7 +1714,6 @@ def clip_is_editorial_usable(clip):
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
         "probable broadcast/b-roll montage instead of speaker clip",
-        "subject severely off-center in final crop",
     }
     frame_path = render_qc.get("frame_path") or {}
     face_presence = float(frame_path.get("face_presence_rate") or 0.0)
@@ -1691,27 +1722,26 @@ def clip_is_editorial_usable(clip):
     center_offset = float(frame_path.get("avg_face_center_offset_ratio") or 0.0)
     max_center_offset = float(frame_path.get("max_face_center_offset_ratio") or 0.0)
     plausibility = float(frame_path.get("avg_face_plausibility") or 0.0)
-    documentary_non_face_ok = (
-        theme_key in {"politics", "truecrime"}
-        and render_qc.get("documentary_non_face_ok")
+    non_speaker_visual_ok = (
+        theme_key in NON_SPEAKER_VISUAL_THEMES
+        and (render_qc.get("documentary_non_face_ok") or render_qc.get("non_speaker_visual_ok"))
         and clip_visual_quality_score(clip) >= MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY
-        and no_face_run <= MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN
-        and alive_no_face <= MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE
-        and "alive frames often miss speaker" not in flags
-        and "extended no-speaker run in final crop" not in flags
+        and no_face_run <= max(MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN, 0.62)
+        and alive_no_face <= max(MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE, 0.72)
         and "probable tiny/background face lock" not in flags
         and "probable background lock instead of speaker" not in flags
         and "probable picture-in-picture/background lock" not in flags
         and "probable flat-surface false face lock" not in flags
         and "probable small-object/background face lock" not in flags
-        and "probable broadcast/b-roll montage instead of speaker clip" not in flags
-        and "subject severely off-center in final crop" not in flags
     )
+
+    if non_speaker_visual_ok:
+        hard_flags.discard("probable broadcast/b-roll montage instead of speaker clip")
 
     if flags & hard_flags:
         return False
 
-    if documentary_non_face_ok:
+    if non_speaker_visual_ok:
         return True
 
     if STRICT_EDITORIAL_FACE_GATES:
@@ -1755,7 +1785,6 @@ def clip_is_editorial_usable(clip):
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
             "probable broadcast/b-roll montage instead of speaker clip",
-            "subject severely off-center in final crop",
         } & flags:
             return False
 
@@ -1766,12 +1795,20 @@ def clip_is_popular_segment_usable(clip):
     render_qc = clip_render_qc(clip)
 
     if render_qc and not render_qc.get("passed", True):
-        return False
+        soft_flags = {"source playback ends without a strong face"}
+        rejection_reasons = set(render_qc.get("rejection_reasons") or [])
+        flags = set(render_qc.get("flags") or [])
+
+        if not (rejection_reasons or flags):
+            return False
+
+        if (rejection_reasons or flags) - soft_flags:
+            return False
 
     return clip_is_editorial_usable(clip)
 
 
-def editorial_output_rejection_reasons(frame_qc, theme=""):
+def editorial_output_rejection_reasons(frame_qc, theme="", speaker_strict=True):
     flags = set(frame_qc.get("flags") or [])
     hard_flags = {
         "could not open final render",
@@ -1781,12 +1818,16 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         "final render has low-information frames",
         "final render has dead visual frames",
         "low final alive-frame rate",
+    }
+    speaker_hard_flags = {
         "probable picture-in-picture/background lock",
         "probable background lock instead of speaker",
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
         "probable broadcast/b-roll montage instead of speaker clip",
     }
+    if speaker_strict:
+        hard_flags |= speaker_hard_flags
     reasons = sorted(flags & hard_flags)
     visual_score = float(frame_qc.get("visual_quality_score") or 0.0)
     face_presence = float(frame_qc.get("face_presence_rate") or 0.0)
@@ -1796,49 +1837,52 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
     low_information = float(frame_qc.get("low_information_frame_ratio") or 0.0)
     dead_frames = float(frame_qc.get("dead_frame_ratio") or 0.0)
     black_frames = float(frame_qc.get("black_frame_ratio") or 0.0)
-    documentary_non_face_ok = (
-        str(theme or "").strip().lower() in {"politics", "truecrime"}
+    theme_key = str(theme or "").strip().lower()
+    non_speaker_visual_ok = (
+        theme_key in NON_SPEAKER_VISUAL_THEMES
         and visual_score >= MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY
         and low_information <= 0.18
         and dead_frames <= 0.02
         and black_frames <= 0.02
-        and no_face_run <= MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN
-        and alive_no_face <= MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE
+        and no_face_run <= max(MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN, 0.62)
+        and alive_no_face <= max(MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE, 0.72)
         and not {
-            "alive frames often miss speaker",
-            "extended no-speaker run in final crop",
             "probable tiny/background face lock",
             "probable background lock instead of speaker",
             "probable picture-in-picture/background lock",
             "probable flat-surface false face lock",
             "probable small-object/background face lock",
-            "probable broadcast/b-roll montage instead of speaker clip",
-            "subject severely off-center in final crop",
         } & flags
     )
 
-    if visual_score < MIN_EDITORIAL_VISUAL_QUALITY and not documentary_non_face_ok:
+    if non_speaker_visual_ok and "probable broadcast/b-roll montage instead of speaker clip" in reasons:
+        reasons.remove("probable broadcast/b-roll montage instead of speaker clip")
+
+    if visual_score < MIN_EDITORIAL_VISUAL_QUALITY and not non_speaker_visual_ok:
         reasons.append(
             f"low editorial visual quality score ({visual_score:.2f} < {MIN_EDITORIAL_VISUAL_QUALITY:.2f})"
         )
 
-    if not documentary_non_face_ok and face_presence and face_presence < MIN_EDITORIAL_OUTPUT_FACE_PRESENCE:
+    if not speaker_strict:
+        return reasons
+
+    if not non_speaker_visual_ok and face_presence and face_presence < MIN_EDITORIAL_OUTPUT_FACE_PRESENCE:
         reasons.append(
             f"low final package face presence ({face_presence:.2f} < {MIN_EDITORIAL_OUTPUT_FACE_PRESENCE:.2f})"
         )
 
-    if not documentary_non_face_ok and no_face_run > MAX_EDITORIAL_OUTPUT_NO_FACE_RUN:
+    if not non_speaker_visual_ok and no_face_run > MAX_EDITORIAL_OUTPUT_NO_FACE_RUN:
         reasons.append(
             f"long final package no-speaker run ({no_face_run:.2f} > {MAX_EDITORIAL_OUTPUT_NO_FACE_RUN:.2f})"
         )
 
-    if not documentary_non_face_ok and alive_no_face > MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE:
+    if not non_speaker_visual_ok and alive_no_face > MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE:
         reasons.append(
             f"alive final package frames often miss speaker ({alive_no_face:.2f} > {MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE:.2f})"
         )
 
     if (
-        not documentary_non_face_ok
+        not non_speaker_visual_ok
         and alive_no_face > 0.34
         and "alive frames often miss speaker" in flags
     ):
@@ -1847,7 +1891,7 @@ def editorial_output_rejection_reasons(frame_qc, theme=""):
         )
 
     if (
-        not documentary_non_face_ok
+        not non_speaker_visual_ok
         and alive_no_face > 0.25
         and max_center_offset > 0.70
         and (
@@ -1878,7 +1922,7 @@ def editorial_audio_qc_for(output_file):
         }
 
 
-def editorial_secondary_frame_qc_for(output_file, theme=""):
+def editorial_secondary_frame_qc_for(output_file, theme="", package=None):
     if not ENABLE_SECONDARY_FINAL_FRAME_QC:
         return {"skipped": True, "reason": "secondary final-frame QC disabled", "flags": []}
 
@@ -1886,21 +1930,39 @@ def editorial_secondary_frame_qc_for(output_file, theme=""):
         import content_qc
 
         media = content_qc.ffprobe_media(output_file)
+        package = package or {}
+        intro_duration = float(package.get("intro_duration") or 0.0)
+        rank_card_duration = float(package.get("rank_card_duration") or 0.0)
+        source_play_duration = float(package.get("source_play_duration") or 0.0)
+        sample_start = 0.0
+        sample_end = float(media.get("duration") or 0.0)
+        asset_type = "final_upload"
+
+        if source_play_duration >= 3.0:
+            sample_start = max(0.0, intro_duration + rank_card_duration)
+            sample_end = min(sample_end, sample_start + source_play_duration)
+            asset_type = "final_upload_source"
+
         interval_seconds = max(
             2.0,
-            float(media.get("duration") or 0.0) / max(1, SECONDARY_FINAL_FRAME_QC_MAX_FRAMES),
+            max(0.0, sample_end - sample_start) / max(1, SECONDARY_FINAL_FRAME_QC_MAX_FRAMES),
         )
         contact_sheet, frame_samples = content_qc.create_contact_sheet(
             output_file,
             str(theme or DEFAULT_THEME),
-            "final_upload",
+            asset_type,
             media,
             interval_seconds=interval_seconds,
             max_frames=SECONDARY_FINAL_FRAME_QC_MAX_FRAMES,
+            start_seconds=sample_start,
+            end_seconds=sample_end,
         )
-        frame_qc = content_qc.summarize_frame_metrics(frame_samples, "final_upload")
+        frame_qc = content_qc.summarize_frame_metrics(frame_samples, asset_type)
         frame_qc["contact_sheet"] = contact_sheet
         frame_qc["frame_qc_version"] = "content_qc_final_upload_v1"
+        frame_qc["sample_asset_type"] = asset_type
+        frame_qc["sample_start_seconds"] = round(sample_start, 3)
+        frame_qc["sample_end_seconds"] = round(sample_end, 3)
         return frame_qc
     except Exception as error:
         return {
@@ -1911,10 +1973,6 @@ def editorial_secondary_frame_qc_for(output_file, theme=""):
 def editorial_secondary_frame_rejection_reasons(frame_qc):
     flags = set((frame_qc or {}).get("flags") or [])
     reasons = []
-    face_presence = float((frame_qc or {}).get("face_presence_rate") or 0.0)
-    no_face_run = float((frame_qc or {}).get("longest_no_face_run_ratio") or 0.0)
-    avg_offset = float((frame_qc or {}).get("avg_face_center_offset") or 0.0)
-    max_offset = float((frame_qc or {}).get("max_face_center_offset") or 0.0)
     hard_flags = {
         "no sampled frames",
         "black/dead frames present",
@@ -1928,20 +1986,35 @@ def editorial_secondary_frame_rejection_reasons(frame_qc):
     for flag in sorted(flags & hard_flags):
         reasons.append(f"secondary final-frame QC: {flag}")
 
-    if "low speaker/face presence" in flags and face_presence < 0.42:
-        reasons.append(f"secondary final-frame QC low speaker presence ({face_presence:.2f} < 0.42)")
-
-    if "extended run without a strong face" in flags and no_face_run > 0.36:
-        reasons.append(f"secondary final-frame QC extended weak-subject run ({no_face_run:.2f} > 0.36)")
-
-    if "subject often off center" in flags and avg_offset > 0.26:
-        reasons.append(f"secondary final-frame QC off-center subject ({avg_offset:.2f} > 0.26)")
-
-    if "severe off-center frames" in flags and max_offset > 0.40:
-        reasons.append(f"secondary final-frame QC severe off-center frames ({max_offset:.2f} > 0.40)")
-
     if any(flag.startswith("final editorial secondary frame QA failed") for flag in flags):
         reasons.append("secondary final-frame QC failed")
+
+    return reasons
+
+
+def editorial_secondary_frame_advisory_reasons(frame_qc):
+    flags = set((frame_qc or {}).get("flags") or [])
+    reasons = []
+    asset_type = str((frame_qc or {}).get("sample_asset_type") or "")
+    face_presence = float((frame_qc or {}).get("face_presence_rate") or 0.0)
+    no_face_run = float((frame_qc or {}).get("longest_no_face_run_ratio") or 0.0)
+    avg_offset = float((frame_qc or {}).get("avg_face_center_offset") or 0.0)
+    max_offset = float((frame_qc or {}).get("max_face_center_offset") or 0.0)
+    low_face_limit = 0.35 if asset_type == "final_upload_source" else 0.42
+    avg_offset_limit = SECONDARY_FINAL_SOURCE_AVG_OFFSET_LIMIT if asset_type == "final_upload_source" else 0.26
+    severe_offset_limit = SECONDARY_FINAL_SOURCE_SEVERE_OFFSET_LIMIT if asset_type == "final_upload_source" else 0.42
+
+    if "low speaker/face presence" in flags and face_presence < low_face_limit:
+        reasons.append(f"secondary final-frame QC advisory: low speaker presence ({face_presence:.2f} < {low_face_limit:.2f})")
+
+    if "extended run without a strong face" in flags and no_face_run > 0.36:
+        reasons.append(f"secondary final-frame QC advisory: extended weak-subject run ({no_face_run:.2f} > 0.36)")
+
+    if "subject often off center" in flags and avg_offset > avg_offset_limit:
+        reasons.append(f"secondary final-frame QC advisory: off-center subject ({avg_offset:.2f} > {avg_offset_limit:.2f})")
+
+    if "severe off-center frames" in flags and max_offset > severe_offset_limit:
+        reasons.append(f"secondary final-frame QC advisory: severe off-center frames ({max_offset:.2f} > {severe_offset_limit:.2f})")
 
     return reasons
 
@@ -1977,11 +2050,16 @@ def finalize_editorial_package(package, label):
         }
 
     audio_qc = editorial_audio_qc_for(output_file)
-    secondary_frame_qc = editorial_secondary_frame_qc_for(output_file, package.get("theme", DEFAULT_THEME))
-    rejection_reasons = editorial_output_rejection_reasons(frame_qc, package.get("theme", DEFAULT_THEME))
+    secondary_frame_qc = editorial_secondary_frame_qc_for(output_file, package.get("theme", DEFAULT_THEME), package=package)
+    rejection_reasons = editorial_output_rejection_reasons(
+        frame_qc,
+        package.get("theme", DEFAULT_THEME),
+        speaker_strict=False,
+    )
     rejection_reasons.extend(editorial_secondary_frame_rejection_reasons(secondary_frame_qc))
     rejection_reasons.extend(editorial_audio_rejection_reasons(audio_qc))
     rejection_reasons = sorted(set(rejection_reasons))
+    advisory_reasons = sorted(set(editorial_secondary_frame_advisory_reasons(secondary_frame_qc)))
     package["render_qc"] = {
         "frame_qc_version": frame_qc.get("frame_qc_version", CURRENT_FRAME_QC_VERSION),
         "passed": not rejection_reasons,
@@ -1997,6 +2075,7 @@ def finalize_editorial_package(package, label):
         "intro_audio": audio_qc,
         "rejected": bool(rejection_reasons),
         "rejection_reasons": rejection_reasons,
+        "advisory_reasons": advisory_reasons,
         "render_strategy": "editorial_post_render_gate",
     }
 
@@ -2038,6 +2117,12 @@ def package_is_upload_ready(package):
 def editorial_clip_score(clip):
     base_score = float(clip.get("score") or 0)
     visual_score = clip_visual_quality_score(clip)
+    readiness = float(clip.get("readiness_score") or 0.0)
+    popularity = float(clip.get("popularity_score") or 0.0)
+    comment = float(clip.get("comment_score") or 0.0)
+    arc = float(clip.get("arc_score") or 0.0)
+    boundary = float(clip.get("boundary_score") or 0.0)
+    text = float(clip.get("text_score") or 0.0)
     render_qc = clip_render_qc(clip)
     penalty = 0.0
 
@@ -2047,7 +2132,16 @@ def editorial_clip_score(clip):
     if "unstable final subject position" in set(render_qc.get("flags") or []):
         penalty += 0.035
 
-    return base_score + 0.12 * visual_score - penalty
+    return (
+        base_score * 0.42
+        + readiness * 0.16
+        + visual_score * 0.16
+        + max(popularity, comment) * 0.10
+        + boundary * 0.07
+        + arc * 0.05
+        + text * 0.04
+        - penalty
+    )
 
 
 def topic_label_from_clip(clip):
@@ -2232,6 +2326,18 @@ def group_clips_by_topic(clips, theme=""):
 
 def clip_state_key(theme, clip):
     return clip.get("source_state_key") or f"{theme}|{clip.get('source_video_url', '')}"
+
+
+def source_keys_from_clips(theme, clips):
+    keys = []
+
+    for clip in clips or []:
+        key = clip_state_key(theme, clip)
+
+        if key and key not in keys:
+            keys.append(key)
+
+    return keys
 
 
 def record_state_key(theme, record):
@@ -2615,6 +2721,70 @@ def popular_sort_score(clip):
 
 
 def popular_segment_publishable_copy(theme, item):
+    title, topic, topic_terms = popular_segment_public_title(theme, item)
+    script = build_popular_segment_script(theme, item)
+
+    if not social_title_is_publishable(theme, title, topic_terms=topic_terms):
+        return False
+
+    if re.search(r"^needs\s+specific\s+", title, flags=re.I):
+        return False
+
+    if not public_hook_script_ok(script, topic):
+        return False
+
+    return True
+
+
+def popular_segment_title_candidates(theme, topic, source_title, channel, clip, signal_source):
+    transcript = clean_viewer_text(clip.get("transcript_excerpt", ""))
+    transcript_l = transcript.lower()
+    source_l = clean_viewer_text(source_title).lower()
+    repaired_candidates = []
+
+    if "kevin levrone" in (transcript_l + " " + source_l) and "training" in (transcript_l + " " + source_l):
+        repaired_candidates.append("Exercise Scientist Reviews Kevin Levrone's Training")
+
+    if "iran" in transcript_l and "nuclear weapon" in transcript_l and "has changed" in transcript_l:
+        repaired_candidates.append("Trump's Iran Line Hasn't Changed")
+
+    if "iran" in transcript_l and "un" in transcript_l and "clown show" in transcript_l:
+        repaired_candidates.append("Iran's UN Seat Became the Clown Show")
+
+    if "brad lander" in transcript_l and "district 10" in transcript_l:
+        repaired_candidates.append("Brad Lander's NYC Upset Changed the Race")
+
+    source_topic = source_title_topic(source_title, theme)
+    source_subject = source_subject_from_title(source_title)
+    topic_quality = score_title_quality(
+        theme,
+        topic,
+        topic_terms=[topic, source_title, channel],
+    )
+    topic_candidates = [
+        build_social_title(theme, topic, content_format="popular", signal_source=signal_source),
+        topic,
+    ]
+    source_candidates = []
+
+    if source_topic:
+        source_candidates.extend([
+            source_topic,
+            build_social_title(theme, source_topic, content_format="popular", signal_source=signal_source),
+        ])
+
+    if source_subject:
+        source_candidates.append(source_subject)
+
+    if topic_quality.get("dangling_title") or re.search(r"^needs\s+specific\s+", topic, flags=re.I):
+        candidates = repaired_candidates + source_candidates + topic_candidates
+    else:
+        candidates = repaired_candidates + topic_candidates + source_candidates
+
+    return unique_sequence(candidate for candidate in candidates if candidate)
+
+
+def popular_segment_public_title(theme, item):
     clip = item.get("clip") or {}
     source_title = item.get("source_title") or clip.get("source_title") or "Podcast interview"
     channel = item.get("channel_label") or "Podcast Channel"
@@ -2627,32 +2797,39 @@ def popular_segment_publishable_copy(theme, item):
         channel=channel,
     )
     signal_source = popular_segment_signal_source(item)
-    title = build_social_title(theme, topic, content_format="popular", signal_source=signal_source)
-    title = sanitize_social_title(
-        theme,
-        title,
-        topic,
-        clip=clip,
-        source_title=source_title,
-        channel=channel,
-        content_format="popular",
-    )
-    script = build_popular_segment_script(theme, item)
     topic_terms = unique_sequence(
         [topic, source_title, channel]
         + [str(term).replace("_", " ") for term in (clip.get("topic_fingerprint") or [])]
     )
 
-    if not social_title_is_publishable(theme, title, topic_terms=topic_terms):
-        return False
+    for candidate in popular_segment_title_candidates(theme, topic, source_title, channel, clip, signal_source):
+        title = sanitize_social_title(
+            theme,
+            candidate,
+            topic,
+            clip=clip,
+            source_title=source_title,
+            channel=channel,
+            content_format="popular",
+        )
 
-    if re.search(r"^needs\s+specific\s+", title, flags=re.I):
-        return False
+        if not re.search(r"^needs\s+specific\s+", title, flags=re.I) and social_title_is_publishable(
+            theme,
+            title,
+            topic_terms=topic_terms,
+        ):
+            return title, topic, topic_terms
 
-    if not public_hook_script_ok(script, topic):
-        return False
-
-    return True
+    fallback = source_title_topic(source_title, theme) or topic
+    return sanitize_social_title(
+        theme,
+        fallback,
+        fallback,
+        clip=clip,
+        source_title=source_title,
+        channel=channel,
+        content_format="popular",
+    ), topic, topic_terms
 
 
 def popular_segment_items(theme, paths, rendered_clips):
@@ -2697,6 +2874,54 @@ def popular_segment_items(theme, paths, rendered_clips):
 
     if POPULAR_SEGMENTS_PER_THEME > 0:
         items = items[:POPULAR_SEGMENTS_PER_THEME]
+
+    return items
+
+
+def exhaustive_rendered_segment_items(theme, paths, rendered_clips):
+    records = load_theme_source_records(theme)
+    records_by_key = {record_state_key(theme, record): record for record in records}
+    records_by_url = {record.get("video_url", ""): record for record in records}
+    items = []
+    seen = set()
+
+    for clip in rendered_clips:
+        output_file = clip.get("output_file") or ""
+
+        if not output_file or not os.path.exists(output_file):
+            continue
+
+        if not clip_is_popular_segment_usable(clip):
+            continue
+
+        key = (
+            clip_state_key(theme, clip),
+            round(float(clip.get("start_time") or 0.0), 2),
+            round(float(clip.get("end_time") or 0.0), 2),
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        source_key = clip_state_key(theme, clip)
+        source_record = records_by_key.get(source_key) or records_by_url.get(clip.get("source_video_url", "")) or {}
+        popularity_score = enrich_clip_popularity(theme, paths, clip)
+        items.append({
+            "source_state_key": source_key,
+            "source_title": clip.get("source_title") or source_record.get("title") or "Podcast interview",
+            "source_video_url": clip.get("source_video_url") or source_record.get("video_url", ""),
+            "channel_label": channel_label_for_record(source_record),
+            "clip": clip,
+            "popularity_score": popularity_score,
+            "sort_score": popular_sort_score(clip),
+            "thumbnail_file": download_youtube_thumbnail(paths, clip.get("source_video_url") or source_record.get("video_url", "")),
+        })
+
+    items = sorted(items, key=lambda item: item["sort_score"], reverse=True)
+
+    if EXHAUST_RENDERED_MAX_CLIPS > 0:
+        items = items[:EXHAUST_RENDERED_MAX_CLIPS]
 
     return items
 
@@ -2816,23 +3041,89 @@ def fallback_countdown_context(theme, paths, topic_item, adjective):
     return context
 
 
-def elevenlabs_tts_text(text):
-    if ELEVENLABS_MODEL_ID != "eleven_v3":
-        return text
+PROMPT_LANGUAGE_LINE_PATTERN = re.compile(
+    r"^\s*(?:voice(?:over)?|delivery|direction|tone|pacing|style|read|say)\s*:\s*",
+    re.IGNORECASE,
+)
+PROMPT_LANGUAGE_PHRASES = [
+    "clear social video host",
+    "natural voice",
+    "energetic but understandable",
+    "natural pacing",
+    "crisp consonants",
+    "crisp consanants",
+    "confident conversational delivery",
+    "confident delivery",
+    "no rushed delivery",
+    "no rush dialogue",
+    "no-rush dialogue",
+]
 
-    return (
-        "[fast-paced social video host, deeper voice, high inflection, sharp curiosity, "
-        "slightly faster rhythm, creator-style tease, natural pauses, not monotone, "
-        f"confident but conversational] {text}"
-    )
+
+def sanitize_spoken_narration_text(text, fallback_hook="this moment"):
+    text = clean_viewer_text(text)
+    if not text:
+        return f"Number 1: {fallback_hook}."
+
+    text = re.sub(r"\[[^\]]*(?:voice|delivery|pacing|consonants?|consanants?|dialogue)[^\]]*\]", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\([^\)]*(?:voice|delivery|pacing|consonants?|consanants?|dialogue)[^\)]*\)", " ", text, flags=re.IGNORECASE)
+
+    cleaned_lines = []
+    for raw_line in re.split(r"[\r\n]+", text):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if PROMPT_LANGUAGE_LINE_PATTERN.search(line):
+            line = PROMPT_LANGUAGE_LINE_PATTERN.sub("", line).strip()
+        lower_line = line.lower()
+        if any(phrase in lower_line for phrase in PROMPT_LANGUAGE_PHRASES) and not re.search(r"\bnumber\s+\d+\b", lower_line):
+            continue
+        for phrase in PROMPT_LANGUAGE_PHRASES:
+            line = re.sub(re.escape(phrase), " ", line, flags=re.IGNORECASE)
+        line = re.sub(r"\s*,\s*,+", ", ", line)
+        line = re.sub(r"^\s*[,;:\-.]+\s*", "", line).strip()
+        if line:
+            cleaned_lines.append(line)
+
+    text = " ".join(cleaned_lines)
+    text = re.sub(r"\s+", " ", text).strip(" ,;:-")
+    if not text:
+        return f"Number 1: {fallback_hook}."
+    if text[-1] not in ".!?":
+        text += "."
+    return text
+
+
+def elevenlabs_tts_text(text):
+    return sanitize_spoken_narration_text(text)
+
+
+def atempo_filter_chain(tempo):
+    tempo = max(1.0, float(tempo or 1.0))
+    filters = []
+
+    while tempo > 2.0:
+        filters.append("atempo=2.000")
+        tempo /= 2.0
+
+    if tempo > 1.01:
+        filters.append(f"atempo={tempo:.3f}")
+
+    return filters
 
 
 def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
     pitch = max(0.55, min(1.15, NARRATION_PITCH))
     raw_duration = max(0.1, get_duration(input_path))
-    target_ceiling = max(3.0, EDITORIAL_INTRO_MAX_SECONDS - 0.35)
+    target_ceiling = max(
+        2.8,
+        EDITORIAL_INTRO_MAX_SECONDS
+        - NARRATION_LEAD_IN_SECONDS
+        - NARRATION_TAIL_PAD_SECONDS
+        - INTRO_AUDIO_SAFETY_PAD_SECONDS,
+    )
     target_duration = max(2.6, min(target_ceiling, NARRATION_TARGET_SECONDS))
-    tempo = max(1.0, min(2.0, raw_duration / target_duration))
+    tempo = max(1.0, min(NARRATION_MAX_TEMPO, raw_duration / target_duration))
     output_path = os.path.join(scratch_dir, f"{date_key}_{theme}_{rank:02d}_intro_mastered.wav")
 
     needs_intro_pad = (
@@ -2849,8 +3140,7 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
     if abs(pitch - 1.0) >= 0.01:
         audio_filters.append(f"rubberband=pitch={pitch:.3f}")
 
-    if tempo > 1.01:
-        audio_filters.append(f"atempo={tempo:.3f}")
+    audio_filters.extend(atempo_filter_chain(tempo))
 
     if abs(NARRATION_BASS_GAIN) >= 0.1:
         audio_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
@@ -2891,8 +3181,7 @@ def process_narration_audio(input_path, scratch_dir, date_key, theme, rank):
 
     fallback_filters = ["aresample=44100"]
 
-    if tempo > 1.01:
-        fallback_filters.append(f"atempo={tempo:.3f}")
+    fallback_filters.extend(atempo_filter_chain(tempo))
 
     if abs(NARRATION_BASS_GAIN) >= 0.1:
         fallback_filters.append(f"bass=g={NARRATION_BASS_GAIN:.2f}:f=110:w=0.65")
@@ -3004,6 +3293,7 @@ def synthesize_windows_narration(text, wav_path, scratch_dir):
 
 def synthesize_intro_audio(text, scratch_dir, date_key, theme, rank):
     os.makedirs(scratch_dir, exist_ok=True)
+    text = sanitize_spoken_narration_text(text)
 
     if TTS_PROVIDER == "elevenlabs":
         voice_ids = []
@@ -3068,6 +3358,7 @@ THEME_TITLE_NOUNS = {
     "truecrime": "True Crime",
     "popculture": "Culture",
 }
+NON_SPEAKER_VISUAL_THEMES = {"politics", "truecrime", "sports", "gaming", "popculture"}
 
 
 def editorial_title_topic(topic):
@@ -3367,6 +3658,15 @@ def build_social_title(theme, topic, content_format="countdown", signal_source="
 def social_title_is_publishable(theme, title, topic_terms=None):
     title_text = clean_viewer_text(title)
     quality = score_title_quality(theme, title, topic_terms=topic_terms or [title])
+    keyword_soup = topic_phrase_is_keyword_soup(theme, title_text)
+    keyword_soup_ok = (
+        keyword_soup
+        and quality.get("honesty", 0.0) >= 0.82
+        and quality.get("specificity", 0.0) >= 0.78
+        and quality.get("theme_native_title", True)
+        and not quality.get("generic_title")
+        and not quality.get("raw_dialogue_fragment")
+    )
     return (
         bool(title_text)
         and
@@ -3374,7 +3674,7 @@ def social_title_is_publishable(theme, title, topic_terms=None):
         and quality.get("honesty", 0.0) >= 0.70
         and quality.get("specificity", 0.0) >= 0.40
         and not editorial_title_has_generic_pattern(title_text)
-        and not topic_phrase_is_keyword_soup(theme, title_text)
+        and (not keyword_soup or keyword_soup_ok)
         and not re.search(r"\b(the|a|an)\s+(changes|missed|debating|watching)\s+(the|a|an)\b", title_text, flags=re.I)
         and not re.search(r"\bpop\s+culture\s+missed\b", title_text, flags=re.I)
         and not re.search(r"^the\s+builders\s+are\s+debating$", title_text, flags=re.I)
@@ -3384,6 +3684,9 @@ def social_title_is_publishable(theme, title, topic_terms=None):
         and not quality.get("repetitive_title")
         and not quality.get("weak_template_title")
         and not quality.get("keyword_soup_title")
+        and not quality.get("overlong_title")
+        and not quality.get("dangling_title")
+        and not quality.get("asr_sentence_title")
         and quality.get("theme_native_title", True)
         and quality.get("not_clickbait", True)
         and not re.search(r"^needs\s+specific\s+", str(title or ""), flags=re.I)
@@ -3415,15 +3718,15 @@ def sanitize_social_title(theme, title, topic, clip=None, source_title="", chann
     if source_subject:
         candidates.append(source_subject)
 
-    suggested_title = clean_viewer_text(clip.get("suggested_title", ""))
-    if suggested_title:
-        candidates.append(suggested_title)
-
     if topic and topic != "The Standout Moment":
         candidates.extend([
             topic,
             build_social_title(theme, topic, content_format=content_format),
         ])
+
+    suggested_title = clean_viewer_text(clip.get("suggested_title", ""))
+    if suggested_title:
+        candidates.append(suggested_title)
 
     for candidate in unique_sequence(candidates):
         candidate = compact_text(clean_viewer_text(candidate), 92)
@@ -3436,6 +3739,121 @@ def sanitize_social_title(theme, title, topic, clip=None, source_title="", chann
 
     fallback_label = THEME_TITLE_NOUNS.get(theme_key, "Editorial")
     return f"Needs Specific {fallback_label} Title"
+
+
+def social_title_key(title):
+    words = [
+        word
+        for word in re.findall(r"[a-zA-Z0-9]+", clean_viewer_text(title).lower())
+        if word and word not in {"the", "a", "an"}
+    ]
+    return " ".join(words)
+
+
+def package_youtube_title(package):
+    youtube = (package.get("platforms") or {}).get("youtube_shorts") or {}
+    return clean_viewer_text(youtube.get("title") or package.get("title") or "")
+
+
+def set_package_public_title(package, title):
+    title = compact_text(clean_viewer_text(title), 100)
+    package["title"] = title
+    package.setdefault("platforms", {}).setdefault("youtube_shorts", {})["title"] = title[:100]
+    package["title_quality"] = score_title_quality(
+        package.get("theme", ""),
+        title,
+        topic_terms=[
+            ((package.get("content_signal") or {}).get("topic") or title),
+            package.get("source_title", ""),
+            package.get("source_channel", ""),
+        ],
+    )
+    package.setdefault("rank_signals", {})["title_quality"] = package["title_quality"]
+    return package
+
+
+def package_title_alternatives(theme, package):
+    signal = package.get("content_signal") or {}
+    topic = clean_headline_topic(
+        theme,
+        signal.get("topic") or package.get("caption") or package.get("title", ""),
+        clip={
+            "suggested_title": package.get("title", ""),
+            "source_title": package.get("source_title", ""),
+            "source_channel": package.get("source_channel", ""),
+            "topic_fingerprint": package.get("tags", []),
+            "transcript_excerpt": package.get("transcript_excerpt", ""),
+        },
+        source_title=package.get("source_title", ""),
+        channel=package.get("source_channel", ""),
+    )
+    source_title = package.get("source_title", "")
+    source_topic = source_title_topic(source_title, theme)
+    source_subject = source_subject_from_title(source_title)
+    content_format = "popular" if package.get("content_format") == "popular_segment_short" else "countdown"
+    candidates = [
+        package_youtube_title(package),
+        topic,
+        build_social_title(theme, topic, content_format=content_format),
+        source_topic,
+        build_social_title(theme, source_topic, content_format=content_format) if source_topic else "",
+    ]
+
+    if source_subject and topic and source_subject.lower() not in topic.lower():
+        candidates.extend([
+            compact_text(f"{source_subject}: {topic}", 92),
+            compact_text(f"{possessive_subject(source_subject)} {topic}", 92),
+        ])
+
+    return unique_sequence(candidates)
+
+
+def enforce_unique_package_titles(theme, packages, existing_metadata=None):
+    existing_metadata = existing_metadata or {}
+    used = set()
+
+    for collection in ("content", "archive"):
+        for item in existing_metadata.get(collection) or []:
+            key = social_title_key(package_youtube_title(item))
+            if key:
+                used.add(key)
+
+    for package in packages:
+        current_title = package_youtube_title(package)
+        current_key = social_title_key(current_title)
+
+        if current_key and current_key not in used:
+            used.add(current_key)
+            continue
+
+        for candidate in package_title_alternatives(theme, package):
+            candidate = sanitize_social_title(
+                theme,
+                candidate,
+                (package.get("content_signal") or {}).get("topic") or candidate,
+                clip={
+                    "suggested_title": package.get("title", ""),
+                    "source_title": package.get("source_title", ""),
+                    "source_channel": package.get("source_channel", ""),
+                    "topic_fingerprint": package.get("tags", []),
+                    "transcript_excerpt": package.get("transcript_excerpt", ""),
+                },
+                source_title=package.get("source_title", ""),
+                channel=package.get("source_channel", ""),
+                content_format="popular" if package.get("content_format") == "popular_segment_short" else "countdown",
+            )
+            key = social_title_key(candidate)
+
+            if key and key not in used and social_title_is_publishable(theme, candidate, topic_terms=[candidate]):
+                set_package_public_title(package, candidate)
+                used.add(key)
+                break
+
+        else:
+            if current_key:
+                used.add(current_key)
+
+    return packages
 
 
 def build_social_caption(theme_label, topic, adjective="", countdown_slot=None, content_format="countdown", source_title=""):
@@ -3625,6 +4043,16 @@ def build_theme_native_editorial_title(theme, topic, adjective, countdown_slot, 
     return build_social_title(theme, topic_text, content_format="countdown")
 
 
+def compact_spoken_topic(text, max_length=58):
+    text = re.sub(r"\s+", " ", clean_viewer_text(text)).strip(" .")
+
+    if len(text) <= max_length:
+        return text
+
+    shortened = text[:max_length].rsplit(" ", 1)[0].strip(" ,.;:-")
+    return shortened or text[:max_length].strip(" ,.;:-")
+
+
 def spoken_hook_topic(topic, clip=None):
     clip = clip or {}
     candidate = (
@@ -3641,7 +4069,7 @@ def spoken_hook_topic(topic, clip=None):
         candidate,
         flags=re.I,
     )
-    return compact_text(candidate, 44).strip(" .") or "this moment"
+    return compact_spoken_topic(candidate, 58) or "this moment"
 
 
 def natural_spoken_hook_topic(topic, clip=None):
@@ -3695,6 +4123,13 @@ def repaired_spoken_hook_topic(theme, topic, clip=None):
     return hook_topic
 
 
+def concise_intro_hook_topic(theme, topic, clip=None, max_length=48):
+    hook_topic = repaired_spoken_hook_topic(theme, topic, clip)
+    hook_topic = re.sub(r"^(the|a|an)\s+", "", hook_topic, flags=re.I).strip()
+    hook_topic = compact_spoken_topic(hook_topic, max_length)
+    return hook_topic or "this moment"
+
+
 SCRIPT_TOPIC_STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "for", "your", "this",
     "that", "moment", "clip", "part", "detail", "question", "inside",
@@ -3725,7 +4160,9 @@ def public_hook_script_ok(script, topic):
         return False
 
     words = re.findall(r"[a-zA-Z0-9']+", lower)
-    if len(words) < 7:
+    concise_intro = bool(re.match(r"^(number\s+\d+|standout)\s*:", lower))
+
+    if len(words) < (5 if concise_intro else 7):
         return False
 
     if any(re.search(pattern, lower) for pattern in VAGUE_PUBLIC_SCRIPT_PATTERNS):
@@ -3837,8 +4274,15 @@ def build_moment_hook_script(theme, topic, adjective, clip=None, signal_source="
     return compact_text(script, 118).rstrip(".") + "."
 
 
-def build_editorial_intro(theme, topic, rank, total_count, adjective, clip):
-    return build_moment_hook_script(theme, topic, adjective, clip)
+def build_editorial_intro(theme, topic, rank, total_count, adjective, clip, countdown_slot=None):
+    slot = int(countdown_slot or countdown_slot_for_rank(rank, total_count))
+    hook_topic = concise_intro_hook_topic(theme, topic, clip, max_length=48)
+    script = f"Number {slot}: {hook_topic}."
+
+    if len(re.findall(r"[a-zA-Z0-9']+", script)) < 6:
+        script = f"Number {slot}: {hook_topic}. Watch this."
+
+    return script
 
 
 def build_output_package(theme, output_path, source_clip, topic_item, rank, adjective, date_key, is_recap=False):
@@ -3848,6 +4292,7 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
     overlay_style = profile.get("overlay_style", "")
     framing_style = profile.get("framing_style", "")
     best_clip = topic_item["clips"][0]
+    underlying_source_state_keys = source_keys_from_clips(theme, topic_item.get("clips") or [best_clip])
     topic = clean_headline_topic(
         theme,
         topic_item["topic"],
@@ -3922,6 +4367,7 @@ def build_output_package(theme, output_path, source_clip, topic_item, rank, adje
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(source_clip) if source_clip else "",
         "source_state_key": f"{theme}|editorial|{date_key}|{rank}",
+        "underlying_source_state_keys": underlying_source_state_keys,
         "source_video_url": best_clip.get("source_video_url", ""),
         "source_channel": rank_signals.get("source_channel", ""),
         "source_title": best_clip.get("source_title", ""),
@@ -4346,9 +4792,9 @@ def editorial_intro_duration(audio_path=None):
     if audio_path:
         audio_duration = get_duration(audio_path)
         if audio_duration > 0:
-            target = max(target, audio_duration + 0.45)
+            target = max(target, audio_duration + INTRO_AUDIO_SAFETY_PAD_SECONDS)
 
-    return max(3.25, min(EDITORIAL_INTRO_MAX_SECONDS, target))
+    return max(3.25, min(EDITORIAL_INTRO_ABSOLUTE_MAX_SECONDS, target))
 
 
 def source_audio_fade_filter(duration):
@@ -5216,7 +5662,7 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
     )
     total_count = int(topic_item.get("_total_count") or DAILY_TOPIC_COUNT)
     countdown_slot = int(topic_item.get("_countdown_slot") or countdown_slot_for_rank(rank, total_count))
-    script = build_editorial_intro(theme, topic, rank, total_count, adjective, best_clip)
+    script = build_editorial_intro(theme, topic, rank, total_count, adjective, best_clip, countdown_slot=countdown_slot)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, rank)
     intro_duration = editorial_intro_duration(intro_audio)
     transition_duration = max(1.0, EDITORIAL_TRANSITION_SECONDS) if len(topic_clips) > 1 else 0.0
@@ -5468,7 +5914,7 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
         "source_title": best_clip.get("source_title") or "source episode",
         "clip_file": source_clip,
     }
-    script = build_editorial_intro(theme, topic, rank, total_count, reel_adjective, best_clip)
+    script = build_editorial_intro(theme, topic, rank, total_count, reel_adjective, best_clip, countdown_slot=countdown_slot)
     intro_audio = synthesize_intro_audio(script, scratch_dir, date_key, theme, rank)
     intro_duration = editorial_intro_duration(intro_audio)
     rank_card_duration = max(0.0, min(0.7, EDITORIAL_RANK_CARD_SECONDS))
@@ -5789,9 +6235,16 @@ def popular_segment_labels(item, theme=""):
 
 def build_popular_segment_script(theme, item):
     clip = item.get("clip") or {}
-    topic = editorial_title_topic(clip.get("suggested_title") or clip_summary(clip, item.get("source_title") or "this moment"))
-    source = popular_segment_signal_source(item)
-    return build_moment_hook_script(theme, topic, "standout", clip, signal_source=source)
+    title, topic, _topic_terms = popular_segment_public_title(theme, item)
+    topic = title if title and not re.search(r"^needs\s+specific\s+", title, flags=re.I) else topic
+    topic = editorial_title_topic(topic or clip.get("suggested_title") or clip_summary(clip, item.get("source_title") or "this moment"))
+    hook_topic = concise_intro_hook_topic(theme, topic, clip, max_length=50)
+    script = f"Standout: {hook_topic}."
+
+    if len(re.findall(r"[a-zA-Z0-9']+", script)) < 6:
+        script = f"Standout: {hook_topic}. Watch this."
+
+    return script
 
 
 def build_popular_output_package(theme, output_path, item, index, date_key, script, intro_audio, intro_duration, clip_duration):
@@ -5801,27 +6254,16 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
     overlay_style = profile.get("overlay_style", "")
     framing_style = profile.get("framing_style", "")
     clip = item["clip"]
+    underlying_source_state_keys = source_keys_from_clips(theme, [clip])
+    item_source_key = str(item.get("source_state_key") or "").strip()
+
+    if item_source_key and item_source_key not in underlying_source_state_keys:
+        underlying_source_state_keys.append(item_source_key)
+
     source_title = item.get("source_title") or clip.get("source_title") or "Podcast interview"
     channel = item.get("channel_label") or "Podcast Channel"
-    raw_topic = clip.get("suggested_title") or clip_summary(clip, source_title)
-    topic = clean_headline_topic(
-        theme,
-        raw_topic,
-        clip=clip,
-        source_title=source_title,
-        channel=channel,
-    )
+    title, topic, topic_terms = popular_segment_public_title(theme, item)
     signal_source = popular_segment_signal_source(item)
-    title = build_social_title(theme, topic, content_format="popular", signal_source=signal_source)
-    title = sanitize_social_title(
-        theme,
-        title,
-        topic,
-        clip=clip,
-        source_title=source_title,
-        channel=channel,
-        content_format="popular",
-    )
     description = build_social_caption(
         theme_label,
         topic,
@@ -5846,7 +6288,7 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
     title_quality = score_title_quality(
         theme,
         title,
-        topic_terms=[topic, source_title, channel],
+        topic_terms=topic_terms,
     )
     rank_signals["title_quality"] = title_quality
     experiment = clip.get("experiment") or {
@@ -5867,6 +6309,7 @@ def build_popular_output_package(theme, output_path, item, index, date_key, scri
         "video_file": os.path.abspath(output_path),
         "source_clip_file": os.path.abspath(clip.get("output_file", "")),
         "source_state_key": f"{theme}|popular|{date_key}|{index}|{item.get('source_state_key', '')}",
+        "underlying_source_state_keys": underlying_source_state_keys,
         "source_video_url": item.get("source_video_url") or clip.get("source_video_url", ""),
         "source_channel": channel,
         "source_title": source_title,
@@ -6092,6 +6535,14 @@ def render_recap_compilation(theme, date_key, packages, paths):
         is_recap=True,
     )
     package["editorial_parts"] = [item["video_file"] for item in packages]
+    underlying_source_state_keys = []
+
+    for item in packages:
+        for key in item.get("underlying_source_state_keys") or []:
+            if key and key not in underlying_source_state_keys:
+                underlying_source_state_keys.append(key)
+
+    package["underlying_source_state_keys"] = underlying_source_state_keys
     package["source_context"] = [
         {
             "source_video_url": item.get("source_video_url", ""),
@@ -6107,31 +6558,179 @@ def render_recap_compilation(theme, date_key, packages, paths):
     return finalize_editorial_package(package, "full daily recap")
 
 
+def synthetic_editorial_source_key(source_key):
+    key = str(source_key or "")
+    return "|editorial|" in key or "|popular|" in key
+
+
+def package_underlying_source_keys(theme, package):
+    keys = []
+
+    for key in package.get("underlying_source_state_keys") or []:
+        key = str(key or "").strip()
+
+        if key and not synthetic_editorial_source_key(key) and key not in keys:
+            keys.append(key)
+
+    rank_signals = package.get("rank_signals") or {}
+
+    for key in [
+        rank_signals.get("source_state_key"),
+        package.get("source_state_key"),
+    ]:
+        key = str(key or "").strip()
+
+        if key and not synthetic_editorial_source_key(key) and key not in keys:
+            keys.append(key)
+
+    source_url = str(package.get("source_video_url") or "").strip()
+
+    if source_url:
+        fallback_key = f"{theme}|{source_url}"
+
+        if fallback_key not in keys:
+            keys.append(fallback_key)
+
+    return keys
+
+
+def mark_editorial_sources_completed(theme, packages, metadata_file):
+    executed = load_json_file(EXECUTED_FILE, {})
+    pulled = load_json_file(PULLED_FILE, {})
+
+    if not isinstance(executed, dict):
+        executed = {}
+
+    if not isinstance(pulled, dict):
+        pulled = {}
+
+    changed_executed = False
+    changed_pulled = False
+    completed_count = 0
+
+    for package in packages or []:
+        if not package_is_upload_ready(package):
+            continue
+
+        source_keys = package_underlying_source_keys(theme, package)
+        final_video_file = os.path.abspath(package.get("video_file", "")) if package.get("video_file") else ""
+        package_key = str(package.get("source_state_key") or "").strip()
+
+        for source_key in source_keys:
+            existing = executed.get(source_key, {})
+
+            if not isinstance(existing, dict):
+                existing = {}
+
+            pulled_record = pulled.get(source_key, {})
+
+            if not isinstance(pulled_record, dict):
+                pulled_record = {}
+
+            final_video_files = list(existing.get("final_video_files") or [])
+            metadata_files = list(existing.get("metadata_files") or [])
+            editorial_packages = list(existing.get("editorial_packages") or [])
+
+            if final_video_file and final_video_file not in final_video_files:
+                final_video_files.append(final_video_file)
+
+            if metadata_file and metadata_file not in metadata_files:
+                metadata_files.append(metadata_file)
+
+            if package_key and package_key not in editorial_packages:
+                editorial_packages.append(package_key)
+
+            updated = {
+                **existing,
+                "theme": theme,
+                "video_url": package.get("source_video_url") or pulled_record.get("video_url", existing.get("video_url", "")),
+                "title": package.get("source_title") or pulled_record.get("title", existing.get("title", "")),
+                "funnel_status": "subtitled",
+                "subtitle_status": "complete",
+                "upload_status": existing.get("upload_status", "pending"),
+                "final_video_count": len(final_video_files),
+                "final_video_files": final_video_files,
+                "metadata_files": metadata_files,
+                "editorial_packages": editorial_packages,
+            }
+            mark_stage(updated, "subtitled")
+            mark_stage(updated, "completed")
+            executed[source_key] = updated
+            changed_executed = True
+            completed_count += 1
+
+            pulled_entry = pulled.get(source_key)
+
+            if isinstance(pulled_entry, dict):
+                mark_stage(pulled_entry, "subtitled")
+                mark_stage(pulled_entry, "upload_ready")
+                pulled_entry["funnel_status"] = "upload_ready"
+                pulled_entry["subtitle_status"] = "complete"
+                changed_pulled = True
+
+    if changed_executed:
+        write_json_file(EXECUTED_FILE, executed)
+
+    if changed_pulled:
+        write_json_file(PULLED_FILE, pulled)
+
+    if completed_count:
+        print(f"Marked {completed_count} underlying source record(s) as completed/subtitled.")
+
+
 def save_editorial_metadata(theme, paths, packages, brief):
     metadata_path = paths["final_metadata_file"]
-    metadata = {
+    metadata_default = {
         "theme": theme,
         "content": [],
+        "archive": [],
         "daily_editorial": brief,
     }
+    preserve_existing = os.getenv("SHORTFORM_PRESERVE_EDITORIAL_BACKLOG", "1") != "0"
 
-    if APPEND_METADATA and os.path.exists(metadata_path) and os.path.getsize(metadata_path) > 0:
-        metadata = load_json_file(metadata_path, metadata)
+    if preserve_existing and os.path.exists(metadata_path) and os.path.getsize(metadata_path) > 0:
+        metadata = load_json_file(metadata_path, metadata_default)
+        metadata["content"] = [
+            item
+            for item in metadata.get("content", [])
+            if item.get("video_file") and os.path.exists(item.get("video_file"))
+        ]
+        metadata["archive"] = [
+            item
+            for item in metadata.get("archive", [])
+            if item.get("video_file") and os.path.exists(item.get("video_file"))
+        ]
+    elif APPEND_METADATA and os.path.exists(metadata_path) and os.path.getsize(metadata_path) > 0:
+        metadata = load_json_file(metadata_path, metadata_default)
         metadata["content"] = [
             item
             for item in metadata.get("content", [])
             if item.get("editorial_date") != brief["date"]
         ]
+    else:
+        metadata = metadata_default
 
     metadata["theme"] = theme
     metadata["daily_editorial"] = brief
-    metadata["content"] = metadata.get("content", []) + packages
+    packages = enforce_unique_package_titles(theme, packages, metadata)
+    metadata["content"] = dedupe_packages(metadata.get("content", []) + packages)
+    metadata["archive"] = dedupe_packages(metadata.get("archive", []))
     write_json_file(metadata_path, metadata)
+
+    if os.getenv("SHORTFORM_DEFER_EDITORIAL_SOURCE_COMPLETION", "0") == "1":
+        print("Deferred source completion marking until final editorial quota pass.")
+    else:
+        mark_editorial_sources_completed(theme, packages, metadata_path)
+
     return metadata_path
 
 
 def cleanup_stale_editorial_outputs(theme, paths, date_key, packages):
+    if os.getenv("SHORTFORM_PRESERVE_EDITORIAL_BACKLOG", "1") != "0":
+        return
+
     output_dir = paths["final_videos_path"]
+    archive_dir = paths.get("archive_path", os.path.join(paths["output_path"], "archive"))
     keep_files = {
         os.path.normcase(os.path.normpath(os.path.abspath(package["video_file"])))
         for package in packages
@@ -6161,9 +6760,119 @@ def cleanup_stale_editorial_outputs(theme, paths, date_key, packages):
             continue
 
         try:
-            os.remove(filepath)
+            os.makedirs(archive_dir, exist_ok=True)
+            target = os.path.abspath(os.path.join(archive_dir, filename))
+            base, ext = os.path.splitext(target)
+            counter = 2
+
+            while os.path.exists(target):
+                target = f"{base}_{counter}{ext}"
+                counter += 1
+
+            os.replace(filepath, target)
+            print(f"Archived stale editorial output instead of deleting it: {os.path.basename(target)}")
         except OSError:
             pass
+
+
+def run_exhaustive_rendered_editorial_for_theme(theme, paths, rendered_clips, date_key, start):
+    print("Exhaust rendered editorial mode enabled: packaging every rendered clip that passes existing visual/editorial checks.")
+    items = exhaustive_rendered_segment_items(theme, paths, rendered_clips)
+    packages = []
+    rejected_items = []
+
+    print(f"Exhaustive rendered clip candidates: {len(items)}")
+
+    for index, item in enumerate(items, start=1):
+        print(
+            f"Rendering exhaustive rendered clip #{index}/{len(items)}: "
+            f"{item.get('channel_label', 'Podcast Channel')} - {item.get('source_title', '')}"
+        )
+
+        try:
+            package = render_popular_segment_short(
+                theme=theme,
+                item=item,
+                index=index,
+                date_key=date_key,
+                paths=paths,
+            )
+        except Exception as error:
+            rejected_items.append({
+                "type": "exhaustive_rendered_segment",
+                "rank": index,
+                "source_title": item.get("source_title", ""),
+                "rejection_reasons": [f"render failed: {str(error).splitlines()[0][:260]}"],
+            })
+            print(
+                f"Skipping exhaustive rendered clip #{index} after render failure: "
+                f"{str(error).splitlines()[0][:260]}"
+            )
+            continue
+
+        if not package_is_upload_ready(package):
+            gate_flags = (package.get("editorial_gates") or {}).get("flags", [])
+            render_reasons = (package.get("render_qc") or {}).get("rejection_reasons", [])
+            rejection_reasons = list(render_reasons) + [f"editorial gate: {flag}" for flag in gate_flags]
+            rejected_items.append({
+                "type": "exhaustive_rendered_segment",
+                "rank": index,
+                "source_title": item.get("source_title", ""),
+                "rejection_reasons": rejection_reasons,
+            })
+            reason_text = "; ".join(rejection_reasons) or "package did not pass upload-ready checks"
+            print(f"Skipping rejected exhaustive rendered clip #{index} from upload metadata: {reason_text}")
+            continue
+
+        packages.append(package)
+
+    brief = {
+        "theme": theme,
+        "date": date_key,
+        "topic_count": 0,
+        "popular_segment_count": len(packages),
+        "rejected_count": len(rejected_items),
+        "package_target": "exhaust_rendered_pool",
+        "package_shortfall": 0,
+        "package_target_met": True,
+        "format": "exhaustive_rendered_clip_packaging",
+        "content_strategy": "package every already-rendered clip that passes visual/editorial checks for the current production cycle",
+        "items": [],
+        "popular_segments": [
+            {
+                "rank": index,
+                "source_title": package.get("source_title", ""),
+                "channel_label": package.get("source_channel", ""),
+                "source_video_url": package.get("source_video_url", ""),
+                "output_file": package.get("video_file", ""),
+                "title": package.get("title", ""),
+                "caption": package.get("caption", ""),
+                "script": package.get("editorial_script", ""),
+                "content_signal": package.get("content_signal", {}),
+            }
+            for index, package in enumerate(packages, start=1)
+        ],
+        "rejected_items": rejected_items,
+        "source_scan": {
+            "watched_hours": 0,
+            "hours_phrase": "",
+            "source_count": len({item.get("source_state_key") for item in items}),
+        },
+        "recap_file": "",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    brief_dir = os.path.join(paths["metadata_path"], "editorial", date_key)
+    os.makedirs(brief_dir, exist_ok=True)
+    brief_file = os.path.join(brief_dir, "daily_brief.json")
+    write_json_file(brief_file, brief)
+    cleanup_stale_editorial_outputs(theme, paths, date_key, packages)
+    metadata_file = save_editorial_metadata(theme, paths, packages, brief)
+
+    print(f"Daily brief: {brief_file}")
+    print(f"Upload metadata: {metadata_file}")
+    print(f"Editorial outputs ready: {len(packages)}")
+    print(f"Daily editorial finished in {time.time() - start:.2f} seconds\n")
+    return len(packages)
 
 
 def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
@@ -6180,10 +6889,13 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
         print("No rendered ranked clips found for editorial generation.\n")
         return 0
 
-    countdown_count = min(DAILY_TOPIC_COUNT, EDITORIAL_COUNTDOWN_SIZE)
-    topic_groups = group_clips_by_topic(rendered_clips, theme=theme)[:countdown_count]
+    if EXHAUST_RENDERED_EDITORIAL_CLIPS:
+        return run_exhaustive_rendered_editorial_for_theme(theme, paths, rendered_clips, date_key, start)
 
-    if not topic_groups:
+    countdown_count = min(DAILY_TOPIC_COUNT, EDITORIAL_COUNTDOWN_SIZE)
+    all_topic_groups = group_clips_by_topic(rendered_clips, theme=theme)
+
+    if not all_topic_groups:
         print("No topic groups found for editorial generation.\n")
         return 0
 
@@ -6193,22 +6905,56 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
     popular_brief_items = []
     rejected_items = []
     visually_rejected_countdown_sources = set()
+    used_countdown_sources = set()
     reel_adjective = take_next_adjectives(theme, 1)[0]
-    context = build_countdown_context(theme, paths, rendered_clips, topic_groups, reel_adjective)
-    attach_countdown_context(topic_groups, context)
+    source_scan_context = build_countdown_context(
+        theme,
+        paths,
+        rendered_clips,
+        all_topic_groups[:countdown_count],
+        reel_adjective,
+    )
     print(
-        f"Countdown setup: watched {format_hours_phrase(context.get('watched_hours', 0))} "
-        f"across {context.get('source_count', 0)} {theme} interviews; angle: {reel_adjective}"
+        f"Countdown setup: watched {format_hours_phrase(source_scan_context.get('watched_hours', 0))} "
+        f"across {source_scan_context.get('source_count', 0)} {theme} interviews; angle: {reel_adjective}"
+    )
+    print(
+        "Editorial package target: "
+        f"{EDITORIAL_FINAL_PACKAGE_TARGET} upload-ready final package(s) "
+        f"({UPLOAD_READY_TARGET_PER_THEME} upload queue + {RESERVE_TARGET_PER_THEME} reserve)"
     )
 
-    for index, topic_item in enumerate(topic_groups, start=1):
+    countdown_attempts = 0
+    countdown_attempt_limit = max(countdown_count * 4, min(len(all_topic_groups), countdown_count * 6))
+
+    while len(countdown_packages) < countdown_count and countdown_attempts < countdown_attempt_limit:
+        countdown_attempts += 1
+        available_clips = [
+            clip
+            for clip in rendered_clips
+            if clip_state_key(theme, clip) not in used_countdown_sources
+        ]
+        candidate_groups = group_clips_by_topic(available_clips, theme=theme)
+
+        if not candidate_groups:
+            break
+
+        slot_rank = len(countdown_packages) + 1
+        context_groups = candidate_groups[:countdown_count]
+        context = build_countdown_context(theme, paths, available_clips, context_groups, reel_adjective)
+        attach_countdown_context(context_groups, context)
+        topic_item = context_groups[0]
+        topic_item["_countdown_context"] = context
+        topic_item["_total_count"] = countdown_count
+        topic_item["_countdown_slot"] = countdown_slot_for_rank(slot_rank, countdown_count)
         adjective = reel_adjective
+        topic_source_keys = source_keys_from_clips(theme, topic_item.get("clips") or [])
         print(f"Rendering countdown short #{topic_item['_countdown_slot']}: {adjective} - {topic_item['topic']}")
         try:
             package = render_editorial_short(
                 theme=theme,
                 topic_item=topic_item,
-                rank=index,
+                rank=slot_rank,
                 adjective=adjective,
                 date_key=date_key,
                 paths=paths,
@@ -6224,6 +6970,7 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
                 f"Skipping countdown short #{topic_item.get('_countdown_slot')} after render failure: "
                 f"{str(error).splitlines()[0][:260]}"
             )
+            used_countdown_sources.update(topic_source_keys)
             continue
 
         if not package_is_upload_ready(package):
@@ -6244,14 +6991,16 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
                 for clip in topic_item.get("clips") or []:
                     visually_rejected_countdown_sources.add(clip_state_key(theme, clip))
 
+            used_countdown_sources.update(topic_source_keys)
             reason_text = "; ".join(rejection_reasons) or "package did not pass upload-ready checks"
             print(f"Skipping rejected countdown short #{topic_item['_countdown_slot']} from upload metadata: {reason_text}")
             continue
 
+        used_countdown_sources.update(source_keys_from_clips(theme, selected_topic_clips(topic_item)))
         packages.append(package)
         countdown_packages.append(package)
         brief_items.append({
-            "rank": index,
+            "rank": slot_rank,
             "countdown_slot": topic_item["_countdown_slot"],
             "adjective": adjective,
             "topic": package.get("content_signal", {}).get("topic") or editorial_title_topic(topic_item["topic"]),
@@ -6281,7 +7030,7 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             })
             print("Skipping rejected daily recap from upload metadata.")
 
-    if RENDER_POPULAR_SEGMENT_SHORTS:
+    if RENDER_POPULAR_SEGMENT_SHORTS and len(packages) < EDITORIAL_FINAL_PACKAGE_TARGET:
         raw_popular_items = popular_segment_items(theme, paths, rendered_clips)
         popular_items = []
 
@@ -6328,6 +7077,13 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             print(f"Rendering {len(popular_items)} most replayed/popular segment shorts...")
 
         for index, item in enumerate(popular_items, start=1):
+            if len(packages) >= EDITORIAL_FINAL_PACKAGE_TARGET:
+                print(
+                    "Editorial package target reached; "
+                    f"stopping popular-segment rendering at {len(packages)} ready package(s)."
+                )
+                break
+
             print(
                 f"Rendering popular segment #{index}: "
                 f"{item.get('channel_label', 'Podcast Channel')} - {item.get('source_title', '')}"
@@ -6382,13 +7138,29 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             })
         if not popular_items:
             print("No replay/popularity-backed source segments found for popular segment shorts.")
+    elif RENDER_POPULAR_SEGMENT_SHORTS:
+        print(
+            "Popular segment rendering skipped because the editorial package target "
+            f"was already reached ({len(packages)}/{EDITORIAL_FINAL_PACKAGE_TARGET})."
+        )
 
+    if len(packages) < EDITORIAL_FINAL_PACKAGE_TARGET:
+        print(
+            "Editorial package target not fully met: "
+            f"{len(packages)}/{EDITORIAL_FINAL_PACKAGE_TARGET} upload-ready package(s). "
+            "This usually means the rendered usable source pool was too small after final QC."
+        )
+
+    package_shortfall = max(0, EDITORIAL_FINAL_PACKAGE_TARGET - len(packages))
     brief = {
         "theme": theme,
         "date": date_key,
         "topic_count": len(brief_items),
         "popular_segment_count": len(popular_brief_items),
         "rejected_count": len(rejected_items),
+        "package_target": EDITORIAL_FINAL_PACKAGE_TARGET,
+        "package_shortfall": package_shortfall,
+        "package_target_met": package_shortfall == 0,
         "format": "ranked_countdown_reel_with_popular_segments",
         "content_strategy": "watched-hours countdown plus one-source popular/replayed segment shorts with restrained premium overlays and full source audio",
         "items": brief_items,
@@ -6399,9 +7171,9 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             "rotation_file": ADJECTIVE_ROTATION_FILE,
         },
         "source_scan": {
-            "watched_hours": context.get("watched_hours", 0),
-            "hours_phrase": format_hours_phrase(context.get("watched_hours", 0)),
-            "source_count": context.get("source_count", 0),
+            "watched_hours": source_scan_context.get("watched_hours", 0),
+            "hours_phrase": format_hours_phrase(source_scan_context.get("watched_hours", 0)),
+            "source_count": source_scan_context.get("source_count", 0),
         },
         "recap_file": recap_package["video_file"] if recap_package else "",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

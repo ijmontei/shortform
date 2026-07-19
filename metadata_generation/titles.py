@@ -61,11 +61,13 @@ GENERIC_BAD_PATTERNS = [
     r"^the\s+.+\s+story\s+fans\s+never\s+hear$",
     r"\bthe\s+story\s+people\s+will\s+debate\b",
     r"\bthe\s+(policy\s+)?claim\s+worth\s+checking\b",
+    r"\bneeds\s+another\s+9[- ]?11\b",
     r"\bthe\s+culture\s+story\s+people\s+will\s+debate\b",
     r"\bthe\s+interview\s+moment\s+worth\s+watching\b",
     r"^the\s+pop\s+culture\s+detail\s+inside\b",
     r"^the\s+context\s+behind\b",
     r"^the\s+debate\s+inside\b",
+    r"^the\s+policy\s+fight\s+that\s+needs\s+context$",
     r"^the\s+debate\s+moment\s+clip\b",
     r"\bclip\s+with\s+a\s+real\s+payoff\b",
     r"\bsplit\s+the\s+lobby\b",
@@ -77,6 +79,8 @@ GENERIC_BAD_PATTERNS = [
     r"^the\s+joke\s+inside\b",
     r"^the\s+investor\s+catch\s+inside\b",
     r"^the\s+health\s+(detail|warning)\s+inside\b",
+    r":\s+the\s+health\s+detail\s+to\s+rethink$",
+    r"\beight\s+sleep\s+pod\b",
     r"^the\s+ai\s+question\s+inside\b",
     r"\bthe\s+ai\s+detail\s+builders\s+are\s+watching\b",
     r"^the\s+market\s+detail\s+investors\s+should\s+watch$",
@@ -107,10 +111,13 @@ GENERIC_BAD_PATTERNS = [
     r"^the\s+game\s+industry\s+bet\s+on\b",
     r"^what\s+if\s+granny\s+smith\s+had\s+a\s+birthday\s+party\??$",
     r"^the\s+health\s+detail\s+worth\s+rethinking$",
+    r"^growth\s+may\s+not\s+be\s+booming$",
     r"\bchanges\s+the\s+plan$",
     r"^what\s+.+\s+changes\s+in\s+the\s+debate$",
     r"^why\s+.+\s+became\s+the\s+debate$",
     r"^why\s+.+\s+(took\s+over\s+the\s+conversation|became\s+the\s+moment)$",
+    r"^why\s+.+\s+became\s+the\s+(flashpoint|debate|moment)$",
+    r"^why\s+.+\s+took\s+over\s+the\s+conversation$",
     r"^the\s+joke\s+that\s+actually\s+landed$",
     r"^oh\s+my\s+god\b",
     r"^for\s+your\s+whole\s+life\b",
@@ -130,16 +137,129 @@ GENERIC_BAD_PATTERNS = [
     r"^what\s+(away|fast|pennsylvania|word|entire|analysis|failure)\s+reveals\s+about\s+the\s+market$",
     r"^why\s+investors\s+are\s+watching\s+(billionaire|bigger|alentown)$",
     r"^why\s+.+\b(simply|too)\b.*\s+matters\s+to\s+investors$",
+    r"^why\s+.+\s+(still\s+)?matters\s+to\s+investors$",
     r":\s+the\s+(sports debate|locker room angle|investor takeaway)$",
     r"^the\s+debate\s+around\s+[a-z0-9 '&.-]{2,36}$",
     r"^the\s+business\s+risk\s+around\s+[a-z0-9 '&.-]{2,36}$",
     r"^nba\s+offseason\s+changed\s+the\s+game$",
+    r"\b(changed|changes)\s+the\s+game$",
+    r"^the\s+locker\s+room\s+(story|debate)\s+around\b",
+    r"^the\s+(joke|callback|habit|debate|pop\s+culture\s+detail|market\s+detail|ai\s+detail|health\s+detail|timeline\s+detail)\s+(inside|behind|around)\b",
+    r"^the\s+sports\s+debate\s+that\s+split\s+the\s+room$",
+    r"^the\s+problem\s+is\b",
+    r"^the\s+technical\s+problem\s+is\s+that\b",
+    r"^a\s+lot\s+of\b",
+    r"^now,\s+",
+    r"^now\s+what\s+not\b",
+    r"^let\s+me\s+just\b",
+    r"^well,\s+",
+    r"^welcome\s+to\b",
+    r"^the\s+reality\s+is\b",
+    r"^the\s+biggest\s+problem\s+people\s+have\b",
+    r"^what\s+the\s+.+\s+revealed\s+is\b",
+    r"^how\s+do\s+you\s+determine\s+when\b",
+    r"^\d+%\s+of\s+devs\s+salaries\b",
+    r"^\d+%\s+of\s+.+\s+don'?t\b",
+    r"^0+\d*\s",
+    r"^100%\s+and\b",
+    r"^got\s+up\s+at\b",
+    r"^in\s+fact\b",
+    r"^what\s+was\s+that\s+last\s+season\s+like\??$",
+    r"^what'?s\s+six\s+myths\s+in\s+this\b",
+    r"^how\s+does\s+that\s+shape\b",
+    r"^\d+\s+class\s+member\b",
+    r"^\d+\s+a\s+month\b",
+    r"^\d+\s+year\s+olds?\s+that\b",
+    r"\binnit\??$",
+    r"^just\s+trying\b",
+    r"^progression\s+at\b",
+    r"^turning\s+the\s+market\s+into\b",
+    r"^investors\s+are\s+turning\s+to\b",
+    r"^emily\s+has\s+really\b",
     r"\bcash\s+growth\s+flow\b",
     r"^the\s+policy\s+fight\s+behind\s+(terrible|bullshit|sentiment|will|qualitative|federal|kids|700|300|entire|analysis|failure|word)$",
     r"^the\s+political\s+risk\s+in\s+(will|700|300|word|entire)$",
     r"^why\s+[0-9,.]+\s+is\s+a\s+real\s+ai\s+bottleneck$",
     r"^what\s+(does|are)\b",
     r"^investors\s+want\s+to\s+invest$",
+    r"^which\s+one\s+was\b",
+    r"^who\s+released\s+this\s+new\s+report\b",
+    r"^who\s+woulda\s+thought\b",
+    r"^what\s+is\s+the\s+real\s+life\b",
+    r"^what'?s\s+the\s+back\s+story\s+behind\b",
+    r"^what'?s\s+the\s+mile\s+high\s+city\??$",
+    r"^a\s+weird\s+movie\s+question\??$",
+    r"^dude,\s+",
+    r"^alright\s+cool\b",
+    r"^all\s+right\s+cool\b",
+    r"^when\s+was\s+.+\s+when\s+that\s+come\s+out\??$",
+    r"^when\s+was\s+.+\s+when\s+that\s+came\s+out\??$",
+    r"^[a-z][a-z'.-]+,\s+who'?s\b",
+    r"^playoff\s+football\s+or\b",
+    r"^super\s+bowl\s+or\s+when\b",
+    r"^who'?s\s+that\b",
+    r"^new\s+.+\s+too\s+or\s+extra\b",
+    r"^team\s+.+\s+comes\s+back\b",
+    r"^number\s+\d+\b",
+    r"^let'?s\b",
+    r"^go\s+to\s+shop\b",
+    r"^whoever\b",
+    r"\bbecause\s+if\s+people\s+don'?t\s+know\b",
+    r"\bis\s+not\s+like\s+that\s+though\b",
+    r"^what'?s\s+the\s+simplest\b",
+    r"^[a-z][a-z'.-]+\s+goes\s+looking\s+for\s+love\b",
+    r"^[a-z][a-z'.-]+\s+says,\s+",
+    r"^[a-z0-9 '&.-]+\s+was\s+\d{4},\s+apparently$",
+    r"^yep,\s+",
+    r"^instead\s+of\b",
+    r"^\d+\s+million\s+units?\s+of\b",
+    r"^[a-z0-9 '&.-]+\s+was\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+of\s+\d{4}$",
+    r"\bwould\s+cost\s+.+\s+right\s+now$",
+    r"\bis\s+a\s+beautiful\s+movement$",
+    r"^[a-z][a-z'.-]+,\s+[a-z][a-z'.-]+,\s+",
+    r"^[a-z0-9 '&.-]{2,32},\s+[a-z0-9 '&.-]{2,40},\s+",
+    r"^the\s+[a-z0-9 '&.-]+\s+chronicles\s+time[- ]bending\b",
+    r"\blike\s+oh\s+shit\b",
+    r"\bthere'?s\s+so\s+many\s+people\s+in\s+this\s+car\b",
+    r"^stocks\s+\d+(?:\.\d+)?\s+is\s+designed\s+around\b",
+    r"^the\s+rent-to-price\s+ratio\s+is\s+not\b",
+    r"^how\s+[a-z0-9 '&.-]{2,48}\s+changes\s+the\s+math$",
+    r"^chip\s+ai\s+changed$",
+    r"^[a-z][a-z'.-]+(?:\s+[a-z][a-z'.-]+){0,3}\s+spent\s+\d+\s+years\b",
+    r"^\d+%\s+of\s+homes\s+right\s+now\b",
+    r"^man,\s+money\s+starts\s+now$",
+    r"^how\s+do\s+you\s+build\b",
+    r"^how\s+does\s+[a-z0-9 '&.-]+\s+come\s+into\s+the\s+fray\??$",
+    r"^\d+\s+to\s+\$?\d+\s+a\s+night\b",
+    r"^gen\s+z\s+about\s+wasting\b",
+    r"^now\s+let'?s\s+go\s+to\b",
+    r"^\d+\s+of\s+post-tax\b",
+    r"^one\s+belief\s+is\s+ai\s+is\s+done\b",
+    r"^[a-z][a-z'.-]+\s+has\s+banned\s+\d+",
+    r"^china\s+already\s+has\b",
+    r"^[a-z][a-z'.-]+\s+[a-z][a-z'.-]+\s+had\s+already\s+agreed\b",
+    r"^folks\s+have\s+been\s+comparing\b",
+    r"^why\s+would\s+an\s+intelligent\b",
+    r"^the\s+conflict\s+has\s+already\s+cost\b",
+    r"^[a-z][a-z'.-]+\s+has\s+gone\s+from\b",
+    r"^the\s+problem\s+has\s+always\s+been\b",
+    r"^china\s+typically\s+has\b",
+    r"^\$?\d+\s+billion\s+or\s+whatever\b",
+    r"^\d+\s+to\s+\d+%\s+of\s+women\b",
+    r"^mortgage\s+is\s+a\s+debt$",
+    r"^the\s+gigette\s+is\b",
+    r"^the\s+mondami\s+suite\b",
+    r"^how\s+do\s+these\s+stupid\s+bubbles\b",
+    r"^before\s+investing\s+carefully\b",
+    r"^stocksfall\b",
+    r"^when\s+ai\s+is\s+coming\s+out\b",
+    r"^[a-z][a-z'.-]+(?:\s+[a-z][a-z'.-]+){0,3}\s+rivalry$",
+    r"^[a-z][a-z'.-]+(?:\s+[a-z][a-z'.-]+){0,3}\s+story$",
+    r"^the\s+[a-z0-9 '&.-]{2,40}\s+childhood\s+story$",
+    r"^anyway,\s+",
+    r"^petersburg\s+either\b",
+    r"^kennedy\s+jr\.,?\s+the\s+secretary\b",
+    r"^the\s+reality\s+was\s+made\s+illegal\b",
 ]
 
 WEAK_TOPIC_TERMS = {
@@ -283,7 +403,7 @@ RAW_DIALOGUE_STARTS = {
     "by", "on", "are", "was", "were", "would", "did", "do", "does",
     "can", "could", "thats", "that's", "thatll", "that'll", "hes",
     "he's", "shes", "she's", "youre", "you're", "nobodys", "nobody's",
-    "oh", "if", "for", "my", "our",
+    "oh", "if", "for", "my", "our", "just",
 }
 
 GENERIC_TOPIC_PHRASES = {
@@ -354,15 +474,29 @@ ALLOWED_SINGLE_FINANCE_SUBJECTS = {
 
 SPECIAL_TOPIC_CASE = {
     "ai": "AI",
+    "api": "API",
+    "ceo": "CEO",
+    "fbi": "FBI",
     "ipo": "IPO",
+    "ios": "iOS",
+    "jonbenet": "JonBenet",
     "nyc": "NYC",
     "nfl": "NFL",
     "nba": "NBA",
     "ufc": "UFC",
+    "uk": "UK",
+    "us": "US",
     "spacex": "SpaceX",
     "openai": "OpenAI",
     "nvidia": "NVIDIA",
     "palantir": "Palantir",
+    "youtube": "YouTube",
+    "xai": "xAI",
+}
+
+TITLE_SMALL_WORDS = {
+    "a", "an", "and", "as", "at", "but", "by", "for", "from", "in",
+    "into", "nor", "of", "on", "or", "over", "the", "to", "vs", "with",
 }
 
 
@@ -375,6 +509,9 @@ def looks_like_raw_dialogue_fragment(text):
         return True
 
     if any(phrase in lower for phrase in GENERIC_TOPIC_PHRASES):
+        return True
+
+    if lower.startswith(("anyway,", "dude,", "bro,", "yeah,", "alright,", "all right")):
         return True
 
     if text and text[0].islower() and not re.match(r"^(iOS|eBay|xAI|AI|NFL|NBA|UFC|FBI|CIA|CEO)\b", text):
@@ -393,12 +530,70 @@ def looks_like_raw_dialogue_fragment(text):
         return True
 
     if re.search(
+        r"^(around\s+\d|rl\s+is\s+great\s+at|which\s+is\b|given\s+the\b|first\s+is\b|"
+        r"once\s+more|the\s+labs?\s+plans?\s+for|what\s+is\s+the\s+oral\s+environment|"
+        r"the\s+phenomenon\s+of\s+why|managing\s+a\s+team\s+of\s+.+\s+different\s+compared|"
+        r"\d+(?:\.\d+)?\s+into\s+doing|the\s+ai\s+just\s+has\s+to\s+re-?implement\s+them)",
+        lower,
+    ):
+        return True
+
+    if re.search(
+        r"^(why\s+is\s+having|why\s+not\s+just|the\s+trap\s+is\s+opening\s+up|"
+        r"the\s+so-called\s+generous\s+offer|someone\s+huge\s+like|"
+        r"the\s+only\s+real\s+challenge|the\s+reality\s+of\s+why|"
+        r"how\s+can\s+parents\s+like|\d+-?year-old\s+girls?\s+come\s+to\s+me)\b",
+        lower,
+    ):
+        return True
+
+    if re.search(r"\b(without\s+the\s+concordant|feeling\s+incredibly)$", lower):
+        return True
+
+    if re.search(
         r"^(wow|gonna|because|sure|quote|unfortunately|by the way|like this|"
         r"that['’]?s|that['’]?ll|he['’]?s|she['’]?s|you['’]?re|nobody['’]?s|"
         r"would you|are there|what was it|how many times|patrick ever|"
-        r"oliver actually|on the afternoon|[0-9][0-9,]*\s+steps)\b",
+        r"oliver actually|on the afternoon|the problem is|got up at|in fact|"
+        r"a lot of|now,\s|let me just|well,|welcome to|the reality is|"
+        r"the biggest problem people have|what the .+ revealed is|how do you determine when|"
+        r"what was that last season like|what'?s six myths in this|how does that shape|"
+        r"which one was|who released this new report|who woulda thought|"
+        r"what is the real life|what'?s the back story behind|what'?s the mile high city|"
+        r"a weird movie question|dude,|alright cool|all right cool|"
+        r"when was .+ when that come out|when was .+ when that came out|"
+        r"[a-z][a-z'.-]+,\s+who'?s|playoff football or|super bowl or when|"
+        r"around\s+\d|rl\s+is\s+great\s+at|which\s+is\b|given\s+the\b|first\s+is\b|"
+        r"once\s+more|the\s+labs?\s+plans?\s+for|what\s+is\s+the\s+oral\s+environment|"
+        r"the\s+phenomenon\s+of\s+why|managing\s+a\s+team\s+of\s+.+\s+different\s+compared|"
+        r"\d+(?:\.\d+)?\s+into\s+doing|the\s+ai\s+just\s+has\s+to\s+re-?implement\s+them|"
+        r"anyway,|petersburg either|"
+        r"kennedy jr\.,?\s+the secretary|the reality was made illegal|"
+        r"[0-9][0-9,]*\s+steps|[0-9]+\s+class member|"
+        r"[0-9]+\s+a\s+month|[0-9]+\s+year olds?\s+that|"
+        r"[0-9]+%\s+of\s+devs\s+salaries|[0-9]+%\s+of\s+.+\s+don'?t|0+[0-9]*\s|100%\s+and)\b",
         lower,
     ):
+        return True
+
+    if re.search(
+        r"^(progression at|turning the market into|investors are turning to|"
+        r"emily has really|now what not|the technical problem is that|"
+        r"which one was|who released this new report|who woulda thought|"
+        r"what is the real life|what'?s the back story behind|what'?s the mile high city|"
+        r"a weird movie question|dude,|alright cool|all right cool|"
+        r"when was .+ when that come out|when was .+ when that came out|"
+        r"[a-z][a-z'.-]+,\s+who'?s|playoff football or|super bowl or when|"
+        r"anyway,|petersburg either|"
+        r"kennedy jr\.,?\s+the secretary|the reality was made illegal)\b",
+        lower,
+    ):
+        return True
+
+    if re.search(r"^[a-z][a-z'.-]+,\s+if\b", lower):
+        return True
+
+    if re.search(r"\binnit\??$", lower):
         return True
 
     if re.search(r"^what'?s\s+the\s+.{1,48}\s+heading\s+into\s+today", lower):
@@ -424,8 +619,20 @@ def looks_like_raw_dialogue_fragment(text):
     if lower.endswith("right?") or lower.startswith(("there's a reason why", "theres a reason why")):
         return True
 
-    if "?" in lower and re.search(r"\b(i|you|your|we|they|he|she|it)\b", lower):
-        return True
+    if "?" in lower:
+        editorial_question_starts = (
+            "why ",
+            "how ",
+            "what happened",
+            "what went wrong",
+            "what changed",
+            "who won",
+            "who wins",
+        )
+        if not lower.startswith(editorial_question_starts):
+            return True
+        if re.search(r"\b(i|you|your|we|they|he|she|it|that|this)\b", lower):
+            return True
 
     if re.search(r"^what\s+if\s+\b(i|you|we|they|he|she|it)\b", lower):
         return True
@@ -460,10 +667,83 @@ def looks_like_raw_dialogue_fragment(text):
     if len(text) >= 78 and (text.count(",") >= 2 or re.search(r"\s(&|and)\s", lower)):
         return True
 
-    if re.search(r"\b(to|and|but|or|because|so|the|a|an|of|for|with|in|on)$", lower):
+    if re.search(r"\b(to|and|but|or|because|so|the|a|an|of|for|with|in|on|as|still)$", lower):
+        return True
+
+    if re.search(r"\b(clod\.?ai|claude\.?ai)\s+slash\s+[a-z0-9]+", lower):
         return True
 
     return False
+
+
+def title_is_overlong_fragment(title, words=None):
+    text = re.sub(r"\s+", " ", str(title or "")).strip()
+    words = words or re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", text.lower())
+
+    if len(words) > 13:
+        return True
+
+    if len(text) > 86 and not re.search(r"\b(?:vs\.?|versus)\b", text.lower()):
+        return True
+
+    return False
+
+
+def title_has_dangling_end(title):
+    lower = re.sub(r"\s+", " ", str(title or "").lower()).strip(" .,:;!?")
+
+    if not lower:
+        return True
+
+    if re.search(
+        r"\b(?:to|and|but|or|because|so|the|a|an|of|for|with|in|on|as|"
+        r"is|are|was|were|be|being|been|need|needs|said|says|called|given|still)$",
+        lower,
+    ):
+        return True
+
+    if re.search(
+        r"\b(?:first\s+six|operation\s+boot|have\s+set|for\s+solar|"
+        r"of\s+the\s+world|to\s+the\s+united|than\s+the\s+united|respon)$",
+        lower,
+    ):
+        return True
+
+    if re.search(
+        r"\b(?:nuclear\s+enrich|policy\s+rights\s+co|insane\s+train)$",
+        lower,
+    ):
+        return True
+
+    return False
+
+
+def looks_like_asr_sentence_title(title):
+    lower = re.sub(r"\s+", " ", str(title or "").lower()).strip(" .,:;!?")
+
+    if not lower:
+        return True
+
+    transcript_patterns = (
+        r"^map please\b",
+        r"^here'?s,?\s+this\s+is\b",
+        r"^now that'?s also\b",
+        r"^how in the world would\b",
+        r"^why was this effective\b",
+        r"^york election\b",
+        r"^let me go back\b",
+        r"^winemoms\b",
+        r"^what the supreme court said is\b",
+        r"^the separations resulting from\b",
+        r"^biohacker brian johnson\b",
+        r"^\d[\d,]*\s+minus\b",
+        r"^\d+\s+foot monuments\b",
+        r"\bin february 22 in february 22\b",
+        r"\bthat were given to sponsors that weren'?t vetted\b",
+        r"\btop\s+1%\s+vagina\b",
+    )
+
+    return any(re.search(pattern, lower) for pattern in transcript_patterns)
 
 
 def normalize_theme_key(theme):
@@ -523,6 +803,13 @@ def is_mechanical_title(lower_title):
         r"\bpodcast\s+(clip|moment|moments|recap)\b",
         r"^most\s+(replayed|popular)\s+from\s+.+\|\s+.+\s+podcast clip$",
         r"^why\s+.+\s+matters$",
+        r"^why\s+.+\s+(still\s+)?matters\s+to\s+investors$",
+        r"\b(changed|changes)\s+the\s+game$",
+        r"^why\s+.+\s+became\s+the\s+(flashpoint|debate|moment)$",
+        r"^why\s+.+\s+took\s+over\s+the\s+conversation$",
+        r"^the\s+locker\s+room\s+(story|debate)\s+around\b",
+        r"^the\s+(joke|callback|habit|debate|pop\s+culture\s+detail|market\s+detail|ai\s+detail|health\s+detail|timeline\s+detail)\s+(inside|behind|around)\b",
+        r"^the\s+sports\s+debate\s+that\s+split\s+the\s+room$",
     ]
     return any(re.search(pattern, lower_title) for pattern in mechanical_patterns)
 
@@ -718,6 +1005,57 @@ def compact_text(text, max_chars=92):
 
     shortened = text[:max_chars].rsplit(" ", 1)[0].strip(" -._")
     return shortened or text[:max_chars].strip(" -._")
+
+
+def headline_case_word(word, force_title=False):
+    text = str(word or "")
+    lower = text.lower().replace("’", "'")
+
+    if not text or any(char.isdigit() for char in text):
+        return text
+
+    if lower in SPECIAL_TOPIC_CASE:
+        return SPECIAL_TOPIC_CASE[lower]
+
+    if text.isupper() and len(re.sub(r"[^A-Z]", "", text)) > 1:
+        return text
+
+    if "-" in text:
+        return "-".join(headline_case_word(part, force_title=True) for part in text.split("-"))
+
+    if "'" in lower:
+        first, rest = lower.split("'", 1)
+        suffix = rest if rest in {"s", "t", "d", "ll", "re", "ve", "m"} else headline_case_word(rest, force_title=True)
+        return f"{headline_case_word(first, force_title=True)}'{suffix}"
+
+    return lower[:1].upper() + lower[1:]
+
+
+def polish_headline_title(title):
+    title = compact_text(title, 96)
+    matches = list(re.finditer(r"[A-Za-z][A-Za-z'’.-]*|\b\d+[\d,.]*%?\b", title))
+
+    if not matches:
+        return title
+
+    parts = []
+    cursor = 0
+    last_word_index = len(matches) - 1
+
+    for word_index, match in enumerate(matches):
+        parts.append(title[cursor:match.start()])
+        token = match.group(0)
+        lower = token.lower().replace("’", "'")
+
+        if word_index not in {0, last_word_index} and lower in TITLE_SMALL_WORDS:
+            parts.append(lower)
+        else:
+            parts.append(headline_case_word(token, force_title=True))
+
+        cursor = match.end()
+
+    parts.append(title[cursor:])
+    return "".join(parts).strip()
 
 
 def format_topic_text(term):
@@ -922,6 +1260,9 @@ def title_passes_publishable_bar(theme, title, topic_terms=None, min_specificity
         and not quality.get("generic_title")
         and not quality.get("repetitive_title")
         and not quality.get("mechanical_title")
+        and not quality.get("overlong_title")
+        and not quality.get("dangling_title")
+        and not quality.get("asr_sentence_title")
         and quality.get("theme_native_title", True)
         and quality["not_clickbait"]
     )
@@ -932,14 +1273,17 @@ def fallback_title_candidates(theme, archetype, topic):
     archetype_text = str(archetype or "moment").replace("_", " ").title()
     theme_key = normalize_theme_key(theme)
 
+    if not topic or looks_like_raw_dialogue_fragment(topic) or keyword_soup_title(theme, topic, topic_terms=[topic]):
+        return []
+
     patterns = {
         "comedy": [
             "The Joke Inside {topic}",
             "The Callback Inside {topic}",
         ],
         "sports": [
-            "{topic} Changed The Game",
-            "The Locker Room Story Around {topic}",
+            "The Locker Room Debate Around {topic}",
+            "Why {topic} Became The Flashpoint",
         ],
         "finance": [
             "The {topic} Question Investors Miss",
@@ -1262,7 +1606,7 @@ def generate_title(theme, archetype, clip, source_record=None, signals=None):
     repaired_title = source_context_title(theme, source_title, clip, topic_terms)
     repair_terms = list(topic_terms or []) + [repaired_title]
     if repaired_title and title_passes_publishable_bar(theme, repaired_title, topic_terms=repair_terms, min_specificity=0.34):
-        return compact_text(repaired_title, 92)
+        return polish_headline_title(repaired_title)
 
     for template in metadata_style.get("title_templates") or []:
         title = compact_text(render_template(template, values), 96)
@@ -1277,27 +1621,27 @@ def generate_title(theme, archetype, clip, source_record=None, signals=None):
             and quality.get("theme_native_title", True)
             and quality["not_clickbait"]
         ):
-            return title
+            return polish_headline_title(title)
 
     transcript_fallback = transcript_sentence_title(clip.get("transcript_excerpt", ""))
     if transcript_fallback and not looks_like_raw_dialogue_fragment(transcript_fallback):
-        return transcript_fallback
+        return polish_headline_title(transcript_fallback)
 
     source_fallback = compact_text(source_title, 90)
     source_words = re.findall(r"[a-zA-Z][a-zA-Z']+|\b\d+[\d,.]*%?\b", source_fallback)
     if len(source_words) >= 4 and title_passes_publishable_bar(theme, source_fallback, topic_terms=topic_terms, min_specificity=0.48):
-        return source_fallback
+        return polish_headline_title(source_fallback)
 
     fallback = compact_text(topic, 90)
 
     if fallback and len(fallback.split()) >= 3 and title_passes_publishable_bar(theme, fallback, topic_terms=topic_terms):
-        return fallback
+        return polish_headline_title(fallback)
 
     for candidate in fallback_title_candidates(theme, archetype, topic):
         candidate = compact_text(candidate, 92)
 
         if title_passes_publishable_bar(theme, candidate, topic_terms=topic_terms, min_specificity=0.30):
-            return candidate
+            return polish_headline_title(candidate)
 
     theme_fallbacks = {
         "comedy": "The Joke That Actually Landed",
@@ -1309,7 +1653,7 @@ def generate_title(theme, archetype, clip, source_record=None, signals=None):
         "truecrime": "The Timeline Detail Investigators Rechecked",
         "popculture": "The Culture Moment People Replayed",
     }
-    return compact_text(theme_fallbacks.get(normalize_theme_key(theme), "The Interview Moment Worth Watching"), 92)
+    return polish_headline_title(theme_fallbacks.get(normalize_theme_key(theme), "The Interview Moment Worth Watching"))
 
 
 def score_title_quality(theme, title, topic_terms=None):
@@ -1331,6 +1675,9 @@ def score_title_quality(theme, title, topic_terms=None):
     )
     malformed_apostrophe_title = bool(re.search(r"\b[A-Za-z]+['’]S\b", title))
     raw_dialogue_fragment = looks_like_raw_dialogue_fragment(title)
+    overlong_title = title_is_overlong_fragment(title, words)
+    dangling_title = title_has_dangling_end(title)
+    asr_sentence_title = looks_like_asr_sentence_title(title)
     theme_hits = theme_signal_terms(theme, lower)
     repeated_words, repeated_bigrams = title_repetition_flags(words)
     repetitive_title = bool(repeated_words or repeated_bigrams)
@@ -1385,6 +1732,9 @@ def score_title_quality(theme, title, topic_terms=None):
         or contextless_time_fragment
         or repetitive_title
         or raw_dialogue_fragment
+        or overlong_title
+        or dangling_title
+        or asr_sentence_title
         or source_only_title
         or clickbait_hits
     )
@@ -1406,8 +1756,14 @@ def score_title_quality(theme, title, topic_terms=None):
             or weak_template_title
             or keyword_soup
             or contextless_time_fragment
+            or overlong_title
+            or dangling_title
+            or asr_sentence_title
         ),
         "raw_dialogue_fragment": raw_dialogue_fragment,
+        "overlong_title": overlong_title,
+        "dangling_title": dangling_title,
+        "asr_sentence_title": asr_sentence_title,
         "theme_native_title": theme_native_title,
         "repetitive_title": repetitive_title,
         "mechanical_title": mechanical_title,

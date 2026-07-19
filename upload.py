@@ -22,7 +22,7 @@ from theme_config import (
     mark_stage,
     write_json_file,
 )
-from theme_profile import get_review_policy
+from theme_profile import get_review_policy, theme_hashtags, theme_tags
 
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -523,6 +523,17 @@ def sanitize_youtube_metadata(package):
     description = clean_public_text(youtube_package.get("description") or package.get("description") or "")
     tags = youtube_package.get("tags") or package.get("tags") or []
     tags = [compact_public_text(tag, 500) for tag in tags if compact_public_text(tag, 500)]
+    theme = clean_theme_name(package.get("theme") or CURRENT_THEME or DEFAULT_THEME)
+
+    if not description:
+        hashtags = [tag for tag in theme_hashtags(theme) if str(tag).startswith("#")]
+        description = compact_public_text(
+            f"{title}\n\n{package.get('caption') or 'Curated shortform clip.'}\n\n{' '.join(hashtags[:5])}",
+            4800,
+        )
+
+    if not tags:
+        tags = [compact_public_text(tag, 500) for tag in theme_tags(theme) if compact_public_text(tag, 500)]
 
     package["title"] = title
     package["description"] = description
@@ -539,6 +550,19 @@ def package_with_effective_youtube_metadata(package):
     return sanitize_youtube_metadata(package)
 
 
+def manual_review_accepts_tail_face_warning(package):
+    review = package.get("manual_visual_review") or {}
+    if not isinstance(review, dict) or not review.get("approved"):
+        return False
+    note = str(review.get("note") or "").lower()
+    return "tail" in note or "strong face" in note or "contact-sheet" in note
+
+
+SOFT_UPLOAD_FRAME_FLAGS = {
+    "source playback ends without a strong face",
+}
+
+
 def refresh_package_render_qc(package):
     video_file = package.get("video_file", "")
 
@@ -546,9 +570,19 @@ def refresh_package_render_qc(package):
         return package
 
     try:
-        import clip_generation
+        import content_qc
 
-        frame_qc = clip_generation.analyze_final_frame_path(video_file, max_samples=24)
+        theme = clean_theme_name(package.get("theme") or CURRENT_THEME or "")
+        asset = {
+            "path": video_file,
+            "theme": theme,
+            "asset_type": "final_upload",
+            "package": package,
+        }
+        report = content_qc.analyze_asset(asset, interval_seconds=2.5, max_frames=24)
+        frame_qc = dict(report.get("frame_qc") or {})
+        frame_qc["contact_sheet"] = report.get("contact_sheet", "")
+        frame_qc["frame_sample_window"] = report.get("frame_sample_window", {})
     except Exception as error:
         existing_qc = dict(package.get("render_qc") or {})
         existing_qc["passed"] = False
@@ -582,20 +616,28 @@ def refresh_package_render_qc(package):
         "probable flat-surface false face lock",
         "probable small-object/background face lock",
         "probable broadcast/b-roll montage instead of speaker clip",
-        "subject severely off-center in final crop",
     }
+
+    accepted_tail_warning = manual_review_accepts_tail_face_warning(package)
+
+    if accepted_tail_warning or SOFT_UPLOAD_FRAME_FLAGS & set(frame_flags + existing_flags + rejections):
+        rejections = [reason for reason in rejections if reason not in SOFT_UPLOAD_FRAME_FLAGS]
 
     for flag in sorted(set(frame_flags) & hard_upload_flags):
         if flag not in rejections:
             rejections.append(flag)
 
-    passed = not rejections and bool(existing_qc.get("passed", True))
+    existing_blocking_flags = set(existing_flags) - SOFT_UPLOAD_FRAME_FLAGS
+    existing_blocking_rejections = set(existing_rejections) - SOFT_UPLOAD_FRAME_FLAGS
+    existing_rejected = bool(existing_qc.get("rejected", False)) and bool(existing_blocking_rejections)
+    existing_passed = bool(existing_qc.get("passed", True)) or not (existing_blocking_flags or existing_blocking_rejections)
+    passed = not rejections and existing_passed
 
     package["render_qc"] = {
         **existing_qc,
         "frame_qc_version": frame_qc.get("frame_qc_version", existing_qc.get("frame_qc_version", "")),
         "passed": passed,
-        "rejected": bool(rejections) or bool(existing_qc.get("rejected", False)),
+        "rejected": bool(rejections) or existing_rejected,
         "flags": sorted(set(existing_flags + frame_flags + rejections)),
         "visual_quality_score": frame_qc.get(
             "visual_quality_score",
@@ -997,9 +1039,20 @@ def mark_youtube_uploaded(package, response):
 
 
 def mark_executed_uploaded(package, response):
-    source_state_key = package.get("source_state_key", "")
+    source_state_keys = []
 
-    if not source_state_key:
+    for key in package.get("underlying_source_state_keys") or []:
+        key = str(key or "").strip()
+
+        if key and key not in source_state_keys:
+            source_state_keys.append(key)
+
+    source_state_key = str(package.get("source_state_key") or "").strip()
+
+    if source_state_key and source_state_key not in source_state_keys:
+        source_state_keys.append(source_state_key)
+
+    if not source_state_keys:
         return
 
     executed = load_json_file(EXECUTED_FILE, {})
@@ -1007,38 +1060,44 @@ def mark_executed_uploaded(package, response):
     if not isinstance(executed, dict):
         executed = {}
 
-    existing = executed.get(source_state_key, {})
-    youtube_uploads = existing.get("youtube_uploads", [])
-    video_id = response.get("id", "")
-    video_file = package.get("video_file", "")
+    for source_key in source_state_keys:
+        existing = executed.get(source_key, {})
 
-    if video_id and not any(item.get("video_id") == video_id for item in youtube_uploads):
-        youtube_uploads.append({
-            "video_id": video_id,
-            "url": f"https://www.youtube.com/watch?v={video_id}",
-            "title": package.get("title", ""),
-            "deleted_local_file": os.path.abspath(video_file) if video_file else "",
-            "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        if not isinstance(existing, dict):
+            existing = {}
 
-    final_video_files = [
-        path
-        for path in existing.get("final_video_files", [])
-        if os.path.abspath(path) != os.path.abspath(video_file)
-    ]
+        youtube_uploads = existing.get("youtube_uploads", [])
+        video_id = response.get("id", "")
+        video_file = package.get("video_file", "")
 
-    updated = {
-        **existing,
-        "theme": package.get("theme", CURRENT_THEME),
-        "video_url": package.get("source_video_url", existing.get("video_url", "")),
-        "title": package.get("source_title", existing.get("title", "")),
-        "funnel_status": "uploaded",
-        "upload_status": "uploaded",
-        "youtube_uploads": youtube_uploads,
-        "final_video_files": final_video_files,
-    }
-    mark_stage(updated, "youtube_uploaded")
-    executed[source_state_key] = updated
+        if video_id and not any(item.get("video_id") == video_id for item in youtube_uploads):
+            youtube_uploads.append({
+                "video_id": video_id,
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "title": package.get("title", ""),
+                "deleted_local_file": os.path.abspath(video_file) if video_file else "",
+                "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            })
+
+        final_video_files = [
+            path
+            for path in existing.get("final_video_files", [])
+            if os.path.abspath(path) != os.path.abspath(video_file)
+        ]
+
+        updated = {
+            **existing,
+            "theme": package.get("theme", CURRENT_THEME),
+            "video_url": package.get("source_video_url", existing.get("video_url", "")),
+            "title": package.get("source_title", existing.get("title", "")),
+            "funnel_status": "uploaded",
+            "upload_status": "uploaded",
+            "youtube_uploads": youtube_uploads,
+            "final_video_files": final_video_files,
+        }
+        mark_stage(updated, "youtube_uploaded")
+        executed[source_key] = updated
+
     write_json_file(EXECUTED_FILE, executed)
 
 

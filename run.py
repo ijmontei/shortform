@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import shutil
 import sys
@@ -13,8 +14,8 @@ from clip_generation import run_clip_scoring
 from clip_generation import run_selected_clip_render
 from clip_generation import run_selected_video_prefetch
 from clip_generation import active_theme_clip_limit
-from content_archive import prepare_upload_queue
-from daily_editorial import run_daily_editorial
+from content_archive import dedupe_packages, move_package_video, package_has_existing_video, package_uploadable, prepare_upload_queue
+from daily_editorial import mark_editorial_sources_completed, run_daily_editorial
 from pipeline_doctor import run_doctor
 from reconcile_editorial_gates import reconcile_theme
 from subtitle_generation import run_subtitle_generation
@@ -32,28 +33,55 @@ DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIM
 DEFAULT_PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "editorial", "subtitle", "reconcile", "manifest", "upload"]
 PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload"]
 SUMMARY_LABELS = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload", "total"]
+NETWORK_ACQUISITION_STAGES = ["pull", "audio", "score", "video"]
+LOCAL_PACKAGING_STAGES = ["render", "editorial", "subtitle", "reconcile", "manifest"]
 
 
 class TeeStream:
     def __init__(self, stream, *files):
         self.stream = stream
         self.files = files
+        self.stream_available = True
+
+    @property
+    def encoding(self):
+        return getattr(self.stream, "encoding", "utf-8")
+
+    def _write_target(self, target, text):
+        try:
+            target.write(text)
+        except UnicodeEncodeError:
+            encoding = getattr(target, "encoding", None) or "utf-8"
+            target.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
     def write(self, text):
-        try:
-            self.stream.write(text)
-        except UnicodeEncodeError:
-            self.stream.write(text.encode(self.stream.encoding or "utf-8", errors="replace").decode(self.stream.encoding or "utf-8"))
+        if self.stream_available and self.stream:
+            try:
+                self._write_target(self.stream, text)
+            except (OSError, ValueError):
+                # Long production runs can outlive the interactive terminal that
+                # launched them. Logging must never abort the media pipeline.
+                self.stream_available = False
 
         for file_handle in self.files:
-            file_handle.write(text)
-            file_handle.flush()
+            try:
+                self._write_target(file_handle, text)
+                file_handle.flush()
+            except (OSError, ValueError):
+                continue
 
     def flush(self):
-        self.stream.flush()
+        if self.stream_available and self.stream:
+            try:
+                self.stream.flush()
+            except (OSError, ValueError):
+                self.stream_available = False
 
         for file_handle in self.files:
-            file_handle.flush()
+            try:
+                file_handle.flush()
+            except (OSError, ValueError):
+                continue
 
 
 class RunLogContext:
@@ -145,6 +173,65 @@ def timed_stage(summary, label, action):
     summary[label] = elapsed
     print(f"{label} complete in {format_duration(elapsed)}")
     return elapsed
+
+
+def timed_stage_accumulate(summary, label, action):
+    start = time.time()
+    result = action()
+    elapsed = time.time() - start
+    summary[label] = summary.get(label, 0.0) + elapsed
+    print(f"{label} complete in {format_duration(elapsed)}")
+    return result, elapsed
+
+
+def env_int(name, default=0, minimum=None):
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = int(default)
+
+    if minimum is not None:
+        value = max(minimum, value)
+
+    return value
+
+
+def env_float(name, default=0.0, minimum=None, maximum=None):
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = float(default)
+
+    if minimum is not None:
+        value = max(minimum, value)
+
+    if maximum is not None:
+        value = min(maximum, value)
+
+    return value
+
+
+def temporary_env(updates):
+    class TemporaryEnv:
+        def __enter__(self_inner):
+            self_inner.previous = {key: os.environ.get(key) for key in updates}
+
+            for key, value in updates.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = str(value)
+
+        def __exit__(self_inner, exc_type, exc, tb):
+            for key, value in self_inner.previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+            return False
+
+    return TemporaryEnv()
 
 
 def write_media_auth_wait_status(
@@ -295,6 +382,8 @@ def write_content_manifest(theme, queue_limit=15):
         f"archive_ready_items_with_burned_captions: {archived_ready_count}",
         f"archive_promoted_this_manifest: {queue_result.get('promoted_count', 0)}",
         f"archive_overflowed_this_manifest: {queue_result.get('archived_count', 0)}",
+        f"missing_video_metadata_dropped: {queue_result.get('dropped_missing_count', 0)}",
+        f"revision_metadata_moved: {queue_result.get('revision_moved_count', 0)}",
         "",
     ]
 
@@ -329,11 +418,18 @@ def write_content_manifest(theme, queue_limit=15):
         f"({len(video_files)} mp4, {captioned_ready_count}/{ready_count} ready captioned, "
         f"{len(archive_video_files)} archived)"
     )
-    if queue_result.get("promoted_count") or queue_result.get("archived_count"):
+    if (
+        queue_result.get("promoted_count")
+        or queue_result.get("archived_count")
+        or queue_result.get("dropped_missing_count")
+        or queue_result.get("revision_moved_count")
+    ):
         print(
             " -> archive queue update: "
             f"promoted {queue_result.get('promoted_count', 0)}, "
-            f"archived overflow {queue_result.get('archived_count', 0)}"
+            f"archived overflow {queue_result.get('archived_count', 0)}, "
+            f"dropped missing {queue_result.get('dropped_missing_count', 0)}, "
+            f"moved revisions {queue_result.get('revision_moved_count', 0)}"
         )
     if moved_uncaptioned_ready:
         print(
@@ -489,8 +585,75 @@ def inactive_generated_theme_names(active_themes):
     return sorted(names)
 
 
-def clean_generated_artifacts(themes, include_inactive=False):
+def clean_slate_timestamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def preserve_upload_queue_before_clean_slate(theme, paths, reset_funnel_history=False):
+    if reset_funnel_history:
+        return [], {}
+
+    metadata_file = paths["final_metadata_file"]
+    archive_dir = paths.get("archive_path", os.path.join(paths["output_path"], "archive"))
+    metadata = load_json_file(metadata_file, {"theme": theme, "content": [], "archive": []})
+
+    if not isinstance(metadata, dict):
+        return [], {}
+
+    preserved = []
+    seen = set()
+
+    for collection in ("content", "archive"):
+        for package in metadata.get(collection) or []:
+            if not isinstance(package, dict):
+                continue
+
+            if not package_uploadable(package) or not package_has_existing_video(package):
+                continue
+
+            if not move_package_video(package, archive_dir):
+                continue
+
+            package["archive_status"] = "preserved_clean_slate"
+            package["preserved_clean_slate_at"] = clean_slate_timestamp()
+            key = (
+                str(package.get("source_state_key") or ""),
+                str(package.get("video_file") or ""),
+                str(package.get("title") or ""),
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            preserved.append(package)
+
+    return dedupe_packages(preserved), metadata.get("daily_editorial") or {}
+
+
+def restore_preserved_upload_queue_after_clean_slate(theme, paths, packages, daily_editorial=None):
+    metadata = {
+        "theme": clean_theme_name(theme),
+        "content": [],
+        "archive": dedupe_packages(packages),
+        "daily_editorial": daily_editorial or {},
+        "archive_policy": {
+            "upload_queue_limit": resolved_default_upload_limit(),
+            "archive_dir": paths.get("archive_path", os.path.join(paths["output_path"], "archive")),
+            "preserved_by_clean_slate_at": clean_slate_timestamp(),
+        },
+    }
+    write_json_file(paths["final_metadata_file"], metadata)
+    return metadata
+
+
+def resolved_default_upload_limit():
+    return DEFAULT_YOUTUBE_UPLOAD_LIMIT if DEFAULT_YOUTUBE_UPLOAD_LIMIT > 0 else "unlimited"
+
+
+def clean_generated_artifacts(themes, include_inactive=False, reset_funnel_history=False):
     removed = []
+    preserved_upload_packages = {}
     themes_to_reset = [clean_theme_name(theme) for theme in themes]
 
     if include_inactive:
@@ -517,9 +680,18 @@ def clean_generated_artifacts(themes, include_inactive=False):
     for theme in themes:
         paths = get_theme_paths(theme)
         metadata_path = paths["metadata_path"]
+        archive_path = paths.get("archive_path", os.path.join(paths["output_path"], "archive"))
+        preserved_packages, preserved_daily = preserve_upload_queue_before_clean_slate(
+            theme,
+            paths,
+            reset_funnel_history=reset_funnel_history,
+        )
+        preserved_upload_packages[clean_theme_name(theme)] = {
+            "packages": preserved_packages,
+            "daily_editorial": preserved_daily,
+        }
         targets = [
             paths["final_videos_path"],
-            paths.get("archive_path", os.path.join(paths["output_path"], "archive")),
             os.path.join(paths["output_path"], "needs_revision"),
             os.path.join(paths["output_path"], "rejected"),
             paths["final_metadata_file"],
@@ -535,6 +707,9 @@ def clean_generated_artifacts(themes, include_inactive=False):
             os.path.join(LOGS_PATH, "frame_validation", clean_theme_name(theme)),
         ]
 
+        if reset_funnel_history:
+            targets.insert(1, archive_path)
+
         for target in targets:
             if remove_workspace_path(target):
                 removed.append(target)
@@ -548,10 +723,23 @@ def clean_generated_artifacts(themes, include_inactive=False):
             ],
         ))
 
-    removed_executed, reset_pulled = reset_funnel_state_for_themes(themes_to_reset)
+    if reset_funnel_history:
+        removed_executed, reset_pulled = reset_funnel_state_for_themes(themes_to_reset)
+    else:
+        removed_executed, reset_pulled = 0, 0
 
     for theme in themes:
         get_theme_paths(theme, create=True)
+        preserved = preserved_upload_packages.get(clean_theme_name(theme), {})
+        packages = preserved.get("packages") or []
+
+        if packages:
+            restore_preserved_upload_queue_after_clean_slate(
+                theme,
+                get_theme_paths(theme),
+                packages,
+                preserved.get("daily_editorial") or {},
+            )
 
     print(
         "Clean-slate reset complete: "
@@ -559,11 +747,23 @@ def clean_generated_artifacts(themes, include_inactive=False):
         f"removed {removed_executed} executed record(s), "
         f"reset {reset_pulled} pulled record(s)."
     )
+    preserved_count = sum(len(item.get("packages") or []) for item in preserved_upload_packages.values())
+    if preserved_count:
+        print(
+            "Preserved "
+            f"{preserved_count} upload-ready queued clip(s) in archive while source history stayed intact."
+        )
+    if not reset_funnel_history:
+        print(
+            "Source history preserved: executed records and pulled funnel stages were not reset."
+        )
 
     return {
         "removed_paths": removed,
         "removed_executed_records": removed_executed,
         "reset_pulled_records": reset_pulled,
+        "preserved_funnel_history": not reset_funnel_history,
+        "preserved_upload_ready_packages": preserved_count,
         "inactive_cleanup_enabled": include_inactive,
     }
 
@@ -786,6 +986,47 @@ def normalized_stage_boundary(stage, *, is_start):
     return stage
 
 
+def selected_stage_shortcut(args):
+    shortcuts = []
+
+    if args.acquisition_only:
+        shortcuts.append("acquisition-only")
+
+    if args.package_only:
+        shortcuts.append("package-only")
+
+    if args.upload_only:
+        shortcuts.append("upload-only")
+
+    if len(shortcuts) > 1:
+        raise SystemExit(
+            "Choose only one stage shortcut: "
+            + ", ".join(f"--{shortcut}" for shortcut in shortcuts)
+        )
+
+    return shortcuts[0] if shortcuts else ""
+
+
+def apply_stage_shortcuts(args):
+    shortcut = selected_stage_shortcut(args)
+
+    if shortcut and (args.only_stage or args.start_at_stage or args.stop_after_stage):
+        raise SystemExit(
+            f"--{shortcut} cannot be combined with --only-stage, --start-at-stage, "
+            "or --stop-after-stage."
+        )
+
+    if shortcut == "acquisition-only":
+        args.travel_safe = True
+        args.stop_after_stage = "video"
+    elif shortcut == "package-only":
+        args.travel_safe = True
+        args.start_at_stage = "render"
+        args.stop_after_stage = "manifest"
+    elif shortcut == "upload-only":
+        args.only_stage = "upload"
+
+
 def selected_pipeline_stages(args):
     if args.only_stage:
         return [args.only_stage]
@@ -803,6 +1044,30 @@ def selected_pipeline_stages(args):
     return stages
 
 
+def print_travel_safe_plan(args):
+    if not args.travel_safe:
+        return
+
+    stages = selected_pipeline_stages(args)
+    acquisition = [stage for stage in stages if stage in NETWORK_ACQUISITION_STAGES]
+    local_packaging = [stage for stage in stages if stage in LOCAL_PACKAGING_STAGES]
+    uploads = [stage for stage in stages if stage == "upload"]
+
+    print("Travel-safe mode enabled.")
+    print("Pipeline will run by stage so internet-heavy acquisition is front-loaded.")
+
+    if acquisition:
+        print(f"Network acquisition stages: {' -> '.join(acquisition)}")
+
+    if local_packaging:
+        print(f"Local packaging stages: {' -> '.join(local_packaging)}")
+
+    if uploads:
+        print("Upload stage runs last after local files are ready.")
+
+    print("")
+
+
 def reconcile_stage_for_theme(theme):
     result = reconcile_theme(theme)
     moved = int(result.get("updated_count") or 0)
@@ -811,6 +1076,139 @@ def reconcile_stage_for_theme(theme):
         print(f" -> moved {moved} gate-failed package(s) to needs_revision")
     else:
         print(" -> no gate-failed ready packages found")
+
+
+def resolved_editorial_package_target():
+    upload_target = env_int("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", 15, minimum=0)
+    reserve_target = env_int("SHORTFORM_RESERVE_TARGET_PER_THEME", 10, minimum=0)
+    return env_int(
+        "SHORTFORM_EDITORIAL_FINAL_PACKAGE_TARGET",
+        upload_target + reserve_target,
+        minimum=1,
+    )
+
+
+def quota_topup_enabled(args):
+    if args.skip_editorial:
+        return False
+
+    return os.getenv("SHORTFORM_ENABLE_EDITORIAL_QUOTA_TOPUP", "1") != "0"
+
+
+def render_topup_batch_size(shortfall, prior_packages):
+    min_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MIN_RENDER_BATCH", 8, minimum=1)
+    max_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_RENDER_BATCH", 40, minimum=min_batch)
+    multiplier = env_float("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MULTIPLIER", 2.0, minimum=1.0, maximum=6.0)
+
+    if prior_packages <= 0:
+        batch = max(min_batch, math.ceil(shortfall * multiplier))
+    else:
+        batch = max(min_batch, math.ceil(shortfall * multiplier))
+
+    return min(max_batch, batch)
+
+
+def mark_final_editorial_sources_completed(theme):
+    paths = get_theme_paths(theme)
+    metadata_file = paths["final_metadata_file"]
+    metadata = load_json_file(metadata_file, {"content": []})
+    packages = metadata.get("content") if isinstance(metadata, dict) else []
+
+    if not isinstance(packages, list):
+        packages = []
+
+    mark_editorial_sources_completed(theme, packages, metadata_file)
+
+
+def run_daily_editorial_deferred(theme):
+    with temporary_env({"SHORTFORM_DEFER_EDITORIAL_SOURCE_COMPLETION": "1"}):
+        return run_daily_editorial(theme=theme)
+
+
+def run_editorial_with_quota_topups(theme, args, summary):
+    target = resolved_editorial_package_target()
+
+    if not quota_topup_enabled(args):
+        packages_ready, _ = timed_stage_accumulate(
+            summary,
+            "editorial",
+            lambda: run_daily_editorial(theme=theme),
+        )
+        return int(packages_ready or 0)
+
+    packages_ready, _ = timed_stage_accumulate(
+        summary,
+        "editorial",
+        lambda: run_daily_editorial_deferred(theme),
+    )
+    packages_ready = int(packages_ready or 0)
+
+    if packages_ready >= target:
+        print(f"Editorial quota met for {theme}: {packages_ready}/{target} upload-ready package(s).")
+        mark_final_editorial_sources_completed(theme)
+        return packages_ready
+
+    max_topups = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", 5, minimum=0)
+
+    if max_topups <= 0:
+        print(f"Editorial quota short for {theme}: {packages_ready}/{target}; top-up passes disabled.")
+        return packages_ready
+
+    print(
+        f"Editorial quota short for {theme}: {packages_ready}/{target}. "
+        "Rendering next-best candidates until the package target is met or the candidate pool is exhausted."
+    )
+
+    for topup_index in range(1, max_topups + 1):
+        shortfall = max(0, target - packages_ready)
+
+        if shortfall <= 0:
+            break
+
+        batch_size = render_topup_batch_size(shortfall, packages_ready)
+        print(
+            f"Quota top-up pass {topup_index}/{max_topups} for {theme}: "
+            f"shortfall={shortfall}, render_batch={batch_size}"
+        )
+
+        with temporary_env({
+            "SHORTFORM_RENDER_TARGET_PER_THEME": str(batch_size),
+            "SHORTFORM_SKIP_RENDERED_CANDIDATES": "1",
+        }):
+            rendered_count, _ = timed_stage_accumulate(
+                summary,
+                "render",
+                lambda: run_selected_clip_render(theme=theme),
+            )
+
+        rendered_count = int(rendered_count or 0)
+
+        if rendered_count <= 0:
+            print(
+                f"No additional renderable candidates found for {theme}; "
+                f"stopping quota top-up at {packages_ready}/{target}."
+            )
+            break
+
+        packages_ready, _ = timed_stage_accumulate(
+            summary,
+            "editorial",
+            lambda: run_daily_editorial_deferred(theme),
+        )
+        packages_ready = int(packages_ready or 0)
+
+        if packages_ready >= target:
+            print(f"Editorial quota met for {theme}: {packages_ready}/{target} upload-ready package(s).")
+            break
+
+    if packages_ready < target:
+        print(
+            f"Editorial quota still short for {theme}: {packages_ready}/{target}. "
+            "The remaining selected candidates were exhausted or failed render/editorial QC."
+        )
+
+    mark_final_editorial_sources_completed(theme)
+    return packages_ready
 
 
 def run_stage_for_theme(theme, stage, args, summary):
@@ -850,7 +1248,7 @@ def run_stage_for_theme(theme, stage, args, summary):
             return True
 
         print(f"starting daily editorial generation for {theme}")
-        timed_stage(summary, "editorial", lambda: run_daily_editorial(theme=theme))
+        run_editorial_with_quota_topups(theme, args, summary)
         return True
 
     if stage == "subtitle":
@@ -1084,6 +1482,35 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--travel-safe",
+        action="store_true",
+        help=(
+            "Force stage-major orchestration and front-load internet-heavy acquisition before "
+            "local rendering/packaging. Useful for travel or unstable Wi-Fi."
+        ),
+    )
+    parser.add_argument(
+        "--acquisition-only",
+        action="store_true",
+        help=(
+            "Travel-safe shortcut: run pull, audio, score, and selected video section prefetch, "
+            "then stop before rendering."
+        ),
+    )
+    parser.add_argument(
+        "--package-only",
+        action="store_true",
+        help=(
+            "Travel-safe shortcut: resume at render and continue through manifest, without "
+            "uploading."
+        ),
+    )
+    parser.add_argument(
+        "--upload-only",
+        action="store_true",
+        help="Shortcut for --only-stage upload.",
+    )
+    parser.add_argument(
         "--start-at-stage",
         choices=PIPELINE_STAGES,
         help="Resume production at this process stage without rerunning earlier stages.",
@@ -1101,7 +1528,15 @@ def parse_args():
     parser.add_argument(
         "--clean-slate",
         action="store_true",
-        help="Remove generated final clips, working clips, subtitle scratch, editorial metadata, and funnel state for the selected themes before running.",
+        help="Remove generated final clips, working clips, subtitle scratch, and editorial metadata for the selected themes before running.",
+    )
+    parser.add_argument(
+        "--reset-funnel-history",
+        action="store_true",
+        help=(
+            "With --clean-slate, also forget executed/pulled funnel stages. "
+            "Use only for development reruns because production cleanup preserves source history by default."
+        ),
     )
     parser.add_argument(
         "--clean-slate-only",
@@ -1270,9 +1705,13 @@ def parse_args():
 
 def main():
     args = parse_args()
+    apply_stage_shortcuts(args)
 
     if args.only_stage and (args.start_at_stage or args.stop_after_stage):
         raise SystemExit("--only-stage cannot be combined with --start-at-stage or --stop-after-stage.")
+
+    if args.travel_safe and args.execution_mode == "theme":
+        raise SystemExit("--travel-safe cannot be combined with --execution-mode theme.")
 
     if args.start_at_stage and args.stop_after_stage:
         start_stage = normalized_stage_boundary(args.start_at_stage, is_start=True)
@@ -1451,7 +1890,9 @@ def main():
             )
 
         if args.clean_slate:
-            print(f"Cleaning generated artifacts and funnel state for: {', '.join(themes)}")
+            print(f"Cleaning generated artifacts for: {', '.join(themes)}")
+            if args.reset_funnel_history:
+                print("Funnel history reset requested; executed/pulled source state will be cleared.")
             clean_inactive = (
                 not single_theme_run
                 and not future_themes_allowed()
@@ -1463,7 +1904,11 @@ def main():
                     "Clean-slate inactive/future cleanup disabled for resumed "
                     f"--start-at-theme run; skipped theme outputs are preserved."
                 )
-            clean_generated_artifacts(themes, include_inactive=clean_inactive)
+            clean_generated_artifacts(
+                themes,
+                include_inactive=clean_inactive,
+                reset_funnel_history=bool(args.reset_funnel_history),
+            )
 
             if args.clean_slate_only:
                 print("Clean-slate reset complete; exiting before production stages.")
@@ -1477,7 +1922,9 @@ def main():
         else:
             print("YouTube upload routing not configured for requested generation-only themes, or upload was skipped.\n")
 
-        if args.execution_mode == "stage":
+        print_travel_safe_plan(args)
+
+        if args.travel_safe or args.execution_mode == "stage":
             use_stage_major = True
         elif args.execution_mode == "theme":
             use_stage_major = False

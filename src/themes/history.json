@@ -1,0 +1,184 @@
+{
+    "theme": "history",
+    "profile": "history",
+    "brand": {
+        "channel_name": "The History Archive",
+        "positioning": "Historical explanations, military stories, and civilizational context from long expert conversations.",
+        "audience": "History-curious viewers who want one vivid idea or story at a time.",
+        "viewer_promise": "A complete historical context, misconception, or story arc in under a minute.",
+        "voice": "serious storyteller",
+        "risk_tolerance": "low"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@TheRestIsHistory/videos",
+        "https://www.youtube.com/@HistoryHit/videos",
+        "https://www.youtube.com/@FallofCivilizations/videos",
+        "https://www.youtube.com/@DanCarlinOfficial/videos",
+        "https://www.youtube.com/@HooverInstitution/videos",
+        "https://www.youtube.com/@LexFridman/videos",
+        "https://www.youtube.com/@JockoPodcastOfficial/videos",
+        "https://www.youtube.com/@TheTeamHousePodcast/videos",
+        "https://www.youtube.com/@KingsandGenerals/videos",
+        "https://www.youtube.com/@TheoriesofEverything/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Historical explanations, military stories, and civilizational context from long expert conversations.",
+        "source_strategy": "Expert history podcasts and documentary channels with strong story/context moments."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            25,
+            40,
+            58
+        ],
+        "min_clip_duration": 20,
+        "max_clip_duration": 60,
+        "default_clip_count": 8,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 6,
+        "min_readiness_score": 0.7,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 5,
+        "allow_cold_open": false,
+        "prefer_context": true,
+        "prefer_fast_payoff": false,
+        "prefer_practicality": false,
+        "prefer_explanation": true
+    },
+    "theme_signals": {
+        "enabled": [
+            "historical_explanation",
+            "misconception_correction",
+            "war_story",
+            "civilization_lesson",
+            "primary_context"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "history",
+            "war",
+            "empire",
+            "civilization",
+            "battle",
+            "revolution",
+            "ancient"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "historical_explanation",
+            "misconception_correction",
+            "war_story",
+            "civilization_lesson",
+            "primary_context"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "explain_then_clip",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "explain_then_clip",
+        "max_intro_seconds": 3,
+        "caption_style": "clean_learning",
+        "framing_style": "speaker_context",
+        "overlay_style": "definition_card"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The History Behind {topic}",
+            "This Misconception Changes {topic}",
+            "Why {topic} Still Matters"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#history",
+            "#education",
+            "#documentary",
+            "#shorts"
+        ],
+        "tags": [
+            "history",
+            "historical",
+            "education",
+            "war history",
+            "civilization"
+        ],
+        "topic_tags": {
+            "history": "#history",
+            "war": "#war",
+            "empire": "#empire",
+            "civilization": "#civilization",
+            "battle": "#battle",
+            "revolution": "#revolution",
+            "ancient": "#ancient"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": true,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": true,
+        "restricted_topics": [
+            "misleading science claims",
+            "historical misinformation"
+        ],
+        "manual_review_topics": [
+            "health/science claims",
+            "current events"
+        ],
+        "minimum_transformation_score": 0.65
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.16,
+        "payoff": 0.14,
+        "standalone_context": 0.14,
+        "theme_signal": 0.14,
+        "public_popularity": 0.1,
+        "captionability": 0.08,
+        "visual_quality": 0.07,
+        "pacing": 0.07,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}

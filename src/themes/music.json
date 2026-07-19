@@ -1,0 +1,188 @@
+{
+    "theme": "music",
+    "profile": "music",
+    "brand": {
+        "channel_name": "The Music Archive",
+        "positioning": "Artist interviews, music-business stories, and creative process moments clipped with context.",
+        "audience": "Music fans who react to artist stories, studio moments, and industry opinions.",
+        "viewer_promise": "One artist story, creative insight, or music-business lesson per clip.",
+        "voice": "tasteful music editor",
+        "risk_tolerance": "medium"
+    },
+    "youtube": {
+        "channel_handle": "",
+        "token_file": ""
+    },
+    "channels": [
+        "https://www.youtube.com/@RickBeato/videos",
+        "https://www.youtube.com/@nardwuar/videos",
+        "https://www.youtube.com/@DrinkChamps/videos",
+        "https://www.youtube.com/@AppleMusic/videos",
+        "https://www.youtube.com/@TheHowardSternShow/videos",
+        "https://www.youtube.com/@BrokenRecordPodcast/videos",
+        "https://www.youtube.com/@NoJumper/videos",
+        "https://www.youtube.com/@Complex/videos",
+        "https://www.youtube.com/@Genius/videos",
+        "https://www.youtube.com/@Hot97/videos"
+    ],
+    "research": {
+        "priority": "high",
+        "community_thesis": "Artist interviews, music-business stories, and creative process moments clipped with context.",
+        "source_strategy": "Artist interview channels with fanbase recognition and repeatable story moments."
+    },
+    "clip_rules": {
+        "candidate_durations": [
+            8,
+            12,
+            18,
+            24,
+            32,
+            45
+        ],
+        "min_clip_duration": 7,
+        "max_clip_duration": 50,
+        "default_clip_count": 10,
+        "theme_clip_budget": 0,
+        "theme_candidates_per_video": 8,
+        "min_readiness_score": 0.68,
+        "min_selected_score": 0.3,
+        "max_topic_similarity": 0.52,
+        "candidate_stride_seconds": 3,
+        "allow_cold_open": true,
+        "prefer_context": false,
+        "prefer_fast_payoff": true,
+        "prefer_practicality": false,
+        "prefer_explanation": false
+    },
+    "theme_signals": {
+        "enabled": [
+            "artist_story",
+            "creative_process",
+            "music_business",
+            "studio_moment",
+            "industry_take"
+        ],
+        "required": [],
+        "positive_keywords": [
+            "song",
+            "album",
+            "artist",
+            "studio",
+            "producer",
+            "label",
+            "tour"
+        ],
+        "negative_keywords": [],
+        "archetypes": [
+            "artist_story",
+            "creative_process",
+            "music_business",
+            "studio_moment",
+            "industry_take"
+        ],
+        "penalize_missing_theme_signal": true
+    },
+    "packaging": {
+        "intro_modes": [
+            "cold_open",
+            "context_card",
+            "clip_then_takeaway",
+            "editorial_countdown"
+        ],
+        "default_intro_mode": "cold_open",
+        "max_intro_seconds": 1.8,
+        "caption_style": "comedy_punchline",
+        "framing_style": "speaker_reaction",
+        "overlay_style": "bold_arcade"
+    },
+    "metadata_style": {
+        "title_style": "specific_curiosity",
+        "title_templates": [
+            "The Story Behind {topic}",
+            "This Artist Explained {topic}",
+            "The Music Business Lesson Behind {topic}"
+        ],
+        "description_style": "source_plus_context",
+        "hashtags": [
+            "#music",
+            "#artist",
+            "#hiphop",
+            "#shorts"
+        ],
+        "tags": [
+            "music",
+            "artist interviews",
+            "music business",
+            "songwriting",
+            "hip hop"
+        ],
+        "topic_tags": {
+            "song": "#song",
+            "album": "#album",
+            "artist": "#artist",
+            "studio": "#studio",
+            "producer": "#producer",
+            "label": "#label",
+            "tour": "#tour"
+        }
+    },
+    "risk_controls": {
+        "requires_fact_check": false,
+        "requires_medical_review": false,
+        "requires_financial_review": false,
+        "requires_claim_context": false,
+        "restricted_topics": [
+            "targeted harassment",
+            "protected-class insults"
+        ],
+        "manual_review_topics": [
+            "edgy identity jokes",
+            "sexual content",
+            "drug stories"
+        ],
+        "minimum_transformation_score": 0.45
+    },
+    "review_policy": {
+        "require_manual_approval_before_public": true,
+        "reject_if_reused_risk_high": true,
+        "reject_if_first_second_fails": true,
+        "reject_if_no_clear_viewer_value": true
+    },
+    "analytics": {
+        "primary_metric": "engaged_view_rate",
+        "secondary_metrics": [
+            "average_percent_viewed",
+            "likes_per_engaged_view",
+            "comments_per_engaged_view",
+            "subs_gained_per_1000_engaged_views"
+        ],
+        "review_after_hours": [
+            2,
+            24,
+            72,
+            168
+        ],
+        "success_thresholds": {
+            "min_average_percent_viewed": 0.7,
+            "min_engaged_view_rate": 0.55,
+            "min_like_rate": 0.025
+        }
+    },
+    "scoring_weights": {
+        "hook": 0.2,
+        "payoff": 0.24,
+        "standalone_context": 0.1,
+        "theme_signal": 0.22,
+        "public_popularity": 0.08,
+        "captionability": 0.05,
+        "visual_quality": 0.07,
+        "pacing": 0.04,
+        "transformation": 0.1
+    },
+    "experiments": {
+        "enabled": true,
+        "active": []
+    },
+    "phase": "phase_two",
+    "phase_one_active": false
+}
