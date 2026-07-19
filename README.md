@@ -42,6 +42,10 @@ For a fresh production run, combine clean slate with the first block:
 .\venv_313\Scripts\python.exe .\run.py --upload-only
 ```
 
+`--clean-slate` preserves upload-ready backlog by default. For a true visual/output test reset
+that deletes existing content and archive packages while retaining executed/pulled source
+history and duplicate prevention, add `--discard-existing-backlog`.
+
 Run a health check before a long production run:
 
 ```powershell
@@ -116,20 +120,23 @@ Collect YouTube Analytics metrics for uploaded videos and build experiment repor
 
 ## Quality And Speed Controls
 
-Production now defaults to a 12-hour wall-clock budget. The stage-major scheduler gives every
-theme a fair share of acquisition, scoring, framing, and editorial time; unused time rolls into
-the next stage. It targets at least 10 upload-ready clips per theme, prefers 20 (15 queued plus
-5 archived), and can keep producing exceptional overflow clips above 20. The limits stop new
-expensive work rather than deleting partial work, so a later run resumes cached audio,
-transcripts, candidate scores, selected sections, and renders.
+Production is optimized to finish an ordinary all-theme cycle in roughly 12 hours, but it does
+not stop at an arbitrary wall-clock deadline. It targets at least 10 upload-ready clips per theme,
+prefers 20 (15 queued plus 5 archived), and can keep producing exceptional overflow clips above
+20. Cached audio, transcripts, candidate scores, selected sections, renders, and packages make
+interrupted runs resumable without imposing a time cap on normal production.
 
 ```powershell
 # Default optimized all-theme production run.
 .\venv_313\Scripts\python.exe .\run.py --travel-safe
 
-# Change the wall-clock envelope, or use 0 for an intentionally unlimited run.
+# Optional travel-day guard. Omit this for normal unlimited production.
 .\venv_313\Scripts\python.exe .\run.py --travel-safe --max-runtime-hours 12
 ```
+
+When the optional guard is enabled, the stage-major scheduler gives every theme a fair share of
+acquisition, scoring, framing, and editorial time and preserves unfinished work for the next run.
+Without that flag, all qualifying work continues until the candidate inventory is exhausted.
 
 Long sources use approximately 12 minutes of high-signal audio windows selected from replay
 heatmaps, chapters, timestamped comments, and transcript coverage. The pipeline reuses one

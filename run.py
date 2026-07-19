@@ -664,7 +664,12 @@ def resolved_default_upload_limit():
     return DEFAULT_YOUTUBE_UPLOAD_LIMIT if DEFAULT_YOUTUBE_UPLOAD_LIMIT > 0 else "unlimited"
 
 
-def clean_generated_artifacts(themes, include_inactive=False, reset_funnel_history=False):
+def clean_generated_artifacts(
+    themes,
+    include_inactive=False,
+    reset_funnel_history=False,
+    discard_existing_backlog=False,
+):
     removed = []
     preserved_upload_packages = {}
     themes_to_reset = [clean_theme_name(theme) for theme in themes]
@@ -694,11 +699,14 @@ def clean_generated_artifacts(themes, include_inactive=False, reset_funnel_histo
         paths = get_theme_paths(theme)
         metadata_path = paths["metadata_path"]
         archive_path = paths.get("archive_path", os.path.join(paths["output_path"], "archive"))
-        preserved_packages, preserved_daily = preserve_upload_queue_before_clean_slate(
-            theme,
-            paths,
-            reset_funnel_history=reset_funnel_history,
-        )
+        if discard_existing_backlog:
+            preserved_packages, preserved_daily = [], {}
+        else:
+            preserved_packages, preserved_daily = preserve_upload_queue_before_clean_slate(
+                theme,
+                paths,
+                reset_funnel_history=reset_funnel_history,
+            )
         preserved_upload_packages[clean_theme_name(theme)] = {
             "packages": preserved_packages,
             "daily_editorial": preserved_daily,
@@ -720,7 +728,7 @@ def clean_generated_artifacts(themes, include_inactive=False, reset_funnel_histo
             os.path.join(LOGS_PATH, "frame_validation", clean_theme_name(theme)),
         ]
 
-        if reset_funnel_history:
+        if reset_funnel_history or discard_existing_backlog:
             targets.insert(1, archive_path)
 
         for target in targets:
@@ -777,6 +785,7 @@ def clean_generated_artifacts(themes, include_inactive=False, reset_funnel_histo
         "reset_pulled_records": reset_pulled,
         "preserved_funnel_history": not reset_funnel_history,
         "preserved_upload_ready_packages": preserved_count,
+        "discarded_existing_backlog": bool(discard_existing_backlog),
         "inactive_cleanup_enabled": include_inactive,
     }
 
@@ -1602,6 +1611,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--discard-existing-backlog",
+        action="store_true",
+        help=(
+            "With --clean-slate, delete existing content/archive packages while preserving "
+            "executed and pulled source history."
+        ),
+    )
+    parser.add_argument(
         "--clean-slate-only",
         action="store_true",
         help="Perform --clean-slate and exit without running production stages.",
@@ -1678,10 +1695,10 @@ def parse_args():
     parser.add_argument(
         "--max-runtime-hours",
         type=float,
-        default=float(os.getenv("SHORTFORM_MAX_RUNTIME_HOURS", "12")),
+        default=float(os.getenv("SHORTFORM_MAX_RUNTIME_HOURS", "0")),
         help=(
-            "Maximum wall-clock runtime for a production run. New source/render work stops early "
-            "enough to package and upload completed clips. Use 0 to disable the budget."
+            "Optional wall-clock guard for a constrained travel run. Production is unlimited by "
+            "default; set a positive value only when unfinished work should resume next run."
         ),
     )
     parser.add_argument(
@@ -2014,6 +2031,7 @@ def main():
                 themes,
                 include_inactive=clean_inactive,
                 reset_funnel_history=bool(args.reset_funnel_history),
+                discard_existing_backlog=bool(args.discard_existing_backlog),
             )
 
             if args.clean_slate_only:

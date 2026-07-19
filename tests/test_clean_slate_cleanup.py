@@ -162,6 +162,51 @@ class CleanSlateCleanupTests(unittest.TestCase):
             self.assertIn(os.path.abspath(archive_dir), os.path.abspath(restored["archive"][0]["video_file"]))
             self.assertTrue(result["preserved_funnel_history"])
 
+    def test_clean_slate_can_discard_backlog_without_resetting_source_history(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            theme_root = os.path.join(temp_dir, "themes", "technology_ai")
+            temp_theme_root = os.path.join(temp_dir, "temp", "technology_ai")
+            content_dir = os.path.join(theme_root, "content")
+            archive_dir = os.path.join(theme_root, "archive")
+            metadata_file = os.path.join(theme_root, "metadata.json")
+            paths = {
+                "output_path": theme_root,
+                "archive_path": archive_dir,
+                "final_videos_path": content_dir,
+                "final_metadata_file": metadata_file,
+                "clips_path": os.path.join(temp_theme_root, "clips"),
+                "subtitle_temp_path": os.path.join(temp_theme_root, "subtitles"),
+                "metadata_path": os.path.join(temp_theme_root, "metadata"),
+            }
+
+            for directory in (content_dir, archive_dir, paths["clips_path"], paths["metadata_path"]):
+                os.makedirs(directory, exist_ok=True)
+
+            with open(os.path.join(archive_dir, "old.mp4"), "wb") as handle:
+                handle.write(b"old")
+            run.write_json_file(metadata_file, {"content": [], "archive": []})
+
+            def fake_paths(_theme, create=False):
+                if create:
+                    for key in ["output_path", "archive_path", "final_videos_path", "clips_path", "subtitle_temp_path", "metadata_path"]:
+                        os.makedirs(paths[key], exist_ok=True)
+                return paths
+
+            with (
+                patch.object(run, "get_theme_paths", side_effect=fake_paths),
+                patch.object(run, "reset_funnel_state_for_themes", return_value=(0, 0)) as reset_mock,
+            ):
+                result = run.clean_generated_artifacts(
+                    ["technology_ai"],
+                    discard_existing_backlog=True,
+                )
+
+            reset_mock.assert_not_called()
+            self.assertTrue(result["preserved_funnel_history"])
+            self.assertTrue(result["discarded_existing_backlog"])
+            self.assertEqual(result["preserved_upload_ready_packages"], 0)
+            self.assertFalse(os.path.exists(os.path.join(archive_dir, "old.mp4")))
+
 
 if __name__ == "__main__":
     unittest.main()
