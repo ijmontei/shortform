@@ -101,9 +101,9 @@ class ConfiguredSourceRelevanceTests(unittest.TestCase):
         ):
             self.assertTrue(clip_generation.candidate_selection_ready(candidate))
 
-    def test_configured_source_still_rejects_raw_public_title(self):
+    def test_configured_source_keeps_complete_clip_with_raw_public_title_advisory(self):
         with patch.object(clip_generation, "CURRENT_THEME", "finance"):
-            self.assertFalse(
+            self.assertTrue(
                 clip_generation.candidate_selection_ready(
                     self.candidate("How does that shape the perspective now being the boss")
                 )
@@ -127,7 +127,10 @@ class ConfiguredSourceRelevanceTests(unittest.TestCase):
         }
 
         with patch.object(clip_generation, "CURRENT_THEME", "technology_ai"):
-            self.assertFalse(clip_generation.candidate_selection_ready(candidate))
+            self.assertTrue(clip_generation.candidate_selection_ready(candidate))
+
+        self.assertTrue(candidate.rank_signals.get("title_quality_advisory_only"))
+        self.assertNotEqual(candidate.rank_signals["title_quality"].get("specificity"), 1.0)
 
     def test_title_too_close_to_source_title_is_rejected(self):
         self.assertTrue(
@@ -149,12 +152,14 @@ class ConfiguredSourceRelevanceTests(unittest.TestCase):
             )
         )
 
-    def test_source_title_copy_fails_candidate_selection(self):
+    def test_source_title_copy_is_advisory_when_clip_is_otherwise_usable(self):
         candidate = self.candidate("Going to a NASCAR Race for the FIRST Time!")
         candidate.source_title = "Going to a NASCAR Race for the FIRST Time!"
 
         with patch.object(clip_generation, "CURRENT_THEME", "sports"):
-            self.assertFalse(clip_generation.candidate_selection_ready(candidate))
+            self.assertTrue(clip_generation.candidate_selection_ready(candidate))
+
+        self.assertTrue(candidate.rank_signals.get("title_quality_advisory_only"))
 
     def test_configured_source_score_prioritizes_watchability_over_theme_keywords(self):
         weights = {

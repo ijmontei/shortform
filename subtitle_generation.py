@@ -16,6 +16,7 @@ from theme_config import (
     write_json_file,
 )
 from editorial_gates import evaluate_editorial_gates
+from media_encoding import encoder_label, video_encoder_args
 from theme_profile import (
     load_theme_profile,
     theme_hashtags as configured_theme_hashtags,
@@ -557,19 +558,19 @@ def burn_subtitles(input_video, ass_path, output_video):
         f":fontsdir='{ffmpeg_filter_path(FONTS_PATH)}'"
     )
 
-    run_subprocess([
+    command = [
         FFMPEG_EXE,
         "-y",
         "-i", input_video,
         "-vf", ass_filter,
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "18",
-        "-pix_fmt", "yuv420p",
+    ]
+    command.extend(video_encoder_args(quality=18, software_preset="medium"))
+    command.extend([
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_video,
-    ], "Subtitle burn-in")
+    ])
+    run_subprocess(command, f"Subtitle burn-in ({encoder_label()})")
 
 
 def load_clip_metadata_index():

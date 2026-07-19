@@ -7,6 +7,7 @@ import re
 import sys
 import time
 
+import runtime_budget
 from content_archive import prepare_upload_queue
 from editorial_gates import evaluate_editorial_gates
 from theme_config import (
@@ -563,10 +564,41 @@ SOFT_UPLOAD_FRAME_FLAGS = {
 }
 
 
+def media_file_signature(path):
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return {}
+
+    return {
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
+def stored_render_qc_is_current(package):
+    if os.getenv("SHORTFORM_FORCE_UPLOAD_QC_REFRESH", "0") == "1":
+        return False
+
+    video_file = package.get("video_file", "")
+    render_qc = package.get("render_qc") or {}
+    stored_signature = render_qc.get("validated_file_signature") or {}
+    return bool(
+        video_file
+        and render_qc.get("render_time_qc_complete")
+        and stored_signature
+        and stored_signature == media_file_signature(video_file)
+    )
+
+
 def refresh_package_render_qc(package):
     video_file = package.get("video_file", "")
 
     if not video_file or not os.path.exists(video_file):
+        return package
+
+    if stored_render_qc_is_current(package):
+        package.setdefault("render_qc", {})["upload_preflight_reused_render_qc"] = True
         return package
 
     try:
@@ -647,6 +679,8 @@ def refresh_package_render_qc(package):
         "rejection_reasons": rejections,
         "render_strategy": existing_qc.get("render_strategy", "upload_preflight_frame_audit"),
         "upload_preflight_refreshed": True,
+        "validated_file_signature": media_file_signature(video_file),
+        "render_time_qc_complete": True,
     }
     return package
 
@@ -666,6 +700,10 @@ def refresh_package_intro_audio_qc(package):
     video_file = package.get("video_file", "")
 
     if not video_file or not os.path.exists(video_file):
+        return package
+
+    if stored_render_qc_is_current(package) and (package.get("render_qc") or {}).get("intro_audio"):
+        package.setdefault("render_qc", {})["upload_preflight_reused_audio_qc"] = True
         return package
 
     try:
@@ -706,11 +744,15 @@ def review_skip_reason(package):
     refresh_package_intro_audio_qc(package)
     review = package.get("review") or {}
     youtube_status = package.get("posting_status", {}).get("youtube_shorts", "")
-    gate_package = package_with_effective_youtube_metadata(package)
-    theme = clean_theme_name(package.get("theme") or CURRENT_THEME or "")
-    editorial_gates = evaluate_editorial_gates(theme, gate_package)
     privacy = package_privacy_status(package)
+    theme = clean_theme_name(package.get("theme") or CURRENT_THEME or "")
     review_policy = get_review_policy(theme)
+    render_qc = package.get("render_qc") or {}
+    render_rejections = [
+        reason
+        for reason in (render_qc.get("rejection_reasons") or [])
+        if reason not in SOFT_UPLOAD_FRAME_FLAGS
+    ]
 
     if review.get("rejected") or youtube_status == "rejected":
         reason = review.get("rejection_reason", "")
@@ -719,8 +761,16 @@ def review_skip_reason(package):
     if package.get("upload_ready_requires_burned_captions", True) and not package.get("content_has_burned_captions"):
         return "missing burned-in captions"
 
-    if not editorial_gates.get("passed", True):
-        return f"editorial gates failed: {', '.join(editorial_gates.get('flags') or [])}"
+    if render_rejections or (render_qc.get("rejected") and not render_qc.get("passed")):
+        details = ", ".join(render_rejections) or "render/audio QC failed"
+        return f"render QC failed: {details}"
+
+    if os.getenv("SHORTFORM_RECHECK_EDITORIAL_GATES_ON_UPLOAD", "0") == "1":
+        gate_package = package_with_effective_youtube_metadata(package)
+        editorial_gates = evaluate_editorial_gates(theme, gate_package)
+
+        if not editorial_gates.get("passed", True):
+            return f"editorial gates failed: {', '.join(editorial_gates.get('flags') or [])}"
 
     if (
         privacy == "public"
@@ -752,6 +802,8 @@ def force_can_bypass_review_skip(package, blocked_reason):
 
     protected_reasons = [
         "editorial gates failed",
+        "render QC failed",
+        "missing burned-in captions",
         "rejected by review",
         "waiting for requested",
     ]
@@ -1178,6 +1230,14 @@ def upload_youtube_for_theme(theme_name=DEFAULT_THEME, limit=None, force=False):
     remaining_content = []
 
     for index, package in enumerate(content):
+        if not runtime_budget.can_start_work(estimated_seconds=4 * 60, production=False):
+            print(
+                "Run time budget reached before another upload; "
+                "remaining files and metadata stay in the upload queue."
+            )
+            remaining_content.extend(content[index:])
+            break
+
         video_path = package.get("video_file", "")
 
         if not video_path or not os.path.exists(video_path):

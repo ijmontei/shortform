@@ -27,8 +27,10 @@ except ImportError:
     yt_dlp = None
 
 import ytdlp_auth
+import runtime_budget
 from content_archive import dedupe_packages
 from editorial_gates import evaluate_editorial_gates
+from media_encoding import encoder_label, video_encoder_args
 from metadata_generation import score_title_quality, title_passes_publishable_bar
 from metadata_generation.titles import polish_headline_title, source_context_title
 from theme_config import BASE_DIR, DEFAULT_THEME, EXECUTED_FILE, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, mark_stage, utc_timestamp, write_json_file
@@ -54,14 +56,22 @@ if not os.path.exists(FFPROBE_EXE):
 
 DAILY_TOPIC_COUNT = max(1, int(os.getenv("SHORTFORM_DAILY_TOPIC_COUNT", "10")))
 EDITORIAL_COUNTDOWN_SIZE = max(1, int(os.getenv("SHORTFORM_EDITORIAL_COUNTDOWN_SIZE", "5")))
+MIN_FINISHED_TARGET_PER_THEME = max(1, int(os.getenv("SHORTFORM_MIN_FINISHED_PER_THEME", "10")))
+PREFERRED_FINISHED_TARGET_PER_THEME = max(
+    MIN_FINISHED_TARGET_PER_THEME,
+    int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "20")),
+)
 UPLOAD_READY_TARGET_PER_THEME = max(0, int(os.getenv("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", "15")))
-RESERVE_TARGET_PER_THEME = max(0, int(os.getenv("SHORTFORM_RESERVE_TARGET_PER_THEME", "10")))
+RESERVE_TARGET_PER_THEME = max(0, int(os.getenv(
+    "SHORTFORM_RESERVE_TARGET_PER_THEME",
+    str(max(0, PREFERRED_FINISHED_TARGET_PER_THEME - UPLOAD_READY_TARGET_PER_THEME)),
+)))
 EDITORIAL_FINAL_PACKAGE_TARGET = max(1, int(os.getenv(
     "SHORTFORM_EDITORIAL_FINAL_PACKAGE_TARGET",
-    str(UPLOAD_READY_TARGET_PER_THEME + RESERVE_TARGET_PER_THEME),
+    str(PREFERRED_FINISHED_TARGET_PER_THEME),
 )))
 EDITORIAL_CLIPS_PER_SHORT = max(1, min(2, int(os.getenv("SHORTFORM_EDITORIAL_CLIPS_PER_SHORT", "1"))))
-RENDER_RECAP_COMPILATION = os.getenv("SHORTFORM_EDITORIAL_RENDER_RECAP", "1") != "0"
+RENDER_RECAP_COMPILATION = os.getenv("SHORTFORM_EDITORIAL_RENDER_RECAP", "0") != "0"
 APPEND_METADATA = os.getenv("SHORTFORM_EDITORIAL_APPEND_METADATA", "0") == "1"
 NARRATION_RATE = int(os.getenv("SHORTFORM_NARRATION_RATE", "1"))
 NARRATION_VOLUME = int(os.getenv("SHORTFORM_NARRATION_VOLUME", "100"))
@@ -124,7 +134,7 @@ MAX_EDITORIAL_OUTPUT_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_OU
 MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_DOCUMENTARY_EDITORIAL_VISUAL_QUALITY", "0.60"))
 MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_NO_FACE_RUN", "0.50"))
 MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_DOCUMENTARY_EDITORIAL_ALIVE_NO_FACE", "0.62"))
-ENABLE_SECONDARY_FINAL_FRAME_QC = os.getenv("SHORTFORM_ENABLE_SECONDARY_FINAL_FRAME_QC", "1") != "0"
+ENABLE_SECONDARY_FINAL_FRAME_QC = os.getenv("SHORTFORM_ENABLE_SECONDARY_FINAL_FRAME_QC", "0") != "0"
 SECONDARY_FINAL_FRAME_QC_MAX_FRAMES = max(6, int(os.getenv("SHORTFORM_SECONDARY_FINAL_FRAME_QC_MAX_FRAMES", "10")))
 SECONDARY_FINAL_SOURCE_AVG_OFFSET_LIMIT = float(os.getenv("SHORTFORM_SECONDARY_FINAL_SOURCE_AVG_OFFSET_LIMIT", "0.30"))
 SECONDARY_FINAL_SOURCE_SEVERE_OFFSET_LIMIT = float(os.getenv("SHORTFORM_SECONDARY_FINAL_SOURCE_SEVERE_OFFSET_LIMIT", "0.46"))
@@ -134,8 +144,10 @@ if YOUTUBE_PRIVACY_STATUS not in {"public", "unlisted", "private"}:
     YOUTUBE_PRIVACY_STATUS = "public"
 RENDER_POPULAR_SEGMENT_SHORTS = os.getenv("SHORTFORM_RENDER_POPULAR_SEGMENTS", "1") != "0"
 POPULAR_SEGMENTS_PER_THEME = max(0, int(os.getenv("SHORTFORM_POPULAR_SEGMENTS_PER_THEME", "0")))
-POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "1") != "0"
+POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "0") != "0"
 POPULAR_SEGMENT_MIN_SCORE = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MIN_SCORE", "0.12"))
+ALLOW_QUALITY_OVERFLOW = os.getenv("SHORTFORM_ALLOW_QUALITY_OVERFLOW", "1") != "0"
+QUALITY_OVERFLOW_MIN_SORT_SCORE = float(os.getenv("SHORTFORM_QUALITY_OVERFLOW_MIN_SORT_SCORE", "0.76"))
 EXHAUST_RENDERED_EDITORIAL_CLIPS = os.getenv("SHORTFORM_EXHAUST_RENDERED_EDITORIAL_CLIPS", "0") == "1"
 EXHAUST_RENDERED_MAX_CLIPS = max(0, int(os.getenv("SHORTFORM_EXHAUST_RENDERED_MAX_CLIPS", "0")))
 POPULAR_SEGMENT_INTRO_SECONDS = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_INTRO_SECONDS", "2.85"))
@@ -144,6 +156,13 @@ EDITORIAL_SUBTITLE_MODEL = None
 YOUTUBE_DATA_API_KEY = os.getenv("YOUTUBE_DATA_API_KEY", "").strip()
 ENABLE_YOUTUBE_DATA_API_SIGNALS = os.getenv("SHORTFORM_ENABLE_YOUTUBE_DATA_API_SIGNALS", "1") != "0"
 YOUTUBE_DATA_API_COMMENT_PAGES = max(1, int(os.getenv("SHORTFORM_YOUTUBE_DATA_API_COMMENT_PAGES", "1")))
+
+
+def can_start_editorial_package(packages_ready, estimated_seconds=6 * 60):
+    return runtime_budget.can_start_work(
+        estimated_seconds=estimated_seconds,
+        production=True,
+    )
 
 FONT_DIR = os.path.join(BASE_DIR, "assets", "fonts")
 FONT_FILE = os.getenv("SHORTFORM_EDITORIAL_FONT", os.path.join(FONT_DIR, "Montserrat-wght.ttf"))
@@ -2060,6 +2079,11 @@ def finalize_editorial_package(package, label):
     rejection_reasons.extend(editorial_audio_rejection_reasons(audio_qc))
     rejection_reasons = sorted(set(rejection_reasons))
     advisory_reasons = sorted(set(editorial_secondary_frame_advisory_reasons(secondary_frame_qc)))
+    file_stat = os.stat(output_file)
+    validated_file_signature = {
+        "size": int(file_stat.st_size),
+        "mtime_ns": int(file_stat.st_mtime_ns),
+    }
     package["render_qc"] = {
         "frame_qc_version": frame_qc.get("frame_qc_version", CURRENT_FRAME_QC_VERSION),
         "passed": not rejection_reasons,
@@ -2077,6 +2101,8 @@ def finalize_editorial_package(package, label):
         "rejection_reasons": rejection_reasons,
         "advisory_reasons": advisory_reasons,
         "render_strategy": "editorial_post_render_gate",
+        "validated_file_signature": validated_file_signature,
+        "render_time_qc_complete": True,
     }
 
     if rejection_reasons:
@@ -2723,17 +2749,22 @@ def popular_sort_score(clip):
 def popular_segment_publishable_copy(theme, item):
     title, topic, topic_terms = popular_segment_public_title(theme, item)
     script = build_popular_segment_script(theme, item)
+    advisories = []
 
     if not social_title_is_publishable(theme, title, topic_terms=topic_terms):
-        return False
+        advisories.append("title_quality_below_preferred_bar")
 
     if re.search(r"^needs\s+specific\s+", title, flags=re.I):
-        return False
+        advisories.append("title_requires_manual_polish")
 
     if not public_hook_script_ok(script, topic):
-        return False
+        advisories.append("hook_uses_fallback_copy")
 
-    return True
+    if advisories:
+        item["copy_advisories"] = sorted(set(advisories))
+
+    transcript = clean_viewer_text((item.get("clip") or {}).get("transcript_excerpt", ""))
+    return len(re.findall(r"\b[\w']+\b", transcript)) >= 8
 
 
 def popular_segment_title_candidates(theme, topic, source_title, channel, clip, signal_source):
@@ -2820,7 +2851,12 @@ def popular_segment_public_title(theme, item):
         ):
             return title, topic, topic_terms
 
-    fallback = source_title_topic(source_title, theme) or topic
+    context_fallback = source_context_title(theme, source_title, clip, topic_terms=topic_terms)
+
+    if context_fallback and not re.search(r"^needs\s+specific\s+", context_fallback, flags=re.I):
+        return compact_text(context_fallback, 92), topic, topic_terms
+
+    fallback = source_title_topic(source_title, theme) or topic or source_title
     return sanitize_social_title(
         theme,
         fallback,
@@ -2833,41 +2869,14 @@ def popular_segment_public_title(theme, item):
 
 
 def popular_segment_items(theme, paths, rendered_clips):
-    records = load_theme_source_records(theme)
-    records_by_key = {record_state_key(theme, record): record for record in records}
-    records_by_url = {record.get("video_url", ""): record for record in records}
-    grouped = {}
+    items = exhaustive_rendered_segment_items(theme, paths, rendered_clips)
 
-    for clip in rendered_clips:
-        if not clip.get("output_file") or not os.path.exists(clip.get("output_file", "")):
-            continue
-
-        if not clip_is_popular_segment_usable(clip):
-            continue
-
-        popularity_score = enrich_clip_popularity(theme, paths, clip)
-
-        if POPULAR_SEGMENT_REQUIRE_SIGNAL and popularity_score < POPULAR_SEGMENT_MIN_SCORE:
-            continue
-
-        key = clip_state_key(theme, clip)
-        grouped.setdefault(key, []).append(clip)
-
-    items = []
-
-    for key, clips in grouped.items():
-        best_clip = max(clips, key=popular_sort_score)
-        source_record = records_by_key.get(key) or records_by_url.get(best_clip.get("source_video_url", "")) or {}
-        items.append({
-            "source_state_key": key,
-            "source_title": best_clip.get("source_title") or source_record.get("title") or "Podcast interview",
-            "source_video_url": best_clip.get("source_video_url") or source_record.get("video_url", ""),
-            "channel_label": channel_label_for_record(source_record),
-            "clip": best_clip,
-            "popularity_score": clip_existing_popularity_score(best_clip),
-            "sort_score": popular_sort_score(best_clip),
-            "thumbnail_file": download_youtube_thumbnail(paths, best_clip.get("source_video_url") or source_record.get("video_url", "")),
-        })
+    if POPULAR_SEGMENT_REQUIRE_SIGNAL:
+        items = [
+            item
+            for item in items
+            if float(item.get("popularity_score") or 0.0) >= POPULAR_SEGMENT_MIN_SCORE
+        ]
 
     items = [item for item in items if popular_segment_publishable_copy(theme, item)]
     items = sorted(items, key=lambda item: item["sort_score"], reverse=True)
@@ -5449,22 +5458,21 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
     frame_count = max(1, int(math.ceil(intro_duration * fps)))
     background_capture = open_background_capture(background_video)
 
+    intro_encode_command = [
+        FFMPEG_EXE,
+        "-y",
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-s", f"{width}x{height}",
+        "-r", str(fps),
+        "-i", "-",
+        "-an",
+    ]
+    intro_encode_command.extend(video_encoder_args(quality=18, software_preset="veryfast"))
+    intro_encode_command.append(output_path)
+
     process = subprocess.Popen(
-        [
-            FFMPEG_EXE,
-            "-y",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-s", f"{width}x{height}",
-            "-r", str(fps),
-            "-i", "-",
-            "-an",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            output_path,
-        ],
+        intro_encode_command,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -5835,21 +5843,22 @@ def _render_editorial_short_legacy(theme, topic_item, rank, adjective, date_key,
 
     input_args.extend(["-i", intro_audio])
 
-    run_subprocess([
+    render_command = [
         FFMPEG_EXE,
         "-y",
         *input_args,
         "-filter_complex", filter_complex,
         "-map", "[v]",
         "-map", "[a]",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+    ]
+    render_command.extend(video_encoder_args(quality=20, software_preset="veryfast"))
+    render_command.extend([
         "-c:a", "aac",
         "-b:a", "192k",
         "-movflags", "+faststart",
         output_path,
-    ], "Editorial countdown short render")
+    ])
+    run_subprocess(render_command, f"Editorial countdown short render ({encoder_label()})")
 
     package = build_output_package(
         theme=theme,
@@ -6153,21 +6162,22 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
 
     input_args.extend(["-i", intro_audio])
 
-    run_subprocess([
+    render_command = [
         FFMPEG_EXE,
         "-y",
         *input_args,
         "-filter_complex", filter_complex,
         "-map", "[v]",
         "-map", "[a]",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+    ]
+    render_command.extend(video_encoder_args(quality=20, software_preset="veryfast"))
+    render_command.extend([
         "-c:a", "aac",
         "-b:a", "192k",
         "-movflags", "+faststart",
         output_path,
-    ], "Editorial watched-hours countdown render")
+    ])
+    run_subprocess(render_command, f"Editorial watched-hours countdown render ({encoder_label()})")
 
     package = build_output_package(
         theme=theme,
@@ -6459,7 +6469,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
         "[intro_a][clip_a]concat=n=2:v=0:a=1[a]",
     ]
 
-    run_subprocess([
+    render_command = [
         FFMPEG_EXE,
         "-y",
         "-i", source_clip,
@@ -6467,14 +6477,15 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
         "-filter_complex", ";".join(filters),
         "-map", "[v]",
         "-map", "[a]",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+    ]
+    render_command.extend(video_encoder_args(quality=20, software_preset="veryfast"))
+    render_command.extend([
         "-c:a", "aac",
         "-b:a", "192k",
         "-movflags", "+faststart",
         output_path,
-    ], "Popular segment short render")
+    ])
+    run_subprocess(render_command, f"Popular segment short render ({encoder_label()})")
 
     package = build_popular_output_package(
         theme=theme,
@@ -6713,7 +6724,18 @@ def save_editorial_metadata(theme, paths, packages, brief):
     metadata["theme"] = theme
     metadata["daily_editorial"] = brief
     packages = enforce_unique_package_titles(theme, packages, metadata)
-    metadata["content"] = dedupe_packages(metadata.get("content", []) + packages)
+    archived_video_files = {
+        os.path.normcase(os.path.normpath(os.path.abspath(item.get("video_file", ""))))
+        for item in metadata.get("archive", [])
+        if item.get("video_file")
+    }
+    packages_for_content = [
+        package
+        for package in packages
+        if not package.get("video_file")
+        or os.path.normcase(os.path.normpath(os.path.abspath(package["video_file"]))) not in archived_video_files
+    ]
+    metadata["content"] = dedupe_packages(metadata.get("content", []) + packages_for_content)
     metadata["archive"] = dedupe_packages(metadata.get("archive", []))
     write_json_file(metadata_path, metadata)
 
@@ -6773,6 +6795,51 @@ def cleanup_stale_editorial_outputs(theme, paths, date_key, packages):
             print(f"Archived stale editorial output instead of deleting it: {os.path.basename(target)}")
         except OSError:
             pass
+
+
+def clip_moment_identity(item):
+    video_url = str((item or {}).get("source_video_url") or "").strip()
+
+    try:
+        start_time = round(float((item or {}).get("clip_start_time", (item or {}).get("start_time", 0)) or 0), 2)
+        end_time = round(float((item or {}).get("clip_end_time", (item or {}).get("end_time", 0)) or 0), 2)
+    except (TypeError, ValueError):
+        start_time = 0.0
+        end_time = 0.0
+
+    return video_url, start_time, end_time
+
+
+def reusable_editorial_packages(paths, date_key):
+    metadata = load_json_file(paths["final_metadata_file"], {"content": [], "archive": []})
+    packages = []
+
+    for package in list(metadata.get("content") or []) + list(metadata.get("archive") or []):
+        if package.get("editorial_date") != date_key:
+            continue
+
+        video_file = package.get("video_file", "")
+        if not video_file or not os.path.exists(video_file):
+            continue
+
+        posting_status = (package.get("posting_status") or {}).get("youtube_shorts", "ready")
+        render_qc = package.get("render_qc") or {}
+        render_rejections = set(render_qc.get("rejection_reasons") or []) - {
+            "source playback ends without a strong face",
+        }
+
+        if posting_status in {"failed", "rejected", "needs_revision"}:
+            continue
+
+        if render_rejections or (render_qc.get("rejected") and not render_qc.get("passed")):
+            continue
+
+        if package.get("upload_ready_requires_burned_captions", True) and not package.get("content_has_burned_captions"):
+            continue
+
+        packages.append(package)
+
+    return dedupe_packages(packages)
 
 
 def run_exhaustive_rendered_editorial_for_theme(theme, paths, rendered_clips, date_key, start):
@@ -6884,29 +6951,66 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
     print(f"=== Generating ranked countdown for theme: {theme} ({date_key}) ===")
 
     rendered_clips = load_rendered_clip_reviews(paths["metadata_path"])
+    existing_packages = reusable_editorial_packages(paths, date_key)
+    existing_moments = {
+        clip_moment_identity(package)
+        for package in existing_packages
+        if clip_moment_identity(package)[0]
+    }
+    pending_rendered_clips = [
+        clip
+        for clip in rendered_clips
+        if clip_moment_identity(clip) not in existing_moments
+    ]
 
-    if not rendered_clips:
+    if not rendered_clips and not existing_packages:
         print("No rendered ranked clips found for editorial generation.\n")
         return 0
 
+    if existing_packages:
+        print(
+            f"Reusing {len(existing_packages)} finished editorial package(s); "
+            f"{len(pending_rendered_clips)} newly rendered moment(s) remain to package."
+        )
+
     if EXHAUST_RENDERED_EDITORIAL_CLIPS:
-        return run_exhaustive_rendered_editorial_for_theme(theme, paths, rendered_clips, date_key, start)
+        return run_exhaustive_rendered_editorial_for_theme(
+            theme,
+            paths,
+            pending_rendered_clips,
+            date_key,
+            start,
+        )
 
     countdown_count = min(DAILY_TOPIC_COUNT, EDITORIAL_COUNTDOWN_SIZE)
-    all_topic_groups = group_clips_by_topic(rendered_clips, theme=theme)
+    all_topic_groups = group_clips_by_topic(pending_rendered_clips, theme=theme)
 
-    if not all_topic_groups:
+    if not all_topic_groups and not existing_packages:
         print("No topic groups found for editorial generation.\n")
         return 0
 
-    packages = []
-    countdown_packages = []
+    packages = list(existing_packages)
+    countdown_packages = [
+        package
+        for package in existing_packages
+        if package.get("content_format") == "daily_editorial_short"
+    ]
     brief_items = []
     popular_brief_items = []
     rejected_items = []
     visually_rejected_countdown_sources = set()
-    used_countdown_sources = set()
-    reel_adjective = take_next_adjectives(theme, 1)[0]
+    used_countdown_sources = {
+        source_key
+        for package in countdown_packages
+        for source_key in (package.get("underlying_source_state_keys") or [])
+        if source_key
+    }
+    existing_adjective = next((
+        str((package.get("rank_signals") or {}).get("editorial_adjective") or "").strip()
+        for package in countdown_packages
+        if str((package.get("rank_signals") or {}).get("editorial_adjective") or "").strip()
+    ), "")
+    reel_adjective = existing_adjective or take_next_adjectives(theme, 1)[0]
     source_scan_context = build_countdown_context(
         theme,
         paths,
@@ -6928,10 +7032,17 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
     countdown_attempt_limit = max(countdown_count * 4, min(len(all_topic_groups), countdown_count * 6))
 
     while len(countdown_packages) < countdown_count and countdown_attempts < countdown_attempt_limit:
+        if not can_start_editorial_package(len(packages)):
+            print(
+                "Runtime budget reached before another countdown render; "
+                "completed packages remain upload-ready."
+            )
+            break
+
         countdown_attempts += 1
         available_clips = [
             clip
-            for clip in rendered_clips
+            for clip in pending_rendered_clips
             if clip_state_key(theme, clip) not in used_countdown_sources
         ]
         candidate_groups = group_clips_by_topic(available_clips, theme=theme)
@@ -7017,7 +7128,7 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
 
     recap_package = None
 
-    if RENDER_RECAP_COMPILATION and countdown_packages:
+    if RENDER_RECAP_COMPILATION and countdown_packages and can_start_editorial_package(len(packages), 12 * 60):
         print("Rendering full daily recap compilation...")
         recap_package = render_recap_compilation(theme, date_key, countdown_packages, paths)
 
@@ -7030,8 +7141,8 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             })
             print("Skipping rejected daily recap from upload metadata.")
 
-    if RENDER_POPULAR_SEGMENT_SHORTS and len(packages) < EDITORIAL_FINAL_PACKAGE_TARGET:
-        raw_popular_items = popular_segment_items(theme, paths, rendered_clips)
+    if RENDER_POPULAR_SEGMENT_SHORTS:
+        raw_popular_items = popular_segment_items(theme, paths, pending_rendered_clips)
         popular_items = []
 
         for item in raw_popular_items:
@@ -7078,9 +7189,19 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
 
         for index, item in enumerate(popular_items, start=1):
             if len(packages) >= EDITORIAL_FINAL_PACKAGE_TARGET:
+                overflow_score = float(item.get("sort_score") or 0.0)
+
+                if not ALLOW_QUALITY_OVERFLOW or overflow_score < QUALITY_OVERFLOW_MIN_SORT_SCORE:
+                    print(
+                        "Preferred editorial package target reached; "
+                        f"stopping at {len(packages)} ready package(s)."
+                    )
+                    break
+
+            if not can_start_editorial_package(len(packages)):
                 print(
-                    "Editorial package target reached; "
-                    f"stopping popular-segment rendering at {len(packages)} ready package(s)."
+                    "Runtime budget reached before another popular-segment render; "
+                    "remaining high-quality candidates are preserved for resume."
                 )
                 break
 
@@ -7138,12 +7259,6 @@ def run_daily_editorial_for_theme(theme_name=DEFAULT_THEME):
             })
         if not popular_items:
             print("No replay/popularity-backed source segments found for popular segment shorts.")
-    elif RENDER_POPULAR_SEGMENT_SHORTS:
-        print(
-            "Popular segment rendering skipped because the editorial package target "
-            f"was already reached ({len(packages)}/{EDITORIAL_FINAL_PACKAGE_TARGET})."
-        )
-
     if len(packages) < EDITORIAL_FINAL_PACKAGE_TARGET:
         print(
             "Editorial package target not fully met: "

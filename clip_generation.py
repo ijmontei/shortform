@@ -19,6 +19,8 @@ import mediapipe as mp
 import numpy as np
 from yt_dlp.utils import download_range_func
 import ytdlp_auth
+import runtime_budget
+from media_encoding import encoder_label, video_encoder_args
 from theme_config import (
     BASE_DIR,
     DEFAULT_THEME,
@@ -77,6 +79,8 @@ audio_path = None
 transcriptions_path = None
 clips_path = None
 metadata_path = None
+_TRANSCRIBE_MODEL = None
+_TRANSCRIBE_MODEL_SETTINGS = None
 
 
 def configure_theme(theme_name):
@@ -95,7 +99,7 @@ def configure_theme(theme_name):
 
 
 # Keep this on while tuning reframing; turn it off for resume runs that should reuse completed clips.
-REGENERATE_EXISTING_CLIPS = os.getenv("SHORTFORM_REGENERATE_EXISTING_CLIPS", "1") != "0"
+REGENERATE_EXISTING_CLIPS = os.getenv("SHORTFORM_REGENERATE_EXISTING_CLIPS", "0") != "0"
 SPEED_PROFILE = os.getenv("SHORTFORM_SPEED_PROFILE", "production").strip().lower()
 
 
@@ -152,10 +156,15 @@ MIN_CLIP_READINESS_SCORE = float(os.getenv("SHORTFORM_MIN_CLIP_READINESS_SCORE",
 UNLIMITED_BACKLOG_MIN_SELECTED_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACKLOG_MIN_SELECTED_SCORE", "0.60"))
 UNLIMITED_BACKLOG_MIN_READINESS_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACKLOG_MIN_READINESS_SCORE", "0.70"))
 UNLIMITED_BACKLOG_MIN_TEXT_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACKLOG_MIN_TEXT_SCORE", "0.20"))
+MIN_FINISHED_TARGET = max(1, int(os.getenv("SHORTFORM_MIN_FINISHED_PER_THEME", "10")))
+PREFERRED_FINISHED_TARGET = max(MIN_FINISHED_TARGET, int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "20")))
 DAILY_UPLOAD_READY_TARGET = max(0, int(os.getenv("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", "15")))
-DAILY_RESERVE_TARGET = max(0, int(os.getenv("SHORTFORM_RESERVE_TARGET_PER_THEME", "10")))
-DAILY_FINAL_PACKAGE_TARGET = DAILY_UPLOAD_READY_TARGET + DAILY_RESERVE_TARGET
-DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER = max(1.0, float(os.getenv("SHORTFORM_RENDER_ACCEPTED_BUFFER_MULTIPLIER", "1.4")))
+DAILY_RESERVE_TARGET = max(0, int(os.getenv(
+    "SHORTFORM_RESERVE_TARGET_PER_THEME",
+    str(max(0, PREFERRED_FINISHED_TARGET - DAILY_UPLOAD_READY_TARGET)),
+)))
+DAILY_FINAL_PACKAGE_TARGET = PREFERRED_FINISHED_TARGET
+DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER = max(1.0, float(os.getenv("SHORTFORM_RENDER_ACCEPTED_BUFFER_MULTIPLIER", "1.2")))
 DAILY_RENDER_ACCEPTED_TARGET = max(0, int(os.getenv(
     "SHORTFORM_DAILY_RENDER_ACCEPTED_TARGET",
     str(math.ceil(DAILY_FINAL_PACKAGE_TARGET * DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER)),
@@ -172,8 +181,8 @@ MAX_THEME_RENDER_ACCEPTED_TARGET = max(
     DAILY_RENDER_ACCEPTED_TARGET,
     int(os.getenv("SHORTFORM_MAX_THEME_RENDER_ACCEPTED_TARGET", "120")),
 )
-DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER = max(1, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER", "4")))
-DAILY_RENDER_POOL_MIN_ATTEMPTS = max(0, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_MIN_ATTEMPTS", "60")))
+DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER = max(1, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER", "3")))
+DAILY_RENDER_POOL_MIN_ATTEMPTS = max(0, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_MIN_ATTEMPTS", "40")))
 CONFIGURED_SOURCE_THEME_SIGNAL_FLOOR = float(os.getenv("SHORTFORM_CONFIGURED_SOURCE_THEME_SIGNAL_FLOOR", "0.50"))
 CONFIGURED_SOURCE_THEME_WEIGHT_CAP = float(os.getenv("SHORTFORM_CONFIGURED_SOURCE_THEME_WEIGHT_CAP", "0.07"))
 MIN_SOURCE_DURATION_SECONDS = float(os.getenv("SHORTFORM_MIN_SOURCE_DURATION_SECONDS", "600"))
@@ -213,7 +222,7 @@ CLIP_TRANSCRIBE_MODEL_SIZE = speed_profile_default(
 ).strip() or "base"
 CLIP_TRANSCRIBE_BEAM_SIZE = max(1, int(speed_profile_default(
     "SHORTFORM_CLIP_TRANSCRIBE_BEAM_SIZE",
-    production="3",
+    production="2",
     debug="1",
     premium="5",
 )))
@@ -237,7 +246,16 @@ CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_SCORE_CA
 CLIP_REVIEW_REPORT_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_REVIEW_REPORT_CANDIDATE_LIMIT", "120")))
 RECONSIDER_UNSELECTED_SOURCES = os.getenv("SHORTFORM_RECONSIDER_UNSELECTED", "0") == "1"
 REUSE_CACHED_CLIP_SCORES = os.getenv("SHORTFORM_REUSE_CACHED_CLIP_SCORES", "1") != "0"
-MAX_UNSCORED_SOURCES_PER_THEME = int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "-1"))
+INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME", "6")))
+MIN_SCORED_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_MIN_SCORED_SOURCES_PER_THEME", "6")))
+MAX_UNSCORED_SOURCES_PER_THEME = max(
+    MIN_SCORED_SOURCES_PER_THEME,
+    int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "12")),
+)
+TARGET_PUBLISHABLE_CANDIDATES_PER_THEME = max(
+    PREFERRED_FINISHED_TARGET,
+    int(os.getenv("SHORTFORM_TARGET_PUBLISHABLE_CANDIDATES_PER_THEME", "36")),
+)
 ENABLE_POPULARITY_SCORING = os.getenv("SHORTFORM_ENABLE_POPULARITY_SCORING", "1") != "0"
 POPULARITY_SCORE_WEIGHT = float(os.getenv("SHORTFORM_POPULARITY_SCORE_WEIGHT", "0.16"))
 GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT = float(os.getenv("SHORTFORM_GUEST_RECOGNIZABILITY_MAX_ADJUSTMENT", "0.018"))
@@ -262,11 +280,11 @@ FULL_SOURCE_SCAN_MAX_SECONDS = max(60, int(speed_profile_default(
 )))
 MAX_SCORING_START_POINTS = max(40, int(speed_profile_default(
     "SHORTFORM_MAX_SCORING_START_POINTS",
-    production="320",
+    production="120",
     debug="180",
     premium="1600",
 )))
-SCORING_SIGNAL_WINDOW_RADIUS_SECONDS = max(10, int(os.getenv("SHORTFORM_SCORING_SIGNAL_WINDOW_RADIUS_SECONDS", "75")))
+SCORING_SIGNAL_WINDOW_RADIUS_SECONDS = max(10, int(os.getenv("SHORTFORM_SCORING_SIGNAL_WINDOW_RADIUS_SECONDS", "60")))
 ENABLE_SIGNAL_WINDOW_TRANSCRIPTION = os.getenv("SHORTFORM_ENABLE_SIGNAL_WINDOW_TRANSCRIPTION", "1") != "0"
 SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS = max(300, int(speed_profile_default(
     "SHORTFORM_SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS",
@@ -276,13 +294,13 @@ SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS = max(300, int(speed_profile_default(
 )))
 SIGNAL_TRANSCRIPT_MAX_WINDOWS = max(4, int(speed_profile_default(
     "SHORTFORM_SIGNAL_TRANSCRIPT_MAX_WINDOWS",
-    production="8",
+    production="6",
     debug="6",
     premium="40",
 )))
 SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS = max(20, int(os.getenv(
     "SHORTFORM_SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS",
-    str(max(75, SCORING_SIGNAL_WINDOW_RADIUS_SECONDS)),
+    str(max(60, min(75, SCORING_SIGNAL_WINDOW_RADIUS_SECONDS))),
 )))
 
 
@@ -936,6 +954,45 @@ def find_existing_audio_package(cleaned_title):
     return max(existing, key=os.path.getmtime)
 
 
+def audio_window_manifest_path(audio_filename):
+    stem, _extension = os.path.splitext(os.path.abspath(audio_filename))
+    return stem + ".windows.json"
+
+
+def load_audio_window_manifest(audio_filename):
+    manifest_path = audio_window_manifest_path(audio_filename)
+
+    if not os.path.exists(manifest_path):
+        return {}
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {}
+
+    windows = payload.get("windows") if isinstance(payload, dict) else None
+
+    if not isinstance(windows, list) or not windows:
+        return {}
+
+    if any(not os.path.exists(str(item.get("file") or "")) for item in windows if isinstance(item, dict)):
+        return {}
+
+    return payload
+
+
+def audio_window_file_for(analysis_windows, manifest, index):
+    items = manifest.get("windows") if isinstance(manifest, dict) else []
+
+    if index <= 0 or index > len(items or []):
+        return ""
+
+    item = items[index - 1]
+    path = str(item.get("file") or "") if isinstance(item, dict) else ""
+    return path if path and os.path.exists(path) else ""
+
+
 def remove_empty_or_partial_file(filepath):
     try:
         if os.path.exists(filepath) and os.path.getsize(filepath) <= 0:
@@ -1108,7 +1165,11 @@ def reject_oversized_audio_metadata(info, source_record, cleaned_title):
 
 
 def reject_audio_file_duration(audio_filename, source_record, cleaned_title):
-    duration = get_media_duration_seconds(audio_filename)
+    window_manifest = load_audio_window_manifest(audio_filename)
+    duration = float(
+        window_manifest.get("source_duration_seconds")
+        or get_media_duration_seconds(audio_filename)
+    )
 
     if duration > 0 and isinstance(source_record, dict):
         source_record.setdefault("duration_seconds", duration)
@@ -1212,6 +1273,134 @@ def preflight_audio_source_for_download(video_url, cleaned_title, source_record=
         raise_or_skip_download_error(error, video_url)
 
 
+def download_audio_windows_for_scoring(video_url, cleaned_title, source_record=None):
+    if os.getenv("SHORTFORM_DOWNLOAD_SCORING_AUDIO_WINDOWS", "1") == "0":
+        return ""
+
+    popularity_profile = load_or_fetch_popularity_profile(video_url, cleaned_title)
+    duration = float(
+        (popularity_profile or {}).get("duration")
+        or source_duration_from_record(source_record)
+        or 0.0
+    )
+
+    if duration <= SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS:
+        return ""
+
+    windows = transcript_signal_windows(popularity_profile or {}, duration)
+
+    if not windows:
+        return ""
+
+    print(
+        "Downloading scoring audio windows only: "
+        f"{len(windows)} windows covering "
+        f"{sum(end - start for start, end in windows) / 60.0:.1f}m of a {duration / 3600.0:.1f}h source"
+    )
+    window_root = os.path.join(audio_path, "_scoring_windows", cleaned_title)
+    os.makedirs(window_root, exist_ok=True)
+    window_items = []
+
+    for index, (window_start, window_end) in enumerate(windows, start=1):
+        prefix = f"window_{index:02d}_{int(window_start)}_{int(window_end)}"
+        existing = find_downloaded_file_by_prefix(
+            window_root,
+            prefix,
+            set(AUDIO_PACKAGE_EXTENSIONS),
+        )
+
+        if not existing:
+            output_template = os.path.join(window_root, f"{prefix}.%(ext)s")
+            ydl_opts = build_ytdl_opts({
+                "format": "bestaudio[vcodec=none]/bestaudio/best",
+                "outtmpl": output_template,
+                "download_ranges": download_range_func(None, [(window_start, window_end)]),
+                "ignoreerrors": False,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                    "preferredquality": "128",
+                }],
+            }, use_cookies=True)
+
+            try:
+                run_ytdlp_then_retry_with_cookies(
+                    ydl_opts,
+                    lambda ydl: ydl.download([video_url]),
+                    auth_required=ytdlp_auth.media_download_auth_required(),
+                    reason="signal-window audio scoring download",
+                )
+            except Exception as error:
+                if is_restricted_auth_error_message(error) or is_skippable_video_error_message(error):
+                    raise_or_skip_download_error(error, video_url)
+                print(
+                    " -> Window-only audio acquisition failed; "
+                    f"falling back to full audio ({str(error).splitlines()[0][:220]})."
+                )
+                return ""
+
+            existing = find_downloaded_file_by_prefix(
+                window_root,
+                prefix,
+                set(AUDIO_PACKAGE_EXTENSIONS),
+            )
+
+        if not existing:
+            print(" -> A scoring audio window was not created; falling back to full audio.")
+            return ""
+
+        window_items.append({
+            "file": os.path.abspath(existing),
+            "source_start": float(window_start),
+            "source_end": float(window_end),
+        })
+
+    combined_audio = os.path.join(audio_path, f"{cleaned_title}.m4a")
+    input_args = []
+    filters = []
+    labels = []
+    combined_cursor = 0.0
+
+    for index, item in enumerate(window_items):
+        input_args.extend(["-i", item["file"]])
+        filters.append(
+            f"[{index}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{index}]"
+        )
+        labels.append(f"[a{index}]")
+        item["combined_start"] = combined_cursor
+        combined_cursor += max(0.0, item["source_end"] - item["source_start"])
+        item["combined_end"] = combined_cursor
+
+    filters.append("".join(labels) + f"concat=n={len(labels)}:v=0:a=1[a]")
+    run_subprocess([
+        FFMPEG_EXE,
+        "-y",
+        *input_args,
+        "-filter_complex", ";".join(filters),
+        "-map", "[a]",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        combined_audio,
+    ], "Scoring audio window assembly")
+    assert_file_exists(combined_audio, "Windowed scoring audio")
+    manifest = {
+        "version": 1,
+        "source_video_url": video_url,
+        "source_duration_seconds": duration,
+        "combined_duration_seconds": combined_cursor,
+        "windows": window_items,
+        "created_at": utc_timestamp(),
+    }
+    write_json_file(audio_window_manifest_path(combined_audio), manifest)
+
+    if isinstance(source_record, dict):
+        source_record["duration_seconds"] = duration
+        source_record["audio_scope"] = "signal_windows"
+        source_record["audio_window_count"] = len(window_items)
+
+    return combined_audio
+
+
 def download_audio_for_scoring(video_url, cleaned_title, source_record=None):
     existing_audio_filename = find_existing_audio_package(cleaned_title)
 
@@ -1221,6 +1410,16 @@ def download_audio_for_scoring(video_url, cleaned_title, source_record=None):
         return existing_audio_filename
 
     preflight_audio_source_for_download(video_url, cleaned_title, source_record)
+
+    windowed_audio = download_audio_windows_for_scoring(
+        video_url,
+        cleaned_title,
+        source_record=source_record,
+    )
+
+    if windowed_audio:
+        print(f" -> Window-only audio acquisition ready: {os.path.basename(windowed_audio)}\n")
+        return windowed_audio
 
     print(f"Downloading audio-only package for scoring: {cleaned_title}")
     start_download = time.time()
@@ -2334,8 +2533,23 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
     if not fps or np.isnan(fps) or fps <= 0:
         fps = 24
 
-    output_width = 1080
-    output_height = 1920
+    source_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    source_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    use_native_intermediate = (
+        os.getenv("SHORTFORM_NATIVE_CROP_INTERMEDIATE", "1") != "0"
+        and source_width > 0
+        and source_height > 0
+        and source_width / max(1, source_height) >= 9 / 16
+    )
+
+    if use_native_intermediate:
+        output_height = max(2, min(1920, source_height))
+        output_width = max(2, int(round(output_height * 9 / 16)))
+        output_width -= output_width % 2
+        output_height -= output_height % 2
+    else:
+        output_width = 1080
+        output_height = 1920
 
     fourcc = cv2.VideoWriter_fourcc(*"MJPG")
     out = cv2.VideoWriter(
@@ -2410,6 +2624,8 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
             temp_subclip,
             face_cascades=face_cascades,
         )
+        if stable_face_target.get("center_x") is not None and output_height != 1920:
+            stable_face_target["center_x"] *= output_height / 1920.0
         detection_checks = int(stable_face_target.get("sampled_frames", 0) or 0)
         face_detection_hits = int(stable_face_target.get("face_samples", 0) or 0)
     elif strategy == "group_face_lock":
@@ -2417,6 +2633,12 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
             temp_subclip,
             face_cascades=face_cascades,
         )
+        if group_face_target.get("center_x") is not None and output_height != 1920:
+            coordinate_scale = output_height / 1920.0
+            group_face_target["center_x"] *= coordinate_scale
+            group_face_target["selected_span_px"] = float(
+                group_face_target.get("selected_span_px") or 0.0
+            ) * coordinate_scale
         detection_checks = int(group_face_target.get("sampled_frames", 0) or 0)
         face_detection_hits = int(group_face_target.get("face_samples", 0) or 0)
 
@@ -2807,6 +3029,9 @@ def smart_crop_to_shorts(temp_subclip, temp_tracked_avi, model, face_cascades=No
         "dual_stack_frame_rate": float(dual_stack_frames / max(1, written_frames)),
         "dual_stack_detection_rate": float(dual_stack_detection_hits / max(1, detection_checks)),
         "dual_stack_fallback_frame_rate": float(dual_stack_fallback_frames / max(1, written_frames)),
+        "intermediate_width": int(output_width),
+        "intermediate_height": int(output_height),
+        "native_crop_intermediate": bool(use_native_intermediate),
     }
 
 
@@ -4258,23 +4483,24 @@ def render_crop_attempt(
     start_step3 = time.time()
 
     try:
-        run_subprocess([
+        mux_command = [
             FFMPEG_EXE,
             "-y",
             "-i", temp_tracked_avi,
             "-i", temp_subclip,
             "-map", "0:v:0",
             "-map", "1:a?",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "20",
-            "-pix_fmt", "yuv420p",
+            "-vf", "scale=1080:1920:flags=lanczos",
+        ]
+        mux_command.extend(video_encoder_args(quality=20, software_preset="fast"))
+        mux_command.extend([
             "-c:a", "aac",
             "-b:a", "192k",
             "-shortest",
             "-movflags", "+faststart",
             final_filename,
-        ], "FFmpeg audio muxing")
+        ])
+        run_subprocess(mux_command, f"FFmpeg audio muxing ({encoder_label()})")
 
         assert_file_exists(final_filename, "Final clip attempt")
     except Exception as error:
@@ -5357,15 +5583,13 @@ def candidate_pre_render_copy_review(candidate):
     transcript = str(getattr(candidate, "transcript_excerpt", "") or "")
     source_title = str(getattr(candidate, "source_title", "") or "")
     signals = getattr(candidate, "rank_signals", {}) or {}
-    cached_quality = signals.get("title_quality") if isinstance(signals, dict) else {}
+    try:
+        quality = score_title_quality(active_theme_name(), title, topic_terms=topic_terms)
+    except Exception:
+        quality = {}
 
-    if isinstance(cached_quality, dict) and cached_quality:
-        quality = dict(cached_quality)
-    else:
-        try:
-            quality = score_title_quality(active_theme_name(), title, topic_terms=topic_terms)
-        except Exception:
-            quality = {}
+    if isinstance(signals, dict):
+        signals["title_quality"] = dict(quality)
 
     min_specificity = 0.42 if active_theme_clip_limit() is None else 0.35
 
@@ -5478,7 +5702,23 @@ def candidate_pre_render_copy_review(candidate):
 
 
 def candidate_pre_render_copy_ready(candidate):
-    return bool(candidate_pre_render_copy_review(candidate).get("ready"))
+    review = candidate_pre_render_copy_review(candidate)
+
+    if review.get("ready"):
+        return True
+
+    transcript = str(getattr(candidate, "transcript_excerpt", "") or "")
+    fallback_words = [word for word in words_from_text(transcript) if len(word) > 2]
+    fallback_available = len(fallback_words) >= 8
+
+    try:
+        candidate.rank_signals = candidate.rank_signals or {}
+        candidate.rank_signals["title_quality_advisory_only"] = True
+        candidate.rank_signals["title_fallback_available"] = fallback_available
+    except Exception:
+        pass
+
+    return fallback_available
 
 
 def normalized_title_compare_tokens(text):
@@ -7446,10 +7686,56 @@ def extract_transcription_window(audio_filename, cleaned_title, start, end, inde
     return output_file
 
 
+def shared_transcription_model():
+    global _TRANSCRIBE_MODEL, _TRANSCRIBE_MODEL_SETTINGS
+
+    import torch
+    from faster_whisper import WhisperModel
+
+    if torch.cuda.is_available():
+        device_type = "cuda"
+        compute_type = "float16"
+        device_label = "GPU Accelerated"
+    else:
+        device_type = "cpu"
+        compute_type = "int8"
+        device_label = "CPU int8"
+
+    settings = (CLIP_TRANSCRIBE_MODEL_SIZE, device_type, compute_type)
+
+    if _TRANSCRIBE_MODEL is not None and _TRANSCRIBE_MODEL_SETTINGS == settings:
+        return _TRANSCRIBE_MODEL
+
+    print(
+        f"Initializing shared faster-whisper model "
+        f"({CLIP_TRANSCRIBE_MODEL_SIZE} | {device_label})..."
+    )
+    _TRANSCRIBE_MODEL = WhisperModel(
+        CLIP_TRANSCRIBE_MODEL_SIZE,
+        device=device_type,
+        compute_type=compute_type,
+    )
+    _TRANSCRIBE_MODEL_SETTINGS = settings
+    return _TRANSCRIBE_MODEL
+
+
 def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", popularity_profile=None):
-    total_duration_hint = float((popularity_profile or {}).get("duration") or 0)
+    window_manifest = load_audio_window_manifest(audio_filename)
+    total_duration_hint = float(
+        window_manifest.get("source_duration_seconds")
+        or (popularity_profile or {}).get("duration")
+        or 0
+    )
     total_duration = total_duration_hint or get_media_duration_seconds(audio_filename)
-    signal_windows = transcript_signal_windows(popularity_profile or {}, total_duration)
+
+    if window_manifest:
+        signal_windows = [
+            (float(item.get("source_start") or 0.0), float(item.get("source_end") or 0.0))
+            for item in window_manifest.get("windows") or []
+            if isinstance(item, dict)
+        ]
+    else:
+        signal_windows = transcript_signal_windows(popularity_profile or {}, total_duration)
     transcript_suffix = "_segments_signal_windows.json" if signal_windows else "_segments.json"
     transcript_filepath = os.path.join(
         transcriptions_path,
@@ -7457,7 +7743,11 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", pop
     )
     audio_fingerprint = file_fingerprint(audio_filename)
     transcript_scope = {
-        "mode": "signal_windows" if signal_windows else "full_source",
+        "mode": (
+            "downloaded_signal_windows"
+            if window_manifest
+            else ("signal_windows" if signal_windows else "full_source")
+        ),
         "source_duration_seconds": round(total_duration, 2),
         "full_source_max_seconds": SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS,
         "window_count": len(signal_windows),
@@ -7489,23 +7779,7 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", pop
 
         print("Transcript cache was created with older settings; regenerating...")
 
-    import torch
-    from faster_whisper import WhisperModel
-
-    if torch.cuda.is_available():
-        print(f"Initializing faster-whisper (Model: {CLIP_TRANSCRIBE_MODEL_SIZE} | GPU Accelerated)...")
-        device_type = "cuda"
-        compute_type = "float16"
-    else:
-        print(f"Initializing faster-whisper (Model: {CLIP_TRANSCRIBE_MODEL_SIZE} | CPU)...")
-        device_type = "cpu"
-        compute_type = "int8"
-
-    model = WhisperModel(
-        CLIP_TRANSCRIBE_MODEL_SIZE,
-        device=device_type,
-        compute_type=compute_type,
-    )
+    model = shared_transcription_model()
 
     print(
         "Transcribing segment text only "
@@ -7524,13 +7798,16 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", pop
         )
 
         for index, (window_start, window_end) in enumerate(signal_windows, start=1):
-            window_file = extract_transcription_window(
-                audio_filename,
-                cleaned_title,
-                window_start,
-                window_end,
-                index,
-            )
+            window_file = audio_window_file_for(signal_windows, window_manifest, index)
+
+            if not window_file:
+                window_file = extract_transcription_window(
+                    audio_filename,
+                    cleaned_title,
+                    window_start,
+                    window_end,
+                    index,
+                )
             segments_iter, info = model.transcribe(
                 window_file,
                 language=lang_code,
@@ -7597,11 +7874,30 @@ def transcribe_audio_segments(audio_filename, cleaned_title, lang_code="en", pop
     return payload
 
 
-def analyze_audio_features(audio_filename, cleaned_title):
+def analyze_audio_features(audio_filename, cleaned_title, analysis_windows=None, source_duration=None):
     features_filepath = os.path.join(
         transcriptions_path,
         f"{cleaned_title}_audio_features.json",
     )
+    analysis_windows = [
+        (max(0.0, float(start)), max(0.0, float(end)))
+        for start, end in (analysis_windows or [])
+        if float(end) > float(start)
+    ]
+    window_manifest = load_audio_window_manifest(audio_filename)
+    source_duration = max(0.0, float(
+        source_duration
+        or window_manifest.get("source_duration_seconds")
+        or get_media_duration_seconds(audio_filename)
+    ))
+    analysis_scope = {
+        "mode": "signal_windows" if analysis_windows else "full_source",
+        "source_duration_seconds": round(source_duration, 2),
+        "windows": [
+            {"start": round(start, 2), "end": round(end, 2)}
+            for start, end in analysis_windows
+        ],
+    }
 
     if os.path.exists(features_filepath) and os.path.getsize(features_filepath) > 0:
         with open(features_filepath, "r", encoding="utf-8") as f:
@@ -7610,78 +7906,108 @@ def analyze_audio_features(audio_filename, cleaned_title):
         cached_fingerprint = (cached_payload.get("audio_fingerprint") or {}).get("fingerprint")
         current_fingerprint = file_fingerprint(audio_filename).get("fingerprint")
 
-        if not cached_fingerprint or cached_fingerprint == current_fingerprint:
+        if (
+            (not cached_fingerprint or cached_fingerprint == current_fingerprint)
+            and cached_payload.get("analysis_scope", {"mode": "full_source"}) == analysis_scope
+        ):
             print("Reusing audio feature cache...")
             return cached_payload
 
         print("Audio feature cache was created for different audio; regenerating...")
 
-    analysis_wav = os.path.join(audio_path, f"{cleaned_title}_analysis_16k.wav")
-
     print("Mapping audio energy and frequency movement...")
     start_audio = time.time()
+    temporary_analysis_files = []
 
-    run_subprocess([
-        FFMPEG_EXE,
-        "-y",
-        "-i", audio_filename,
-        "-ac", "1",
-        "-ar", "16000",
-        "-acodec", "pcm_s16le",
-        analysis_wav,
-    ], "Audio analysis WAV extraction")
+    if analysis_windows:
+        wav_sources = []
+
+        for index, (window_start, window_end) in enumerate(analysis_windows, start=1):
+            window_file = audio_window_file_for(analysis_windows, window_manifest, index)
+
+            if not window_file:
+                window_file = extract_transcription_window(
+                    audio_filename,
+                    cleaned_title,
+                    window_start,
+                    window_end,
+                    index,
+                )
+
+            wav_sources.append((window_file, window_start))
+    else:
+        analysis_wav = os.path.join(audio_path, f"{cleaned_title}_analysis_16k.wav")
+        run_subprocess([
+            FFMPEG_EXE,
+            "-y",
+            "-i", audio_filename,
+            "-ac", "1",
+            "-ar", "16000",
+            "-acodec", "pcm_s16le",
+            analysis_wav,
+        ], "Audio analysis WAV extraction")
+        wav_sources = [(analysis_wav, 0.0)]
+        temporary_analysis_files.append(analysis_wav)
 
     rms_values = []
     peak_values = []
     zcr_values = []
     centroid_values = []
     flux_values = []
+    feature_times = []
 
     previous_magnitude = None
 
-    with wave.open(analysis_wav, "rb") as wav_file:
-        sample_rate = wav_file.getframerate()
-        chunk_size = sample_rate
+    for wav_path, time_offset in wav_sources:
+        previous_magnitude = None
 
-        while True:
-            raw = wav_file.readframes(chunk_size)
+        with wave.open(wav_path, "rb") as wav_file:
+            sample_rate = wav_file.getframerate()
+            chunk_size = sample_rate
+            second_index = 0
 
-            if not raw:
-                break
+            while True:
+                raw = wav_file.readframes(chunk_size)
 
-            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                if not raw:
+                    break
 
-            if samples.size == 0:
-                continue
+                samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
-            rms = float(np.sqrt(np.mean(samples * samples)))
-            peak = float(np.max(np.abs(samples)))
-            zcr = float(np.mean(samples[:-1] * samples[1:] < 0)) if samples.size > 1 else 0.0
+                if samples.size == 0:
+                    second_index += 1
+                    continue
 
-            windowed = samples * np.hanning(samples.size)
-            magnitude = np.abs(np.fft.rfft(windowed))
-            freqs = np.fft.rfftfreq(samples.size, d=1.0 / sample_rate)
-            mag_sum = float(np.sum(magnitude))
-            centroid = float(np.sum(freqs * magnitude) / mag_sum) if mag_sum > 0 else 0.0
+                rms = float(np.sqrt(np.mean(samples * samples)))
+                peak = float(np.max(np.abs(samples)))
+                zcr = float(np.mean(samples[:-1] * samples[1:] < 0)) if samples.size > 1 else 0.0
 
-            if previous_magnitude is None:
-                flux = 0.0
-            else:
-                shared = min(previous_magnitude.size, magnitude.size)
-                flux = float(np.mean(np.abs(magnitude[:shared] - previous_magnitude[:shared])))
+                windowed = samples * np.hanning(samples.size)
+                magnitude = np.abs(np.fft.rfft(windowed))
+                freqs = np.fft.rfftfreq(samples.size, d=1.0 / sample_rate)
+                mag_sum = float(np.sum(magnitude))
+                centroid = float(np.sum(freqs * magnitude) / mag_sum) if mag_sum > 0 else 0.0
 
-            previous_magnitude = magnitude
+                if previous_magnitude is None:
+                    flux = 0.0
+                else:
+                    shared = min(previous_magnitude.size, magnitude.size)
+                    flux = float(np.mean(np.abs(magnitude[:shared] - previous_magnitude[:shared])))
 
-            rms_values.append(rms)
-            peak_values.append(peak)
-            zcr_values.append(zcr)
-            centroid_values.append(centroid)
-            flux_values.append(flux)
+                previous_magnitude = magnitude
+                feature_times.append(max(0, int(round(time_offset + second_index))))
+                rms_values.append(rms)
+                peak_values.append(peak)
+                zcr_values.append(zcr)
+                centroid_values.append(centroid)
+                flux_values.append(flux)
+                second_index += 1
 
-    try:
-        os.remove(analysis_wav)
-    except Exception:
-        pass
+    for temporary_file in temporary_analysis_files:
+        try:
+            os.remove(temporary_file)
+        except Exception:
+            pass
 
     rms_norm = normalize_array(rms_values)
     peak_norm = normalize_array(peak_values)
@@ -7699,21 +8025,42 @@ def analyze_audio_features(audio_filename, cleaned_title):
         + 0.03 * zcr_norm
     )
 
+    dense_duration = max(
+        1,
+        int(math.ceil(source_duration)),
+        (max(feature_times) + 1) if feature_times else 1,
+    )
+    dense_seconds = [
+        {
+            "time": index,
+            "energy": 0.0,
+            "peak": 0.0,
+            "frequency_flux": 0.0,
+            "tone_shift": 0.0,
+            "excitement": 0.0,
+        }
+        for index in range(dense_duration)
+    ]
+
+    for value_index, absolute_second in enumerate(feature_times):
+        if absolute_second >= len(dense_seconds):
+            continue
+
+        dense_seconds[absolute_second] = {
+            "time": absolute_second,
+            "energy": float(rms_norm[value_index]),
+            "peak": float(peak_norm[value_index]),
+            "frequency_flux": float(flux_norm[value_index]),
+            "tone_shift": float(rms_delta_norm[value_index]),
+            "excitement": float(excitement[value_index]),
+        }
+
     payload = {
         "audio_fingerprint": file_fingerprint(audio_filename),
+        "analysis_scope": analysis_scope,
         "analyzed_at": utc_timestamp(),
         "audio_feature_seconds": round(time.time() - start_audio, 2),
-        "seconds": [
-            {
-                "time": index,
-                "energy": float(rms_norm[index]),
-                "peak": float(peak_norm[index]),
-                "frequency_flux": float(flux_norm[index]),
-                "tone_shift": float(rms_delta_norm[index]),
-                "excitement": float(excitement[index]),
-            }
-            for index in range(len(rms_values))
-        ]
+        "seconds": dense_seconds,
     }
 
     with open(features_filepath, "w", encoding="utf-8") as f:
@@ -8762,9 +9109,6 @@ def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popula
         )
         return []
 
-    start_audio_stage = time.time()
-    audio_payload = analyze_audio_features(audio_filename, cleaned_title)
-    audio_stage_seconds = time.time() - start_audio_stage
     start_transcript_stage = time.time()
     transcript_payload = transcribe_audio_segments(
         audio_filename,
@@ -8773,6 +9117,20 @@ def score_viral_candidates(audio_filename, cleaned_title, lang_code="en", popula
         popularity_profile=popularity_profile,
     )
     transcript_stage_seconds = time.time() - start_transcript_stage
+    transcript_scope = transcript_payload.get("transcript_scope") or {}
+    analysis_windows = [
+        (window.get("start", 0.0), window.get("end", 0.0))
+        for window in transcript_scope.get("windows") or []
+        if isinstance(window, dict)
+    ]
+    start_audio_stage = time.time()
+    audio_payload = analyze_audio_features(
+        audio_filename,
+        cleaned_title,
+        analysis_windows=analysis_windows,
+        source_duration=transcript_payload.get("duration"),
+    )
+    audio_stage_seconds = time.time() - start_audio_stage
     start_candidate_stage = time.time()
     candidates = build_candidate_clips(
         transcript_payload,
@@ -8959,6 +9317,13 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
         if max_rendered is not None and rendered_count >= max_rendered:
             break
 
+        if not runtime_budget.can_start_work(estimated_seconds=8 * 60, production=True):
+            print(
+                "Production time budget reached before starting another clip render; "
+                "remaining ranked candidates are preserved for the next run.\n"
+            )
+            break
+
         source_duration = clip.end_time - clip.start_time
 
         if not (active_min_clip_duration() <= source_duration <= active_max_clip_duration()):
@@ -9124,7 +9489,7 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             # STEP 1: Extract raw subclip using FFmpeg
             start_step1 = time.time()
 
-            run_subprocess([
+            cut_command = [
                 FFMPEG_EXE,
                 "-y",
                 "-ss", str(render_clip.start_time),
@@ -9132,15 +9497,16 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
                 "-t", str(duration),
                 "-map", "0:v:0",
                 "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "18",
+            ]
+            cut_command.extend(video_encoder_args(quality=18, software_preset="veryfast"))
+            cut_command.extend([
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-avoid_negative_ts", "make_zero",
                 "-movflags", "+faststart",
                 temp_subclip,
-            ], "FFmpeg accurate cutting")
+            ])
+            run_subprocess(cut_command, f"FFmpeg accurate cutting ({encoder_label()})")
 
             assert_file_exists(temp_subclip, "Temporary subclip")
 
@@ -9560,6 +9926,46 @@ def theme_records_for_global_ranking(theme_records, executed_data):
     return unfinished_records
 
 
+def source_view_count(record):
+    raw = str((record or {}).get("views") or (record or {}).get("view_count") or "0")
+    digits = re.sub(r"[^0-9]", "", raw)
+
+    try:
+        return int(digits or 0)
+    except ValueError:
+        return 0
+
+
+def source_processing_priority(item):
+    state_key, record = item
+    title = str((record or {}).get("title") or "")
+    cleaned_title = clean_title_for_filename(title) if title else ""
+    has_score_cache = bool(cleaned_title and has_cached_clip_scores(cleaned_title))
+    has_audio_cache = bool(cleaned_title and find_existing_audio_package(cleaned_title))
+    stages = record.get("stages") if isinstance(record.get("stages"), dict) else {}
+    tier_score = {
+        "priority": 3,
+        "secondary": 2,
+        "legacy": 1,
+    }.get(str(record.get("source_tier") or "").lower(), 0)
+    duration = source_duration_from_record(record)
+    duration_score = 1 if 10 * 60 <= duration <= 2.5 * 60 * 60 else 0
+    return (
+        1 if has_score_cache else 0,
+        1 if stages.get("clips_scored") else 0,
+        1 if has_audio_cache or stages.get("audio_prefetched") else 0,
+        tier_score,
+        duration_score,
+        source_view_count(record),
+        str(record.get("pulled_at") or ""),
+        state_key,
+    )
+
+
+def prioritize_source_records(records):
+    return sorted(records or [], key=source_processing_priority, reverse=True)
+
+
 def resolve_record_title(video_record):
     video_url = video_record["video_url"]
     video_title = video_record.get("title") or ""
@@ -9632,6 +10038,7 @@ def run_audio_prefetch_for_theme(theme_name):
         executed_data = {}
 
     theme_records, videos_to_process = theme_clip_records(pulled_data, executed_data)
+    videos_to_process = prioritize_source_records(videos_to_process)
 
     print(f"=== Prefetching audio for theme: {CURRENT_THEME} ===")
     print(f"Videos found: {len(theme_records)}")
@@ -9641,7 +10048,23 @@ def run_audio_prefetch_for_theme(theme_name):
     skipped = 0
     consecutive_network_failures = 0
 
+    started_sources = 0
+
     for state_key, record in videos_to_process:
+        video_title = str(record.get("title") or "")
+        cleaned_title_hint = clean_title_for_filename(video_title) if video_title else ""
+        has_audio_cache = bool(cleaned_title_hint and find_existing_audio_package(cleaned_title_hint))
+
+        if not has_audio_cache and started_sources >= INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME:
+            continue
+
+        if not has_audio_cache and not runtime_budget.can_start_work(estimated_seconds=4 * 60, production=True):
+            print(
+                "Production time budget reached during audio prefetch; "
+                "remaining sources stay pending for the next resumable run."
+            )
+            break
+
         record["state_key"] = state_key
         skip_reason = recent_blocked_skip_reason(record)
 
@@ -9653,6 +10076,8 @@ def run_audio_prefetch_for_theme(theme_name):
         record["_last_error_message"] = ""
 
         try:
+            if not has_audio_cache:
+                started_sources += 1
             cleaned_title, audio_filename = prefetch_audio_for_record(record)
             prefetched += 1
             consecutive_network_failures = 0
@@ -10340,6 +10765,9 @@ def run_theme_global_ranked_scoring(records_for_ranking, pulled_data):
     consecutive_network_failures = 0
     uncached_score_attempts = 0
 
+    records_for_ranking = prioritize_source_records(records_for_ranking)
+    publishable_candidate_count = 0
+
     for state_key, record in records_for_ranking:
         record["state_key"] = state_key
         skip_reason = recent_blocked_skip_reason(record)
@@ -10365,6 +10793,12 @@ def run_theme_global_ranked_scoring(records_for_ranking, pulled_data):
             continue
 
         if not has_score_cache:
+            if not runtime_budget.can_start_work(estimated_seconds=12 * 60, production=True):
+                print(
+                    "Production time budget reached during source scoring; "
+                    "unscored sources remain pending for the next run."
+                )
+                break
             uncached_score_attempts += 1
 
         scored_source = score_video_for_theme_ranking(record)
@@ -10389,6 +10823,11 @@ def run_theme_global_ranked_scoring(records_for_ranking, pulled_data):
 
         consecutive_network_failures = 0
         scored_sources.append(scored_source)
+        publishable_candidate_count += sum(
+            1
+            for candidate in scored_source.get("candidates") or []
+            if candidate_selection_ready(candidate)
+        )
         mark_stage(pulled_data[state_key], "clips_scored")
         pulled_data[state_key]["funnel_status"] = "clips_scored"
         pulled_data[state_key]["clip_prefix"] = record.get("_last_cleaned_title", "")
@@ -10397,6 +10836,18 @@ def run_theme_global_ranked_scoring(records_for_ranking, pulled_data):
         pulled_data[state_key].pop("last_clip_generation_error_type", None)
         pulled_data[state_key].pop("last_clip_generation_error_message", None)
         write_json_file(PULLED_FILE, pulled_data)
+
+        if (
+            uncached_score_attempts >= MIN_SCORED_SOURCES_PER_THEME
+            and publishable_candidate_count >= TARGET_PUBLISHABLE_CANDIDATES_PER_THEME
+        ):
+            print(
+                "Adaptive scoring target reached: "
+                f"{publishable_candidate_count} publishable candidates from "
+                f"{uncached_score_attempts} newly scored source(s). "
+                "Remaining source records stay available for a later run.\n"
+            )
+            break
 
     all_candidates = [
         candidate
@@ -10447,7 +10898,7 @@ def run_theme_global_ranked_scoring(records_for_ranking, pulled_data):
     }
 
 
-def prefetch_selected_video_sections_for_source(cleaned_title, source_record, source_state_key, clips):
+def prefetch_selected_video_sections_for_source(cleaned_title, source_record, source_state_key, clips, max_sections=None):
     if not clips:
         return 0
 
@@ -10463,6 +10914,13 @@ def prefetch_selected_video_sections_for_source(cleaned_title, source_record, so
     fetched_count = 0
 
     for clip_number, clip in enumerate(clips, start=1):
+        if max_sections is not None and fetched_count >= max_sections:
+            break
+
+        if not runtime_budget.can_start_work(estimated_seconds=2 * 60, production=True):
+            print("Production time budget reached during selected-section prefetch.")
+            break
+
         source_duration = clip.end_time - clip.start_time
 
         if not (active_min_clip_duration() <= source_duration <= active_max_clip_duration()):
@@ -10510,8 +10968,19 @@ def run_selected_video_prefetch_for_theme(theme_name):
 
     fetched_total = 0
     failed_total = 0
+    prefetch_target = max(
+        MIN_FINISHED_TARGET,
+        daily_render_target(CURRENT_THEME) + int(os.getenv("SHORTFORM_VIDEO_PREFETCH_BUFFER", "4")),
+    )
 
     for source_state_key, group in groups.items():
+        if fetched_total >= prefetch_target:
+            print(
+                f"Selected-section prefetch target reached ({fetched_total}/{prefetch_target}); "
+                "additional ranked sections will download on demand only if a render top-up needs them."
+            )
+            break
+
         record = pulled_data.get(source_state_key) or group["record"]
         pulled_data.setdefault(source_state_key, record)
         record["state_key"] = source_state_key
@@ -10525,6 +10994,7 @@ def run_selected_video_prefetch_for_theme(theme_name):
                 source_record=record,
                 source_state_key=source_state_key,
                 clips=clips,
+                max_sections=max(0, prefetch_target - fetched_total),
             )
             fetched_total += fetched_count
             mark_stage(pulled_data[source_state_key], "video_sections_prefetched")

@@ -8,6 +8,7 @@ import time
 import traceback as traceback_module
 
 import ytdlp_auth
+import runtime_budget
 from clip_generation import run_clip_generation
 from clip_generation import run_audio_prefetch
 from clip_generation import run_clip_scoring
@@ -35,6 +36,18 @@ PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "clip", "editori
 SUMMARY_LABELS = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload", "total"]
 NETWORK_ACQUISITION_STAGES = ["pull", "audio", "score", "video"]
 LOCAL_PACKAGING_STAGES = ["render", "editorial", "subtitle", "reconcile", "manifest"]
+PRODUCTION_STAGE_WEIGHTS = {
+    "pull": 0.25,
+    "audio": 1.00,
+    "score": 2.40,
+    "video": 1.00,
+    "render": 3.80,
+    "clip": 6.20,
+    "editorial": 1.50,
+    "subtitle": 0.20,
+    "reconcile": 0.05,
+    "manifest": 0.05,
+}
 
 
 class TeeStream:
@@ -1079,11 +1092,10 @@ def reconcile_stage_for_theme(theme):
 
 
 def resolved_editorial_package_target():
-    upload_target = env_int("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", 15, minimum=0)
-    reserve_target = env_int("SHORTFORM_RESERVE_TARGET_PER_THEME", 10, minimum=0)
+    preferred_target = env_int("SHORTFORM_PREFERRED_FINISHED_PER_THEME", 20, minimum=1)
     return env_int(
         "SHORTFORM_EDITORIAL_FINAL_PACKAGE_TARGET",
-        upload_target + reserve_target,
+        preferred_target,
         minimum=1,
     )
 
@@ -1096,9 +1108,9 @@ def quota_topup_enabled(args):
 
 
 def render_topup_batch_size(shortfall, prior_packages):
-    min_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MIN_RENDER_BATCH", 8, minimum=1)
-    max_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_RENDER_BATCH", 40, minimum=min_batch)
-    multiplier = env_float("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MULTIPLIER", 2.0, minimum=1.0, maximum=6.0)
+    min_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MIN_RENDER_BATCH", 4, minimum=1)
+    max_batch = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_RENDER_BATCH", 16, minimum=min_batch)
+    multiplier = env_float("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MULTIPLIER", 1.5, minimum=1.0, maximum=6.0)
 
     if prior_packages <= 0:
         batch = max(min_batch, math.ceil(shortfall * multiplier))
@@ -1148,7 +1160,7 @@ def run_editorial_with_quota_topups(theme, args, summary):
         mark_final_editorial_sources_completed(theme)
         return packages_ready
 
-    max_topups = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", 5, minimum=0)
+    max_topups = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", 3, minimum=0)
 
     if max_topups <= 0:
         print(f"Editorial quota short for {theme}: {packages_ready}/{target}; top-up passes disabled.")
@@ -1160,6 +1172,13 @@ def run_editorial_with_quota_topups(theme, args, summary):
     )
 
     for topup_index in range(1, max_topups + 1):
+        if not runtime_budget.can_start_work(estimated_seconds=8 * 60, production=True):
+            print(
+                f"Production time budget reached before top-up pass {topup_index} for {theme}; "
+                f"preserving {packages_ready} finished package(s) and remaining candidates for resume."
+            )
+            break
+
         shortfall = max(0, target - packages_ready)
 
         if shortfall <= 0:
@@ -1347,7 +1366,9 @@ def run_pipeline_by_stage(themes, args):
         + "\n"
     )
 
-    for stage in stages:
+    production_stages = [stage for stage in stages if stage != "upload"]
+
+    for stage_index, stage in enumerate(stages):
         stage_start = time.time()
         runnable_themes = [theme for theme in themes if theme not in blocked_themes]
 
@@ -1357,8 +1378,36 @@ def run_pipeline_by_stage(themes, args):
 
         print(f"=== Stage: {stage} for themes: {', '.join(runnable_themes)} ===\n")
 
-        for theme in runnable_themes:
+        if stage in production_stages:
+            remaining_stages = [
+                item
+                for item in stages[stage_index:]
+                if item in production_stages
+            ]
+            remaining_weight = sum(PRODUCTION_STAGE_WEIGHTS.get(item, 0.10) for item in remaining_stages)
+            stage_deadline = runtime_budget.weighted_slice_deadline(
+                remaining_stage_weights=remaining_weight,
+                current_weight=PRODUCTION_STAGE_WEIGHTS.get(stage, 0.10),
+            )
+            runtime_budget.set_stage_deadline(stage_deadline)
+
+            if stage_deadline:
+                stage_minutes = max(0.0, stage_deadline - time.time()) / 60.0
+                print(
+                    f"Runtime allocation for {stage}: about {stage_minutes:.1f} minutes; "
+                    "unused time rolls forward."
+                )
+        else:
+            stage_deadline = 0.0
+            runtime_budget.set_stage_deadline(0)
+
+        for theme_index, theme in enumerate(runnable_themes):
             summary = theme_summaries[theme]
+            theme_deadline = runtime_budget.fair_slice_deadline(
+                stage_deadline,
+                len(runnable_themes) - theme_index,
+            )
+            runtime_budget.set_theme_deadline(theme_deadline)
 
             try:
                 print(f"--- {stage}: {theme} ---")
@@ -1380,6 +1429,9 @@ def run_pipeline_by_stage(themes, args):
             summary["total"] = time.time() - theme_started_at[theme]
             print("")
 
+            runtime_budget.set_theme_deadline(0)
+
+        runtime_budget.clear_work_scope()
         print(f"Stage {stage} complete in {format_duration(time.time() - stage_start)}\n")
 
     for theme in themes:
@@ -1392,7 +1444,14 @@ def run_pipeline_by_theme(themes, args):
     failed_themes = []
     theme_summaries = {}
 
-    for theme_name in themes:
+    for theme_index, theme_name in enumerate(themes):
+        production_deadline = runtime_budget.deadline_epoch(production=True)
+        theme_deadline = runtime_budget.fair_slice_deadline(
+            production_deadline,
+            len(themes) - theme_index,
+        )
+        runtime_budget.set_theme_deadline(theme_deadline)
+
         try:
             succeeded, summary = run_pipeline_for_theme(theme_name, args)
         except Exception as error:
@@ -1406,6 +1465,10 @@ def run_pipeline_by_theme(themes, args):
 
         if not succeeded:
             failed_themes.append(theme_name)
+
+        runtime_budget.set_theme_deadline(0)
+
+    runtime_budget.clear_work_scope()
 
     return failed_themes, theme_summaries
 
@@ -1611,6 +1674,21 @@ def parse_args():
         "--youtube-upload-limit",
         type=int,
         help="Optional max number of YouTube uploads per theme for this run. Default is 15.",
+    )
+    parser.add_argument(
+        "--max-runtime-hours",
+        type=float,
+        default=float(os.getenv("SHORTFORM_MAX_RUNTIME_HOURS", "12")),
+        help=(
+            "Maximum wall-clock runtime for a production run. New source/render work stops early "
+            "enough to package and upload completed clips. Use 0 to disable the budget."
+        ),
+    )
+    parser.add_argument(
+        "--upload-runtime-reserve-minutes",
+        type=float,
+        default=float(os.getenv("SHORTFORM_UPLOAD_RUNTIME_RESERVE_MINUTES", "75")),
+        help="Minutes reserved at the end of the runtime budget for packaging and upload.",
     )
     parser.add_argument(
         "--doctor",
@@ -1866,6 +1944,34 @@ def main():
         if not themes:
             print("No themes configured. Add JSON theme files in src/themes.")
             return
+
+        upload_stage_enabled = (
+            "upload" in selected_pipeline_stages(args)
+            and not args.skip_youtube
+            and any(theme_has_youtube_upload_route(item) for item in themes)
+        )
+        effective_upload_reserve_minutes = (
+            max(0.0, float(args.upload_runtime_reserve_minutes or 0.0))
+            if upload_stage_enabled
+            else 0.0
+        )
+        budget = runtime_budget.configure_run_budget(
+            max_runtime_hours=max(0.0, float(args.max_runtime_hours or 0.0)),
+            upload_reserve_minutes=effective_upload_reserve_minutes,
+        )
+
+        if budget["enabled"]:
+            print(
+                "Production runtime budget: "
+                f"{float(args.max_runtime_hours):g}h total, "
+                f"{effective_upload_reserve_minutes:g}m reserved for upload."
+            )
+            print(
+                "New acquisition/render work will stop with "
+                f"{runtime_budget.format_remaining(production=True)} remaining in the production window.\n"
+            )
+        else:
+            print("Production runtime budget disabled.\n")
 
         single_theme_run = bool(theme or os.getenv("SHORTFORM_THEME"))
 

@@ -116,6 +116,42 @@ Collect YouTube Analytics metrics for uploaded videos and build experiment repor
 
 ## Quality And Speed Controls
 
+Production now defaults to a 12-hour wall-clock budget. The stage-major scheduler gives every
+theme a fair share of acquisition, scoring, framing, and editorial time; unused time rolls into
+the next stage. It targets at least 10 upload-ready clips per theme, prefers 20 (15 queued plus
+5 archived), and can keep producing exceptional overflow clips above 20. The limits stop new
+expensive work rather than deleting partial work, so a later run resumes cached audio,
+transcripts, candidate scores, selected sections, and renders.
+
+```powershell
+# Default optimized all-theme production run.
+.\venv_313\Scripts\python.exe .\run.py --travel-safe
+
+# Change the wall-clock envelope, or use 0 for an intentionally unlimited run.
+.\venv_313\Scripts\python.exe .\run.py --travel-safe --max-runtime-hours 12
+```
+
+Long sources use approximately 12 minutes of high-signal audio windows selected from replay
+heatmaps, chapters, timestamped comments, and transcript coverage. The pipeline reuses one
+Whisper model instance and cached transcripts, scores promising sources first, downloads only
+selected video sections, and uses Intel Quick Sync (`h264_qsv`) when a functional probe passes.
+Set `SHORTFORM_HARDWARE_ENCODER=software` to force the `libx264` fallback.
+Final upload preflight reuses signature-matched render/audio QC and does not repeat title or
+content grading. Metadata is still sanitized and weak titles receive a supported fallback.
+Set `SHORTFORM_RECHECK_EDITORIAL_GATES_ON_UPLOAD=1` only when deliberately auditing legacy
+packages again.
+
+Public replay heatmaps, chapters, and timestamped comments boost candidate rank but are not a
+hard requirement for filling the 10-to-20 clip inventory. A clip without those signals must
+still be a complete, engaging thought and pass the same framing, audio, subtitle, and duplicate
+checks. Distinct moments from the same long interview may all qualify; the old one-clip-per-source
+packaging bottleneck is removed. Set `SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL=1` for a narrower
+signal-only run.
+
+Editorial quota top-ups are incremental. Existing upload-ready packages in either `content` or
+`archive` count toward the current date's target, and only newly rendered source moments are
+packaged on the next pass. A top-up never rebuilds the same finished Short merely to recount it.
+
 - `yt-dlp` fetches channel metadata without cookies for speed. Media downloads are authenticated by default so age-restricted videos do not get treated as ordinary skips. Firefox browser cookies are the default primary auth source; keep an exported, signed-in, age-verified `cookies.txt` only as the backup path when browser-cookie access is blocked. The local `.env` should pin the working Firefox profile and keep the cookie file as the second source:
 
 ```powershell
@@ -327,7 +363,7 @@ logs/framing_lab/<theme>/audits/
 $env:SHORTFORM_ENABLE_PERSON_FALLBACK="1"
 ```
 
-- Clip discovery transcription uses `faster-whisper` before scoring candidates. It defaults to the `base` model with beam `3` so clip selection has cleaner sentence boundaries than the old tiny pass. Use `tiny` for faster tests, or `small` for slower but stronger transcript quality:
+- Clip discovery transcription uses `faster-whisper` before scoring candidates. Production defaults to the `base` model with beam `2`, reuses one loaded model, and caches by audio hash/model/version. Use `tiny` for faster tests, or `small` for slower but stronger transcript quality:
 
 ```powershell
 $env:SHORTFORM_CLIP_TRANSCRIBE_MODEL="tiny"
@@ -338,7 +374,7 @@ You can also switch the scoring profile in one setting:
 
 ```powershell
 $env:SHORTFORM_SPEED_PROFILE="debug"      # tiny model, beam 1
-$env:SHORTFORM_SPEED_PROFILE="production" # base model, beam 3
+$env:SHORTFORM_SPEED_PROFILE="production" # base model, beam 2
 $env:SHORTFORM_SPEED_PROFILE="premium"    # small model, beam 5
 ```
 
@@ -347,7 +383,7 @@ Very long interviews use a capped candidate-window policy by default: full scan 
 ```powershell
 $env:SHORTFORM_ENABLE_SCORING_WINDOW_CAPS="1"
 $env:SHORTFORM_FULL_SOURCE_SCAN_MAX_SECONDS="5400"
-$env:SHORTFORM_MAX_SCORING_START_POINTS="520"
+$env:SHORTFORM_MAX_SCORING_START_POINTS="120"
 ```
 
 Set `SHORTFORM_ENABLE_SCORING_WINDOW_CAPS=0` for exhaustive scans, or use `SHORTFORM_SPEED_PROFILE=premium` for a deeper cap.
