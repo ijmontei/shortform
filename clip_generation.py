@@ -7686,6 +7686,52 @@ def extract_transcription_window(audio_filename, cleaned_title, start, end, inde
     return output_file
 
 
+def analysis_pcm_wav(media_file, cleaned_title, index):
+    try:
+        with wave.open(media_file, "rb") as wav_file:
+            if (
+                wav_file.getnchannels() == 1
+                and wav_file.getsampwidth() == 2
+                and wav_file.getframerate() == 16000
+            ):
+                return media_file
+    except (OSError, EOFError, wave.Error):
+        pass
+
+    analysis_dir = os.path.join(audio_path, "_analysis_windows")
+    os.makedirs(analysis_dir, exist_ok=True)
+    output_file = os.path.join(
+        analysis_dir,
+        f"{cleaned_title}_window_{int(index):02d}_16k.wav",
+    )
+
+    if os.path.exists(output_file) and os.path.getsize(output_file) > 44:
+        try:
+            with wave.open(output_file, "rb") as wav_file:
+                if (
+                    wav_file.getnchannels() == 1
+                    and wav_file.getsampwidth() == 2
+                    and wav_file.getframerate() == 16000
+                    and os.path.getmtime(output_file) >= os.path.getmtime(media_file)
+                ):
+                    return output_file
+        except (OSError, EOFError, wave.Error):
+            pass
+
+    run_subprocess([
+        FFMPEG_EXE,
+        "-y",
+        "-i", media_file,
+        "-vn",
+        "-ac", "1",
+        "-ar", "16000",
+        "-acodec", "pcm_s16le",
+        output_file,
+    ], "Scoring-window PCM conversion")
+    assert_file_exists(output_file, "Scoring-window analysis WAV")
+    return output_file
+
+
 def shared_transcription_model():
     global _TRANSCRIBE_MODEL, _TRANSCRIBE_MODEL_SETTINGS
 
@@ -7934,7 +7980,10 @@ def analyze_audio_features(audio_filename, cleaned_title, analysis_windows=None,
                     index,
                 )
 
-            wav_sources.append((window_file, window_start))
+            wav_sources.append((
+                analysis_pcm_wav(window_file, cleaned_title, index),
+                window_start,
+            ))
     else:
         analysis_wav = os.path.join(audio_path, f"{cleaned_title}_analysis_16k.wav")
         run_subprocess([
