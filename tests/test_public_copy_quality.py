@@ -30,6 +30,16 @@ TRUECRIME_PASSENGER_CLIP = {
 
 
 class PublicCopyQualityTests(unittest.TestCase):
+    def test_archive_channel_label_does_not_duplicate_brand_words(self):
+        self.assertEqual(
+            daily_editorial.archive_channel_label("The Joke Archive"),
+            "THE JOKE ARCHIVE",
+        )
+        self.assertEqual(
+            daily_editorial.archive_channel_label("comedy"),
+            "THE COMEDY ARCHIVE",
+        )
+
     def test_public_text_cleanup_removes_common_mojibake(self):
         broken_source_title = (
             "Cops Face Off With Dangerous Suspects "

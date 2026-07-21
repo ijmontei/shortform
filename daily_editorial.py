@@ -30,7 +30,7 @@ import ytdlp_auth
 import runtime_budget
 from content_archive import dedupe_packages
 from editorial_gates import evaluate_editorial_gates
-from media_encoding import encoder_label, video_encoder_args
+from media_encoding import disable_qsv, encoder_label, software_fallback_command, video_encoder_args
 from metadata_generation import score_title_quality, title_passes_publishable_bar
 from metadata_generation.titles import polish_headline_title, source_context_title
 from theme_config import BASE_DIR, DEFAULT_THEME, EXECUTED_FILE, PULLED_FILE, assert_theme_allowed_for_active_run, discover_themes, ensure_theme, load_json_file, mark_stage, utc_timestamp, write_json_file
@@ -452,6 +452,20 @@ def run_subprocess(cmd, label):
         errors="replace",
     )
 
+    if result.returncode != 0 and "h264_qsv" in cmd:
+        print(f" -> {label} failed with Intel Quick Sync; retrying with libx264.")
+        disable_qsv()
+        cmd = software_fallback_command(cmd, quality=20, software_preset="veryfast")
+        label = f"{label} software fallback"
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
     if result.returncode != 0:
         print(f"\n--- {label} failed ---")
         print("Command:")
@@ -470,6 +484,15 @@ def compact_text(text, max_length):
         return text
 
     return text[: max(0, max_length - 1)].rstrip(" ,.;:-") + "..."
+
+
+def archive_channel_label(label):
+    cleaned = re.sub(r"\s+", " ", str(label or "").strip())
+
+    if cleaned.lower().endswith("archive"):
+        return cleaned.upper()
+
+    return f"THE {cleaned.upper()} ARCHIVE"
 
 
 def clean_viewer_text(text):
@@ -5970,7 +5993,7 @@ def render_editorial_short(theme, topic_item, rank, adjective, date_key, paths):
     cream = style.get("cream", "0xFFF4B8")
     mint = style.get("mint", "0xB7D7C2")
     dark = style.get("dark", "0x2E3440")
-    archive_label = f"THE {theme_label.upper()} ARCHIVE"
+    archive_label = archive_channel_label(theme_label)
     top_entries = context.get("top_entries", [])[:total_count]
     source_banners = context.get("source_banners", [])[:EDITORIAL_BOARD_SOURCE_LIMIT]
     input_paths = []
@@ -6400,7 +6423,7 @@ def render_popular_segment_short(theme, item, index, date_key, paths):
     mint = style.get("mint", "0xB7D7C2")
     dark = style.get("dark", "0x2E3440")
     profile = theme_profile(theme)
-    archive_label = f"THE {profile['label'].upper()} ARCHIVE"
+    archive_label = archive_channel_label(profile["label"])
     signal_label, popularity_label, detail_label = popular_segment_labels(item, theme)
     hero_label = compact_text(signal_label, 18).upper()
     script = build_popular_segment_script(theme, item)

@@ -59,6 +59,7 @@ def qsv_available():
 def video_encoder_args(quality=20, software_preset="veryfast"):
     if qsv_available():
         return [
+            "-r", os.getenv("SHORTFORM_OUTPUT_FPS", "30"),
             "-c:v", "h264_qsv",
             "-preset", os.getenv("SHORTFORM_QSV_PRESET", "faster"),
             "-global_quality", str(max(1, int(quality))),
@@ -75,3 +76,37 @@ def video_encoder_args(quality=20, software_preset="veryfast"):
 
 def encoder_label():
     return "h264_qsv" if qsv_available() else "libx264"
+
+
+def disable_qsv():
+    global _QSV_AVAILABLE
+
+    with _ENCODER_LOCK:
+        _QSV_AVAILABLE = False
+
+
+def software_fallback_command(command, quality=20, software_preset="veryfast"):
+    fallback = list(command)
+
+    for index in range(len(fallback) - 1):
+        if fallback[index:index + 2] != ["-c:v", "h264_qsv"]:
+            continue
+
+        end = index + 2
+
+        while end + 1 < len(fallback) and fallback[end] in {
+            "-preset",
+            "-global_quality",
+            "-pix_fmt",
+        }:
+            end += 2
+
+        fallback[index:end] = [
+            "-c:v", "libx264",
+            "-preset", software_preset,
+            "-crf", str(max(1, int(quality))),
+            "-pix_fmt", "yuv420p",
+        ]
+        return fallback
+
+    return fallback
