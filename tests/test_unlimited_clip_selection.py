@@ -39,13 +39,13 @@ class UnlimitedClipSelectionTests(unittest.TestCase):
             source_title=source_title or f"Source Interview {index}",
         )
 
-    def test_legacy_theme_candidate_count_does_not_cap_production_selection(self):
+    def test_daily_policy_caps_per_source_candidates_independently_of_legacy_rule(self):
         with patch.object(
             clip_generation,
             "active_clip_rules",
             return_value={"theme_candidates_per_video": 15},
         ):
-            self.assertIsNone(clip_generation.active_theme_candidates_per_video("comedy"))
+            self.assertEqual(clip_generation.active_theme_candidates_per_video("comedy"), 12)
 
     def test_ranked_candidate_window_returns_every_candidate_without_cap(self):
         candidates = [

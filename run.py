@@ -15,6 +15,7 @@ from clip_generation import run_clip_scoring
 from clip_generation import run_selected_clip_render
 from clip_generation import run_selected_video_prefetch
 from clip_generation import active_theme_clip_limit
+from clip_generation import daily_render_target
 from content_archive import dedupe_packages, move_package_video, package_has_existing_video, package_uploadable, prepare_upload_queue
 from daily_editorial import mark_editorial_sources_completed, run_daily_editorial
 from pipeline_doctor import run_doctor
@@ -815,7 +816,15 @@ def clip_generation_volume_label(themes):
     if capped:
         return "budget-limited (" + ", ".join(capped) + ")"
 
-    return "quality-threshold unlimited; no per-theme local clip cap"
+    targets = {theme: daily_render_target(theme) for theme in themes}
+    unique_targets = set(targets.values())
+
+    if len(unique_targets) == 1:
+        target = next(iter(unique_targets))
+        return f"quality-ranked; daily target {target} finished clip(s) per theme"
+
+    target_labels = ", ".join(f"{theme}:{target}" for theme, target in targets.items())
+    return f"quality-ranked; daily targets ({target_labels})"
 
 
 def theme_has_youtube_upload_route(theme):
@@ -1101,7 +1110,7 @@ def reconcile_stage_for_theme(theme):
 
 
 def resolved_editorial_package_target():
-    preferred_target = env_int("SHORTFORM_PREFERRED_FINISHED_PER_THEME", 20, minimum=1)
+    preferred_target = env_int("SHORTFORM_PREFERRED_FINISHED_PER_THEME", 10, minimum=1)
     return env_int(
         "SHORTFORM_EDITORIAL_FINAL_PACKAGE_TARGET",
         preferred_target,
@@ -1169,7 +1178,7 @@ def run_editorial_with_quota_topups(theme, args, summary):
         mark_final_editorial_sources_completed(theme)
         return packages_ready
 
-    max_topups = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", 3, minimum=0)
+    max_topups = env_int("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", 1, minimum=0)
 
     if max_topups <= 0:
         print(f"Editorial quota short for {theme}: {packages_ready}/{target}; top-up passes disabled.")

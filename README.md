@@ -370,7 +370,7 @@ logs/framing_lab/<theme>/audits/
 $env:SHORTFORM_ENABLE_PERSON_FALLBACK="1"
 ```
 
-- Clip discovery transcription uses `faster-whisper` before scoring candidates. Production defaults to the `base` model with beam `2`, reuses one loaded model, and caches by audio hash/model/version. Use `tiny` for faster tests, or `small` for slower but stronger transcript quality:
+- Clip discovery transcription uses `faster-whisper` before scoring candidates. Production defaults to the `base` model with beam `1`, reuses one loaded model, and caches by audio hash/model/version. Use `tiny` for faster tests, or `small` for slower but stronger transcript quality:
 
 ```powershell
 $env:SHORTFORM_CLIP_TRANSCRIBE_MODEL="tiny"
@@ -381,8 +381,19 @@ You can also switch the scoring profile in one setting:
 
 ```powershell
 $env:SHORTFORM_SPEED_PROFILE="debug"      # tiny model, beam 1
-$env:SHORTFORM_SPEED_PROFILE="production" # base model, beam 2
+$env:SHORTFORM_SPEED_PROFILE="production" # base model, beam 1
 $env:SHORTFORM_SPEED_PROFILE="premium"    # small model, beam 5
+```
+
+Normal production is tuned for a roughly 12-hour all-theme cycle without a hard runtime cutoff. The default policy targets 10 finished clips per theme, keeps the YouTube upload cap at 15, preserves existing backlog, scores four to six newly discovered sources per theme, uses speech-optimized analysis audio, and uses one primary crop plus one inexpensive fallback. Editorial intros render at 24 fps over a sampled video background while the finished Short remains 1080p. It still rejects missing audio, dead or black frames, probable background-face locks, duplicates, and incomplete or unpublishable moments. High-scoring candidates that are not needed for the daily target remain resumable instead of triggering unlimited render overflow.
+
+The deeper, slower behavior remains available through environment overrides:
+
+```powershell
+$env:SHORTFORM_PREFERRED_FINISHED_PER_THEME="20"
+$env:SHORTFORM_ENABLE_EXPENSIVE_FRAMING_FALLBACKS="1"
+$env:SHORTFORM_ALLOW_QUALITY_OVERFLOW="1"
+$env:SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME="12"
 ```
 
 Very long interviews use a capped candidate-window policy by default: full scan for shorter sources, then a bounded mix of replay/timestamp/chapter windows, high-audio-energy windows, and evenly spaced coverage for long sources. This keeps daily production from spending hours scoring every possible window in a multi-hour interview.

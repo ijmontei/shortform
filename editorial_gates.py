@@ -21,6 +21,7 @@ NON_SPEAKER_VISUAL_THEMES = {
     "sports",
     "gaming",
     "popculture",
+    "technology_ai",
 }
 TRUST_CONFIGURED_SOURCE_RELEVANCE = os.getenv("SHORTFORM_TRUST_CONFIGURED_SOURCE_RELEVANCE", "1") != "0"
 RELAX_THEME_RELEVANCE_GATES = os.getenv("SHORTFORM_RELAX_THEME_RELEVANCE_GATES", "1") != "0"

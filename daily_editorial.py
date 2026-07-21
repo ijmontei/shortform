@@ -59,7 +59,7 @@ EDITORIAL_COUNTDOWN_SIZE = max(1, int(os.getenv("SHORTFORM_EDITORIAL_COUNTDOWN_S
 MIN_FINISHED_TARGET_PER_THEME = max(1, int(os.getenv("SHORTFORM_MIN_FINISHED_PER_THEME", "10")))
 PREFERRED_FINISHED_TARGET_PER_THEME = max(
     MIN_FINISHED_TARGET_PER_THEME,
-    int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "20")),
+    int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "10")),
 )
 UPLOAD_READY_TARGET_PER_THEME = max(0, int(os.getenv("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", "15")))
 RESERVE_TARGET_PER_THEME = max(0, int(os.getenv(
@@ -107,6 +107,11 @@ CLIP_SOURCE_AUDIO_VOLUME = float(os.getenv("SHORTFORM_EDITORIAL_CLIP_AUDIO_VOLUM
 EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS = max(0.0, float(os.getenv("SHORTFORM_EDITORIAL_SOURCE_AUDIO_FADE_IN_SECONDS", "0.24")))
 EDITORIAL_INTRO_TARGET_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_SECONDS", "5.2"))
 EDITORIAL_INTRO_MAX_SECONDS = float(os.getenv("SHORTFORM_EDITORIAL_INTRO_MAX_SECONDS", "6.25"))
+EDITORIAL_INTRO_FPS = max(20, min(30, int(os.getenv("SHORTFORM_EDITORIAL_INTRO_FPS", "24"))))
+EDITORIAL_INTRO_BACKGROUND_FPS = max(
+    0.5,
+    min(EDITORIAL_INTRO_FPS, float(os.getenv("SHORTFORM_EDITORIAL_INTRO_BACKGROUND_FPS", "2"))),
+)
 EDITORIAL_INTRO_ABSOLUTE_MAX_SECONDS = max(
     EDITORIAL_INTRO_MAX_SECONDS,
     float(os.getenv("SHORTFORM_EDITORIAL_INTRO_ABSOLUTE_MAX_SECONDS", "7.25")),
@@ -120,8 +125,8 @@ EDITORIAL_BURN_SOURCE_CAPTIONS = os.getenv("SHORTFORM_EDITORIAL_BURN_SOURCE_CAPT
 EDITORIAL_PERIOD_LABEL = os.getenv("SHORTFORM_EDITORIAL_PERIOD_LABEL", "this week").strip() or "this week"
 EDITORIAL_BOARD_SOURCE_LIMIT = max(5, int(os.getenv("SHORTFORM_EDITORIAL_BOARD_SOURCE_LIMIT", "12")))
 EDITORIAL_HARD_REJECT_BAD_OUTPUTS = os.getenv("SHORTFORM_EDITORIAL_HARD_REJECT_BAD_OUTPUTS", "1") != "0"
-MIN_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY", "0.60"))
-STRICT_EDITORIAL_FACE_GATES = os.getenv("SHORTFORM_STRICT_EDITORIAL_FACE_GATES", "1") != "0"
+MIN_EDITORIAL_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_EDITORIAL_VISUAL_QUALITY", "0.54"))
+STRICT_EDITORIAL_FACE_GATES = os.getenv("SHORTFORM_STRICT_EDITORIAL_FACE_GATES", "0") != "0"
 MIN_EDITORIAL_SOURCE_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_EDITORIAL_SOURCE_FACE_PRESENCE", "0.42"))
 MAX_EDITORIAL_SOURCE_NO_FACE_RUN = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_NO_FACE_RUN", "0.30"))
 MAX_EDITORIAL_SOURCE_ALIVE_NO_FACE = float(os.getenv("SHORTFORM_MAX_EDITORIAL_SOURCE_ALIVE_NO_FACE", "0.36"))
@@ -146,7 +151,7 @@ RENDER_POPULAR_SEGMENT_SHORTS = os.getenv("SHORTFORM_RENDER_POPULAR_SEGMENTS", "
 POPULAR_SEGMENTS_PER_THEME = max(0, int(os.getenv("SHORTFORM_POPULAR_SEGMENTS_PER_THEME", "0")))
 POPULAR_SEGMENT_REQUIRE_SIGNAL = os.getenv("SHORTFORM_POPULAR_SEGMENT_REQUIRE_SIGNAL", "0") != "0"
 POPULAR_SEGMENT_MIN_SCORE = float(os.getenv("SHORTFORM_POPULAR_SEGMENT_MIN_SCORE", "0.12"))
-ALLOW_QUALITY_OVERFLOW = os.getenv("SHORTFORM_ALLOW_QUALITY_OVERFLOW", "1") != "0"
+ALLOW_QUALITY_OVERFLOW = os.getenv("SHORTFORM_ALLOW_QUALITY_OVERFLOW", "0") != "0"
 QUALITY_OVERFLOW_MIN_SORT_SCORE = float(os.getenv("SHORTFORM_QUALITY_OVERFLOW_MIN_SORT_SCORE", "0.76"))
 EXHAUST_RENDERED_EDITORIAL_CLIPS = os.getenv("SHORTFORM_EXHAUST_RENDERED_EDITORIAL_CLIPS", "0") == "1"
 EXHAUST_RENDERED_MAX_CLIPS = max(0, int(os.getenv("SHORTFORM_EXHAUST_RENDERED_MAX_CLIPS", "0")))
@@ -1836,15 +1841,22 @@ def clip_is_editorial_usable(clip):
 def clip_is_popular_segment_usable(clip):
     render_qc = clip_render_qc(clip)
 
-    if render_qc and not render_qc.get("passed", True):
-        soft_flags = {"source playback ends without a strong face"}
+    if not render_qc:
+        return False
+
+    if not render_qc.get("passed", True):
+        soft_flags = {
+            "source playback ends without a strong face",
+            "unstable final subject position",
+            "subject off-center in final crop",
+            "render window padded by 0.75s pre / 0.25s post",
+            "rendered from selected video section",
+        }
         rejection_reasons = set(render_qc.get("rejection_reasons") or [])
         flags = set(render_qc.get("flags") or [])
+        warnings = rejection_reasons | flags
 
-        if not (rejection_reasons or flags):
-            return False
-
-        if (rejection_reasons or flags) - soft_flags:
+        if not warnings or warnings - soft_flags:
             return False
 
     return clip_is_editorial_usable(clip)
@@ -2084,7 +2096,7 @@ def finalize_editorial_package(package, label):
     try:
         import clip_generation
 
-        frame_qc = clip_generation.analyze_final_frame_path(output_file, max_samples=24)
+        frame_qc = clip_generation.analyze_final_frame_path(output_file, max_samples=10)
     except Exception as error:
         frame_qc = {
             "flags": [f"final editorial QA failed: {error}"],
@@ -3390,7 +3402,7 @@ THEME_TITLE_NOUNS = {
     "truecrime": "True Crime",
     "popculture": "Culture",
 }
-NON_SPEAKER_VISUAL_THEMES = {"politics", "truecrime", "sports", "gaming", "popculture"}
+NON_SPEAKER_VISUAL_THEMES = {"politics", "truecrime", "sports", "gaming", "popculture", "technology_ai"}
 
 
 def editorial_title_topic(topic):
@@ -5045,9 +5057,11 @@ def next_background_image(capture):
     return Image.fromarray(frame).convert("RGBA")
 
 
-def intro_background_frame(t, accent, accent2, background_capture=None):
+def intro_background_frame(t, accent, accent2, background_capture=None, video_frame=None):
     width, height = 1080, 1920
-    video_frame = next_background_image(background_capture)
+
+    if video_frame is None:
+        video_frame = next_background_image(background_capture)
 
     if video_frame:
         frame = center_crop(video_frame, (width, height)).filter(ImageFilter.GaussianBlur(18))
@@ -5072,6 +5086,36 @@ def intro_background_frame(t, accent, accent2, background_capture=None):
     draw.rectangle((0, 330, width, 337), fill=accent2)
     draw.rectangle((0, 1590, width, 1597), fill=accent)
     return frame
+
+
+def sampled_intro_backgrounds(background_video, intro_duration, accent, accent2):
+    capture = open_background_capture(background_video)
+    sample_count = max(1, int(math.ceil(float(intro_duration) * EDITORIAL_INTRO_BACKGROUND_FPS)))
+    frames = []
+
+    try:
+        for sample_index in range(sample_count):
+            sample_time = sample_index / EDITORIAL_INTRO_BACKGROUND_FPS
+
+            if capture is not None:
+                capture.set(cv2.CAP_PROP_POS_MSEC, sample_time * 1000.0)
+                video_frame = next_background_image(capture)
+            else:
+                video_frame = None
+
+            frames.append(
+                intro_background_frame(
+                    sample_time,
+                    accent,
+                    accent2,
+                    video_frame=video_frame,
+                )
+            )
+    finally:
+        if capture is not None:
+            capture.release()
+
+    return frames
 
 
 def countdown_intro_timing(intro_duration):
@@ -5194,8 +5238,8 @@ def paste_rotated(base, layer, x, y, angle, alpha=1.0):
 def card_morph_layer(source_card, final_card, width, height, progress):
     progress = clamp(progress)
     layer = Image.new("RGBA", (max(1, int(width)), max(1, int(height))), (0, 0, 0, 0))
-    source = source_card.resize(layer.size, Image.Resampling.LANCZOS)
-    final = final_card.resize(layer.size, Image.Resampling.LANCZOS)
+    source = source_card.resize(layer.size, Image.Resampling.BILINEAR)
+    final = final_card.resize(layer.size, Image.Resampling.BILINEAR)
     source_alpha = max(0.0, 1.0 - ease_in_out_cubic((progress - 0.86) / 0.14))
     final_alpha = ease_in_out_cubic((progress - 0.62) / 0.28)
 
@@ -5424,7 +5468,8 @@ def draw_morph_energy(draw, accent, accent2, t, progress):
 
 def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_duration, ranking_title, ranking_subtitle, context, top_entries, source_banners, countdown_slot, style, background_video=None):
     output_path = os.path.join(scratch_dir, clean_filename(f"{date_key}_{theme}_{rank}_countdown_intro") + ".mp4")
-    fps = max(24, min(30, int(os.getenv("SHORTFORM_EDITORIAL_INTRO_FPS", "30"))))
+    render_started_at = time.time()
+    fps = EDITORIAL_INTRO_FPS
     width, height = 1080, 1920
     accent = color_tuple(style["accent"])
     accent2 = color_tuple(style["accent2"])
@@ -5479,7 +5524,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
     lock_center = 940
     total_scroll = max(row_spacing * max(1, len(source_banners)), wheel_height + row_spacing)
     frame_count = max(1, int(math.ceil(intro_duration * fps)))
-    background_capture = open_background_capture(background_video)
+    background_frames = sampled_intro_backgrounds(background_video, intro_duration, accent, accent2)
 
     intro_encode_command = [
         FFMPEG_EXE,
@@ -5504,7 +5549,11 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
     try:
         for frame_index in range(frame_count):
             t = frame_index / fps
-            frame = intro_background_frame(t, accent, accent2, background_capture)
+            background_index = min(
+                len(background_frames) - 1,
+                int(t * EDITORIAL_INTRO_BACKGROUND_FPS),
+            )
+            frame = background_frames[background_index].copy()
             draw = ImageDraw.Draw(frame)
             draw_intro_header(draw, ranking_title, ranking_subtitle, fonts, accent, t)
             final_progress = ease_in_out_cubic((t - spin_end) / max(0.1, final_lock - spin_end))
@@ -5582,7 +5631,7 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
 
                     scaled_w = int(card.width * scale)
                     scaled_h = int(card.height * scale)
-                    scaled = card.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+                    scaled = card.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
                     draw_card_carrier(draw, x, y, scaled_w, scaled_h, accent, accent2, alpha, t, index)
                     paste_rotated(frame, scaled, x, y, angle, alpha)
 
@@ -5651,13 +5700,11 @@ def render_countdown_intro_video(theme, scratch_dir, date_key, rank, intro_durat
 
     stdout, stderr = process.communicate()
 
-    if background_capture is not None:
-        background_capture.release()
-
     if process.returncode != 0:
         detail = stderr.decode("utf-8", errors="replace")[-4000:]
         raise RuntimeError(f"Countdown intro render failed: {detail}")
 
+    print(f" -> Countdown intro visual rendered in {time.time() - render_started_at:.1f}s at {fps} fps")
     return output_path
 
 

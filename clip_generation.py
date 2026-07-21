@@ -157,14 +157,14 @@ UNLIMITED_BACKLOG_MIN_SELECTED_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACK
 UNLIMITED_BACKLOG_MIN_READINESS_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACKLOG_MIN_READINESS_SCORE", "0.70"))
 UNLIMITED_BACKLOG_MIN_TEXT_SCORE = float(os.getenv("SHORTFORM_UNLIMITED_BACKLOG_MIN_TEXT_SCORE", "0.20"))
 MIN_FINISHED_TARGET = max(1, int(os.getenv("SHORTFORM_MIN_FINISHED_PER_THEME", "10")))
-PREFERRED_FINISHED_TARGET = max(MIN_FINISHED_TARGET, int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "20")))
+PREFERRED_FINISHED_TARGET = max(MIN_FINISHED_TARGET, int(os.getenv("SHORTFORM_PREFERRED_FINISHED_PER_THEME", "10")))
 DAILY_UPLOAD_READY_TARGET = max(0, int(os.getenv("SHORTFORM_UPLOAD_READY_TARGET_PER_THEME", "15")))
 DAILY_RESERVE_TARGET = max(0, int(os.getenv(
     "SHORTFORM_RESERVE_TARGET_PER_THEME",
     str(max(0, PREFERRED_FINISHED_TARGET - DAILY_UPLOAD_READY_TARGET)),
 )))
 DAILY_FINAL_PACKAGE_TARGET = PREFERRED_FINISHED_TARGET
-DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER = max(1.0, float(os.getenv("SHORTFORM_RENDER_ACCEPTED_BUFFER_MULTIPLIER", "1.2")))
+DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER = max(1.0, float(os.getenv("SHORTFORM_RENDER_ACCEPTED_BUFFER_MULTIPLIER", "1.0")))
 DAILY_RENDER_ACCEPTED_TARGET = max(0, int(os.getenv(
     "SHORTFORM_DAILY_RENDER_ACCEPTED_TARGET",
     str(math.ceil(DAILY_FINAL_PACKAGE_TARGET * DAILY_RENDER_ACCEPTED_BUFFER_MULTIPLIER)),
@@ -181,8 +181,8 @@ MAX_THEME_RENDER_ACCEPTED_TARGET = max(
     DAILY_RENDER_ACCEPTED_TARGET,
     int(os.getenv("SHORTFORM_MAX_THEME_RENDER_ACCEPTED_TARGET", "120")),
 )
-DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER = max(1, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER", "3")))
-DAILY_RENDER_POOL_MIN_ATTEMPTS = max(0, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_MIN_ATTEMPTS", "40")))
+DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER = max(1, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_ATTEMPT_MULTIPLIER", "2")))
+DAILY_RENDER_POOL_MIN_ATTEMPTS = max(0, int(os.getenv("SHORTFORM_DAILY_RENDER_POOL_MIN_ATTEMPTS", "20")))
 CONFIGURED_SOURCE_THEME_SIGNAL_FLOOR = float(os.getenv("SHORTFORM_CONFIGURED_SOURCE_THEME_SIGNAL_FLOOR", "0.50"))
 CONFIGURED_SOURCE_THEME_WEIGHT_CAP = float(os.getenv("SHORTFORM_CONFIGURED_SOURCE_THEME_WEIGHT_CAP", "0.07"))
 MIN_SOURCE_DURATION_SECONDS = float(os.getenv("SHORTFORM_MIN_SOURCE_DURATION_SECONDS", "600"))
@@ -191,24 +191,29 @@ RECENT_BLOCKED_RETRY_SECONDS = float(os.getenv("SHORTFORM_RECENT_BLOCKED_RETRY_S
 SKIP_BROADCAST_VOD_SOURCES = os.getenv("SHORTFORM_SKIP_BROADCAST_VOD_SOURCES", "1") != "0"
 ENABLE_PERSON_FALLBACK = os.getenv("SHORTFORM_ENABLE_PERSON_FALLBACK") == "1"
 ENABLE_ALTERNATE_FRAMING_RETRY = os.getenv("SHORTFORM_ENABLE_ALTERNATE_FRAMING_RETRY", "1") != "0"
-ALLOW_FACELESS_CENTER_SAFE = os.getenv("SHORTFORM_ALLOW_FACELESS_CENTER_SAFE", "0") == "1"
+ALLOW_FACELESS_CENTER_SAFE = os.getenv("SHORTFORM_ALLOW_FACELESS_CENTER_SAFE", "1") == "1"
 RENDER_PREROLL_SECONDS = max(0.0, float(os.getenv("SHORTFORM_RENDER_PREROLL_SECONDS", "0.75")))
 RENDER_POSTROLL_SECONDS = max(0.0, float(os.getenv("SHORTFORM_RENDER_POSTROLL_SECONDS", "0.25")))
 RENDER_EXTRA_DURATION_TOLERANCE = max(0.0, float(os.getenv("SHORTFORM_RENDER_EXTRA_DURATION_TOLERANCE", "1.25")))
-FRAME_RETRY_SCORE_THRESHOLD = float(os.getenv("SHORTFORM_FRAME_RETRY_SCORE_THRESHOLD", "0.76"))
-MAX_CROP_SECONDS_PER_MINUTE = float(os.getenv("SHORTFORM_MAX_CROP_SECONDS_PER_MINUTE", "240"))
-MAX_CROP_WALL_SECONDS = float(os.getenv("SHORTFORM_MAX_CROP_WALL_SECONDS", "240"))
+FRAME_RETRY_SCORE_THRESHOLD = float(os.getenv("SHORTFORM_FRAME_RETRY_SCORE_THRESHOLD", "0.68"))
+MAX_CROP_SECONDS_PER_MINUTE = float(os.getenv("SHORTFORM_MAX_CROP_SECONDS_PER_MINUTE", "180"))
+MAX_CROP_WALL_SECONDS = float(os.getenv("SHORTFORM_MAX_CROP_WALL_SECONDS", "180"))
 MAX_CROP_FRAME_MULTIPLIER = float(os.getenv("SHORTFORM_MAX_CROP_FRAME_MULTIPLIER", "1.12"))
-FRAME_AUDIT_SAMPLE_COUNT = max(12, int(os.getenv("SHORTFORM_FRAME_AUDIT_SAMPLE_COUNT", "18")))
+FRAME_AUDIT_SAMPLE_COUNT = max(8, int(os.getenv("SHORTFORM_FRAME_AUDIT_SAMPLE_COUNT", "10")))
+BLACK_FRAME_SAMPLE_COUNT = max(6, int(os.getenv("SHORTFORM_BLACK_FRAME_SAMPLE_COUNT", "8")))
+FINAL_FRAME_PATH_SAMPLE_COUNT = max(8, int(os.getenv("SHORTFORM_FINAL_FRAME_PATH_SAMPLE_COUNT", "10")))
+PREFLIGHT_FRAME_SAMPLE_COUNT = max(8, int(os.getenv("SHORTFORM_PREFLIGHT_FRAME_SAMPLE_COUNT", "10")))
+FACE_TARGET_SAMPLE_COUNT = max(16, int(os.getenv("SHORTFORM_FACE_TARGET_SAMPLE_COUNT", "16")))
+CREATE_RENDER_CONTACT_SHEETS = os.getenv("SHORTFORM_CREATE_RENDER_CONTACT_SHEETS", "0") == "1"
 GROUP_FACE_CONFIDENCE_THRESHOLD = float(os.getenv("SHORTFORM_GROUP_FACE_CONFIDENCE_THRESHOLD", "0.25"))
 HARD_REJECT_BAD_RENDERS = os.getenv("SHORTFORM_HARD_REJECT_BAD_RENDERS", "1") != "0"
-MIN_ACCEPTED_RENDER_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_ACCEPTED_RENDER_VISUAL_QUALITY", "0.60"))
+MIN_ACCEPTED_RENDER_VISUAL_QUALITY = float(os.getenv("SHORTFORM_MIN_ACCEPTED_RENDER_VISUAL_QUALITY", "0.56"))
 DEAD_FRAME_RATIO_THRESHOLD = float(os.getenv("SHORTFORM_DEAD_FRAME_RATIO_THRESHOLD", "0.22"))
 MIN_ALIVE_FRAME_RATE = float(os.getenv("SHORTFORM_MIN_ALIVE_FRAME_RATE", "0.68"))
-MIN_FINAL_SPEAKER_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_FINAL_SPEAKER_FACE_PRESENCE", "0.44"))
-MAX_FINAL_ALIVE_NO_FACE_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_ALIVE_NO_FACE_RATIO", "0.30"))
-MAX_FINAL_NO_FACE_RUN_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_NO_FACE_RUN_RATIO", "0.24"))
-MAX_FINAL_AVG_FACE_CENTER_OFFSET = float(os.getenv("SHORTFORM_MAX_FINAL_AVG_FACE_CENTER_OFFSET", "0.28"))
+MIN_FINAL_SPEAKER_FACE_PRESENCE = float(os.getenv("SHORTFORM_MIN_FINAL_SPEAKER_FACE_PRESENCE", "0.40"))
+MAX_FINAL_ALIVE_NO_FACE_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_ALIVE_NO_FACE_RATIO", "0.36"))
+MAX_FINAL_NO_FACE_RUN_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_NO_FACE_RUN_RATIO", "0.30"))
+MAX_FINAL_AVG_FACE_CENTER_OFFSET = float(os.getenv("SHORTFORM_MAX_FINAL_AVG_FACE_CENTER_OFFSET", "0.34"))
 MAX_FINAL_SPEAKER_LOW_INFORMATION_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_SPEAKER_LOW_INFORMATION_RATIO", "0.05"))
 MAX_FINAL_SPEAKER_BLANK_BACKGROUND_RATIO = float(os.getenv("SHORTFORM_MAX_FINAL_SPEAKER_BLANK_BACKGROUND_RATIO", "0.04"))
 MIN_FINAL_FACE_PLAUSIBILITY = float(os.getenv("SHORTFORM_MIN_FINAL_FACE_PLAUSIBILITY", "0.37"))
@@ -222,7 +227,7 @@ CLIP_TRANSCRIBE_MODEL_SIZE = speed_profile_default(
 ).strip() or "base"
 CLIP_TRANSCRIBE_BEAM_SIZE = max(1, int(speed_profile_default(
     "SHORTFORM_CLIP_TRANSCRIBE_BEAM_SIZE",
-    production="2",
+    production="1",
     debug="1",
     premium="5",
 )))
@@ -237,24 +242,24 @@ THEME_CLIP_BUDGET = max(0, int(os.getenv("SHORTFORM_THEME_CLIP_BUDGET", "0")))
 ENFORCE_THEME_CLIP_BUDGET = os.getenv("SHORTFORM_ENFORCE_THEME_CLIP_BUDGET", "0") == "1"
 ALLOW_THEME_CLIP_CAP = os.getenv("SHORTFORM_ALLOW_THEME_CLIP_CAP", "0") == "1"
 THEME_CANDIDATES_PER_VIDEO = max(1, int(os.getenv("SHORTFORM_THEME_CANDIDATES_PER_VIDEO", "24")))
-SOURCE_CANDIDATE_CAP = max(0, int(os.getenv("SHORTFORM_SOURCE_CANDIDATE_CAP", "0")))
+SOURCE_CANDIDATE_CAP = max(0, int(os.getenv("SHORTFORM_SOURCE_CANDIDATE_CAP", "12")))
 RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO = os.getenv(
     "SHORTFORM_RESPECT_LEGACY_THEME_CANDIDATES_PER_VIDEO",
     "0",
 ) == "1"
-CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_SCORE_CACHE_CANDIDATE_LIMIT", "0")))
-CLIP_REVIEW_REPORT_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_REVIEW_REPORT_CANDIDATE_LIMIT", "120")))
+CLIP_SCORE_CACHE_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_SCORE_CACHE_CANDIDATE_LIMIT", "48")))
+CLIP_REVIEW_REPORT_CANDIDATE_LIMIT = max(0, int(os.getenv("SHORTFORM_CLIP_REVIEW_REPORT_CANDIDATE_LIMIT", "60")))
 RECONSIDER_UNSELECTED_SOURCES = os.getenv("SHORTFORM_RECONSIDER_UNSELECTED", "0") == "1"
 REUSE_CACHED_CLIP_SCORES = os.getenv("SHORTFORM_REUSE_CACHED_CLIP_SCORES", "1") != "0"
-INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME", "6")))
-MIN_SCORED_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_MIN_SCORED_SOURCES_PER_THEME", "6")))
+INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_INITIAL_AUDIO_PREFETCH_SOURCES_PER_THEME", "4")))
+MIN_SCORED_SOURCES_PER_THEME = max(1, int(os.getenv("SHORTFORM_MIN_SCORED_SOURCES_PER_THEME", "4")))
 MAX_UNSCORED_SOURCES_PER_THEME = max(
     MIN_SCORED_SOURCES_PER_THEME,
-    int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "12")),
+    int(os.getenv("SHORTFORM_MAX_UNSCORED_SOURCES_PER_THEME", "6")),
 )
 TARGET_PUBLISHABLE_CANDIDATES_PER_THEME = max(
     PREFERRED_FINISHED_TARGET,
-    int(os.getenv("SHORTFORM_TARGET_PUBLISHABLE_CANDIDATES_PER_THEME", "36")),
+    int(os.getenv("SHORTFORM_TARGET_PUBLISHABLE_CANDIDATES_PER_THEME", "20")),
 )
 ENABLE_POPULARITY_SCORING = os.getenv("SHORTFORM_ENABLE_POPULARITY_SCORING", "1") != "0"
 POPULARITY_SCORE_WEIGHT = float(os.getenv("SHORTFORM_POPULARITY_SCORE_WEIGHT", "0.16"))
@@ -274,13 +279,13 @@ SLOW_SOURCE_REVIEW_SECONDS = float(os.getenv("SHORTFORM_SLOW_SOURCE_REVIEW_SECON
 ENABLE_SCORING_WINDOW_CAPS = os.getenv("SHORTFORM_ENABLE_SCORING_WINDOW_CAPS", "1") != "0"
 FULL_SOURCE_SCAN_MAX_SECONDS = max(60, int(speed_profile_default(
     "SHORTFORM_FULL_SOURCE_SCAN_MAX_SECONDS",
-    production="5400",
+    production="3600",
     debug="1200",
     premium="21600",
 )))
 MAX_SCORING_START_POINTS = max(40, int(speed_profile_default(
     "SHORTFORM_MAX_SCORING_START_POINTS",
-    production="120",
+    production="72",
     debug="180",
     premium="1600",
 )))
@@ -288,13 +293,13 @@ SCORING_SIGNAL_WINDOW_RADIUS_SECONDS = max(10, int(os.getenv("SHORTFORM_SCORING_
 ENABLE_SIGNAL_WINDOW_TRANSCRIPTION = os.getenv("SHORTFORM_ENABLE_SIGNAL_WINDOW_TRANSCRIPTION", "1") != "0"
 SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS = max(300, int(speed_profile_default(
     "SHORTFORM_SIGNAL_TRANSCRIPT_FULL_MAX_SECONDS",
-    production="1200",
+    production="900",
     debug="600",
     premium="3600",
 )))
 SIGNAL_TRANSCRIPT_MAX_WINDOWS = max(4, int(speed_profile_default(
     "SHORTFORM_SIGNAL_TRANSCRIPT_MAX_WINDOWS",
-    production="6",
+    production="4",
     debug="6",
     premium="40",
 )))
@@ -302,6 +307,7 @@ SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS = max(20, int(os.getenv(
     "SHORTFORM_SIGNAL_TRANSCRIPT_WINDOW_RADIUS_SECONDS",
     str(max(60, min(75, SCORING_SIGNAL_WINDOW_RADIUS_SECONDS))),
 )))
+ANALYSIS_AUDIO_MAX_ABR = max(48, int(os.getenv("SHORTFORM_ANALYSIS_AUDIO_MAX_ABR", "96")))
 
 
 def active_theme_name(theme_name=None):
@@ -1312,14 +1318,17 @@ def download_audio_windows_for_scoring(video_url, cleaned_title, source_record=N
         if not existing:
             output_template = os.path.join(window_root, f"{prefix}.%(ext)s")
             ydl_opts = build_ytdl_opts({
-                "format": "bestaudio[vcodec=none]/bestaudio/best",
+                "format": (
+                    f"bestaudio[vcodec=none][abr<={ANALYSIS_AUDIO_MAX_ABR}]/"
+                    "bestaudio[vcodec=none]/bestaudio/best"
+                ),
                 "outtmpl": output_template,
                 "download_ranges": download_range_func(None, [(window_start, window_end)]),
                 "ignoreerrors": False,
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "m4a",
-                    "preferredquality": "128",
+                    "preferredquality": str(ANALYSIS_AUDIO_MAX_ABR),
                 }],
             }, use_cookies=True)
 
@@ -1425,6 +1434,13 @@ def download_audio_for_scoring(video_url, cleaned_title, source_record=None):
     start_download = time.time()
     output_template = os.path.join(audio_path, f"{cleaned_title}.%(ext)s")
     audio_attempts = [
+        {
+            "label": "speech-optimized audio",
+            "format": (
+                f"bestaudio[vcodec=none][abr<={ANALYSIS_AUDIO_MAX_ABR}]/"
+                f"bestaudio[vcodec=none][acodec^=mp4a][abr<={ANALYSIS_AUDIO_MAX_ABR}]"
+            ),
+        },
         {
             "label": "preferred audio",
             "format": (
@@ -2199,7 +2215,8 @@ def clamp_center_x(center_x, resized_w, output_width):
     return resized_w / 2
 
 
-def estimate_stable_face_target(temp_subclip, face_cascades=None, max_samples=36):
+def estimate_stable_face_target(temp_subclip, face_cascades=None, max_samples=None):
+    max_samples = max_samples or FACE_TARGET_SAMPLE_COUNT
     cap = cv2.VideoCapture(temp_subclip)
     output_height = 1920
     output_width = 1080
@@ -2310,7 +2327,8 @@ def estimate_stable_face_target(temp_subclip, face_cascades=None, max_samples=36
     return result
 
 
-def estimate_group_face_target(temp_subclip, face_cascades=None, max_samples=36):
+def estimate_group_face_target(temp_subclip, face_cascades=None, max_samples=None):
+    max_samples = max_samples or FACE_TARGET_SAMPLE_COUNT
     cap = cv2.VideoCapture(temp_subclip)
     output_height = 1920
     output_width = 1080
@@ -3112,7 +3130,8 @@ def is_valid_existing_clip(video_path, min_size_bytes=1024 * 1024):
     )
 
 
-def estimate_black_frame_ratio(video_path, max_samples=18):
+def estimate_black_frame_ratio(video_path, max_samples=None):
+    max_samples = max_samples or BLACK_FRAME_SAMPLE_COUNT
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
@@ -3298,7 +3317,8 @@ def create_frame_audit_contact_sheet(video_path, audit_path, face_cascades=None,
     return result
 
 
-def analyze_final_frame_path(video_path, face_cascades=None, max_samples=24):
+def analyze_final_frame_path(video_path, face_cascades=None, max_samples=None):
+    max_samples = max_samples or FINAL_FRAME_PATH_SAMPLE_COUNT
     cap = cv2.VideoCapture(video_path)
     result = {
         "frame_qc_version": FRAME_QC_VERSION,
@@ -3650,7 +3670,7 @@ def build_render_qc(video_path, crop_stats, expected_duration, face_cascades=Non
     frame_path_qc = analyze_final_frame_path(video_path, face_cascades=face_cascades)
     audit_result = None
 
-    if audit_path:
+    if audit_path and CREATE_RENDER_CONTACT_SHEETS:
         audit_result = create_frame_audit_contact_sheet(
             video_path,
             audit_path,
@@ -3699,7 +3719,8 @@ def build_render_qc(video_path, crop_stats, expected_duration, face_cascades=Non
     }
 
 
-def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
+def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=None):
+    max_samples = max_samples or PREFLIGHT_FRAME_SAMPLE_COUNT
     cap = cv2.VideoCapture(temp_subclip)
     result = {
         "sampled_frames": 0,
@@ -3912,7 +3933,7 @@ def preflight_clip_visual_qc(temp_subclip, face_cascades, max_samples=16):
 
 
 def preflight_allows_center_safe_render(preflight_qc):
-    if not ALLOW_FACELESS_CENTER_SAFE:
+    if not ALLOW_FACELESS_CENTER_SAFE or not active_theme_allows_non_speaker_visual():
         return False
 
     if not isinstance(preflight_qc, dict):
@@ -3977,7 +3998,7 @@ def render_attempt_quality_score(render_qc):
 
 def active_theme_allows_non_speaker_visual():
     profile_name = str((active_theme_profile() or {}).get("profile") or active_theme_name()).lower()
-    return profile_name in {"politics", "truecrime", "sports", "gaming", "popculture"}
+    return profile_name in {"politics", "truecrime", "sports", "gaming", "popculture", "technology_ai"}
 
 
 def render_qc_non_speaker_visual_candidate(render_qc):
@@ -4090,7 +4111,7 @@ def fallback_framing_strategies():
     rich_fallback_profiles = {"comedy", "sports", "gaming", "popculture"}
     standard_fallbacks = ["stable_face_lock", "center_safe"]
 
-    if os.getenv("SHORTFORM_ENABLE_EXPENSIVE_FRAMING_FALLBACKS", "1") != "1":
+    if os.getenv("SHORTFORM_ENABLE_EXPENSIVE_FRAMING_FALLBACKS", "0") != "1":
         return standard_fallbacks
 
     if profile_name in rich_fallback_profiles or "reaction" in framing_style or "debate" in framing_style:
@@ -4367,7 +4388,7 @@ def audit_existing_final_clip(video_path, expected_duration=0.0, face_cascades=N
     frame_qc = analyze_final_frame_path(video_path, face_cascades=face_cascades)
     audit_result = None
 
-    if audit_path:
+    if audit_path and CREATE_RENDER_CONTACT_SHEETS:
         audit_result = create_frame_audit_contact_sheet(
             video_path,
             audit_path,
@@ -9617,7 +9638,7 @@ def render_selected_clips(video_filename, cleaned_title, source_record, source_s
             if should_try_alternate_framing(first_attempt["render_qc"]):
                 first_qc = first_attempt["render_qc"]
                 first_quality = float(first_qc.get("attempt_quality_score") or 0.0)
-                fallback_accept_threshold = float(os.getenv("SHORTFORM_FALLBACK_ACCEPT_SCORE", "0.68"))
+                fallback_accept_threshold = float(os.getenv("SHORTFORM_FALLBACK_ACCEPT_SCORE", "0.62"))
                 first_has_output = bool(first_attempt.get("output_file") and os.path.exists(first_attempt["output_file"]))
 
                 if (
