@@ -7,6 +7,8 @@ import sys
 import time
 import traceback as traceback_module
 
+import clip_generation as clip_generation_module
+import daily_editorial as daily_editorial_module
 import ytdlp_auth
 import runtime_budget
 from clip_generation import run_clip_generation
@@ -21,7 +23,7 @@ from daily_editorial import mark_editorial_sources_completed, run_daily_editoria
 from pipeline_doctor import run_doctor
 from reconcile_editorial_gates import reconcile_theme
 from subtitle_generation import run_subtitle_generation
-from theme_config import BASE_DIR, TEMP_PATH, THEMES_OUTPUT_PATH, clean_theme_name, discover_themes, future_theme_guard_message, future_themes_allowed, get_theme_paths, load_json_file, load_theme_config, requested_env_theme_names, write_json_file
+from theme_config import BASE_DIR, TEMP_PATH, THEMES_OUTPUT_PATH, clean_theme_name, discover_themes, future_theme_guard_message, future_themes_allowed, get_theme_paths, load_json_file, load_theme_config, requested_env_theme_names, utc_timestamp, write_json_file
 from validate_outputs import validate_outputs
 from video_fetch import run_video_fetch
 
@@ -31,6 +33,7 @@ RUNS_LOG_PATH = os.path.join(LOGS_PATH, "runs")
 LATEST_LOG_FILE = os.path.join(LOGS_PATH, "run_latest.log")
 LATEST_SUMMARY_FILE = os.path.join(LOGS_PATH, "run_latest_summary.json")
 MEDIA_AUTH_WAIT_STATUS_FILE = os.path.join(LOGS_PATH, "media_auth_wait_latest.json")
+BACKLOG_CAMPAIGN_STATUS_FILE = os.path.join(LOGS_PATH, "backlog_campaign_latest.json")
 DEFAULT_YOUTUBE_UPLOAD_LIMIT = int(os.getenv("SHORTFORM_YOUTUBE_DAILY_UPLOAD_LIMIT", "15"))
 DEFAULT_PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "editorial", "subtitle", "reconcile", "manifest", "upload"]
 PIPELINE_STAGES = ["pull", "audio", "score", "video", "render", "clip", "editorial", "subtitle", "reconcile", "manifest", "upload"]
@@ -827,6 +830,171 @@ def clip_generation_volume_label(themes):
     return f"quality-ranked; daily targets ({target_labels})"
 
 
+def backlog_target_per_theme(args):
+    return max(0, int(getattr(args, "backlog_target_per_theme", 0) or 0))
+
+
+def theme_finished_backlog_count(theme, editorial_date=None):
+    paths = get_theme_paths(theme)
+    metadata = load_json_file(paths["final_metadata_file"], {"content": [], "archive": []})
+    seen_files = set()
+
+    for package in list(metadata.get("content") or []) + list(metadata.get("archive") or []):
+        if not isinstance(package, dict) or not package_uploadable(package):
+            continue
+
+        if editorial_date and str(package.get("editorial_date") or "") != editorial_date:
+            continue
+
+        if (
+            package.get("upload_ready_requires_burned_captions", True)
+            and not package.get("content_has_burned_captions")
+        ):
+            continue
+
+        video_file = str(package.get("video_file") or "").strip()
+
+        if not video_file or not os.path.exists(video_file):
+            continue
+
+        seen_files.add(os.path.normcase(os.path.normpath(os.path.abspath(video_file))))
+
+    return len(seen_files)
+
+
+def backlog_theme_remaining(theme, args):
+    target = backlog_target_per_theme(args)
+
+    if target <= 0:
+        return 0
+
+    return max(0, target - theme_finished_backlog_count(theme))
+
+
+def backlog_campaign_payload(themes, args, stage="", status="running"):
+    target = backlog_target_per_theme(args)
+    progress = {}
+
+    for theme in themes:
+        finished = theme_finished_backlog_count(theme)
+        progress[theme] = {
+            "finished": finished,
+            "target": target,
+            "remaining": max(0, target - finished),
+            "target_met": finished >= target,
+        }
+
+    return {
+        "status": status,
+        "stage": stage,
+        "target_per_theme": target,
+        "uploads_enabled": False,
+        "source_videos_per_channel": int(getattr(args, "source_videos_per_channel", 0) or 0),
+        "updated_at": utc_timestamp(),
+        "themes": progress,
+    }
+
+
+def write_backlog_campaign_status(themes, args, stage="", status="running"):
+    if backlog_target_per_theme(args) <= 0:
+        return
+
+    os.makedirs(LOGS_PATH, exist_ok=True)
+    write_json_file(
+        BACKLOG_CAMPAIGN_STATUS_FILE,
+        backlog_campaign_payload(themes, args, stage=stage, status=status),
+    )
+
+
+def configure_backlog_campaign(themes, args):
+    target = backlog_target_per_theme(args)
+
+    if target <= 0:
+        if getattr(args, "source_videos_per_channel", 0):
+            os.environ["SHORTFORM_FETCH_VIDEOS_PER_CHANNEL"] = str(
+                max(1, int(args.source_videos_per_channel))
+            )
+        return
+
+    if args.clean_slate or args.clean_slate_only:
+        raise SystemExit("Backlog campaign mode preserves finished work and cannot be combined with --clean-slate.")
+
+    args.skip_youtube = True
+    args.travel_safe = True
+    args.execution_mode = "stage"
+
+    if not args.source_videos_per_channel:
+        args.source_videos_per_channel = 50
+
+    args.source_videos_per_channel = max(1, int(args.source_videos_per_channel))
+    os.environ["SHORTFORM_FETCH_VIDEOS_PER_CHANNEL"] = str(args.source_videos_per_channel)
+    os.environ.setdefault("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_PASSES", "20")
+    os.environ.setdefault("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MAX_RENDER_BATCH", "100")
+    os.environ.setdefault("SHORTFORM_EDITORIAL_QUOTA_TOPUP_MIN_RENDER_BATCH", "10")
+
+    remaining_by_theme = {
+        theme: max(0, target - theme_finished_backlog_count(theme))
+        for theme in themes
+    }
+    max_remaining = max(remaining_by_theme.values(), default=0)
+    clip_generation_module.PREFERRED_FINISHED_TARGET = target
+    clip_generation_module.DAILY_FINAL_PACKAGE_TARGET = target
+    clip_generation_module.DAILY_RENDER_ACCEPTED_TARGET_GLOBAL_OVERRIDE = False
+    clip_generation_module.MAX_THEME_RENDER_ACCEPTED_TARGET = max(
+        clip_generation_module.MAX_THEME_RENDER_ACCEPTED_TARGET,
+        target,
+    )
+    clip_generation_module.THEME_RENDER_ACCEPTED_TARGET_OVERRIDES.update(remaining_by_theme)
+    clip_generation_module.MIN_SCORED_SOURCES_PER_THEME = max(
+        clip_generation_module.MIN_SCORED_SOURCES_PER_THEME,
+        20,
+    )
+    clip_generation_module.MAX_UNSCORED_SOURCES_PER_THEME = max(
+        clip_generation_module.MAX_UNSCORED_SOURCES_PER_THEME,
+        min(250, max(40, math.ceil(max_remaining / 2))),
+    )
+    clip_generation_module.TARGET_PUBLISHABLE_CANDIDATES_PER_THEME = max(
+        clip_generation_module.TARGET_PUBLISHABLE_CANDIDATES_PER_THEME,
+        max_remaining * 2,
+    )
+    clip_generation_module.MAX_THEME_RENDER_ACCEPTED_TARGET = max(
+        clip_generation_module.MAX_THEME_RENDER_ACCEPTED_TARGET,
+        max_remaining,
+    )
+    daily_editorial_module.ALLOW_QUALITY_OVERFLOW = False
+
+    print("Backlog campaign mode enabled.")
+    print(f"Target: {target} finished, captioned local videos per theme.")
+    print(f"Historical source discovery: latest {args.source_videos_per_channel} videos per configured channel.")
+    print("YouTube upload is forcibly disabled; content and archive packages will be preserved.")
+
+    for theme in themes:
+        finished = target - remaining_by_theme[theme]
+        print(f" -> {theme}: {finished}/{target} finished; {remaining_by_theme[theme]} remaining")
+
+    print("")
+    write_backlog_campaign_status(themes, args, stage="configured")
+
+
+def configure_backlog_theme_runtime(theme, args):
+    remaining = backlog_theme_remaining(theme, args)
+
+    if backlog_target_per_theme(args) <= 0:
+        return remaining
+
+    clip_generation_module.THEME_RENDER_ACCEPTED_TARGET_OVERRIDES[theme] = remaining
+    date_key = os.getenv("SHORTFORM_EDITORIAL_DATE", time.strftime("%Y-%m-%d"))
+    current_date_ready = theme_finished_backlog_count(theme, editorial_date=date_key)
+    daily_target = max(1, current_date_ready + remaining)
+    daily_editorial_module.PREFERRED_FINISHED_TARGET_PER_THEME = daily_target
+    daily_editorial_module.EDITORIAL_FINAL_PACKAGE_TARGET = daily_target
+    daily_editorial_module.RESERVE_TARGET_PER_THEME = max(
+        0,
+        daily_target - daily_editorial_module.UPLOAD_READY_TARGET_PER_THEME,
+    )
+    return remaining
+
+
 def theme_has_youtube_upload_route(theme):
     config = load_theme_config(theme)
     youtube = config.get("youtube") or {}
@@ -1156,7 +1324,12 @@ def run_daily_editorial_deferred(theme):
 
 
 def run_editorial_with_quota_topups(theme, args, summary):
-    target = resolved_editorial_package_target()
+    configure_backlog_theme_runtime(theme, args)
+    target = (
+        daily_editorial_module.EDITORIAL_FINAL_PACKAGE_TARGET
+        if backlog_target_per_theme(args) > 0
+        else resolved_editorial_package_target()
+    )
 
     if not quota_topup_enabled(args):
         packages_ready, _ = timed_stage_accumulate(
@@ -1249,6 +1422,20 @@ def run_editorial_with_quota_topups(theme, args, summary):
 
 
 def run_stage_for_theme(theme, stage, args, summary):
+    campaign_remaining = configure_backlog_theme_runtime(theme, args)
+
+    if (
+        backlog_target_per_theme(args) > 0
+        and campaign_remaining <= 0
+        and stage in {"pull", "audio", "score", "video", "render", "clip", "editorial"}
+    ):
+        summary[stage] = 0.0
+        print(
+            f"Backlog target already met for {theme}: "
+            f"{theme_finished_backlog_count(theme)}/{backlog_target_per_theme(args)}; {stage} skipped."
+        )
+        return True
+
     if stage == "pull":
         timed_stage(summary, "pull", lambda: run_video_fetch(theme=theme))
         return True
@@ -1450,6 +1637,7 @@ def run_pipeline_by_stage(themes, args):
             runtime_budget.set_theme_deadline(0)
 
         runtime_budget.clear_work_scope()
+        write_backlog_campaign_status(themes, args, stage=stage)
         print(f"Stage {stage} complete in {format_duration(time.time() - stage_start)}\n")
 
     for theme in themes:
@@ -1646,6 +1834,26 @@ def parse_args():
         "--skip-youtube",
         action="store_true",
         help="Skip YouTube upload after subtitle generation.",
+    )
+    parser.add_argument(
+        "--backlog-target-per-theme",
+        type=int,
+        default=0,
+        metavar="COUNT",
+        help=(
+            "Generation-only campaign target for finished local content/archive videos per theme. "
+            "Forces stage-major execution, preserves existing backlog, and disables YouTube upload."
+        ),
+    )
+    parser.add_argument(
+        "--source-videos-per-channel",
+        type=int,
+        default=0,
+        metavar="COUNT",
+        help=(
+            "Number of recent videos to discover from every configured source channel. "
+            "Backlog campaigns default to 50; normal runs default to 1."
+        ),
     )
     parser.add_argument(
         "--skip-media-auth-preflight",
@@ -1971,6 +2179,8 @@ def main():
             print("No themes configured. Add JSON theme files in src/themes.")
             return
 
+        configure_backlog_campaign(themes, args)
+
         upload_stage_enabled = (
             "upload" in selected_pipeline_stages(args)
             and not args.skip_youtube
@@ -2072,8 +2282,21 @@ def main():
         print_overall_summary(theme_summaries)
 
         if failed_themes:
+            write_backlog_campaign_status(themes, args, stage="finished", status="failed")
             print(f"Pipeline finished with upload failures for: {', '.join(failed_themes)}")
             sys.exit(1)
+
+        if backlog_target_per_theme(args) > 0:
+            campaign_complete = all(
+                theme_finished_backlog_count(theme) >= backlog_target_per_theme(args)
+                for theme in themes
+            )
+            write_backlog_campaign_status(
+                themes,
+                args,
+                stage="finished",
+                status="complete" if campaign_complete else "partial",
+            )
 
         print("Pipeline complete for all requested themes.")
 

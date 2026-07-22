@@ -13,6 +13,28 @@ Version 1.1 short-form clip generation pipeline.
 
 Use `--skip-youtube` when you want to prepare upload-ready clips without uploading.
 
+## Generation-Only Backlog Campaigns
+
+Build a large local backlog without opening Google OAuth or uploading anything:
+
+```powershell
+.\venv_313\Scripts\python.exe .\backlog_campaign.py --target 500 --source-videos-per-channel 50
+```
+
+The campaign preserves existing `content` and `archive` packages, discovers older videos from every configured source channel, skips completed sources, and runs resumable generation cycles until every theme reaches the target. Historical depth expands after a stalled cycle, up to 200 videos per source channel by default. Progress is written to:
+
+```text
+logs/backlog_campaign_latest.json
+```
+
+Run one generation-only cycle instead of the automatic campaign loop:
+
+```powershell
+.\venv_313\Scripts\python.exe .\run.py --travel-safe --skip-youtube --backlog-target-per-theme 500 --source-videos-per-channel 50
+```
+
+Backlog mode cannot be combined with `--clean-slate`, and it forcibly disables YouTube uploads even when channel routes and tokens are configured.
+
 ## Travel-Safe / Resumable Runs
 
 When internet may cut out, use travel-safe mode to front-load the network-heavy work across all themes before local rendering and packaging starts:

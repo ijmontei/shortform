@@ -123,11 +123,46 @@ def run_ytdlp_with_cookie_fallback(ydl_opts, operation):
     )
 
 
-def latest_video_for_channel(channel_url):
+def fetched_video_record(video, candidate_url, configured_channel_url):
+    if not isinstance(video, dict):
+        return None
+
+    views_int = video.get("view_count", 0)
+    views_str = f"{views_int:,} views" if views_int else "N/A"
+    raw_date = video.get("upload_date")
+    date_str = (
+        datetime.strptime(raw_date, "%Y%m%d").strftime("%b %d, %Y")
+        if raw_date
+        else "N/A"
+    )
+    video_id = video.get("id") or video.get("url")
+    video_url = video.get("webpage_url") or video.get("url") or ""
+
+    if video_id and not str(video_url).startswith("http") and is_probable_youtube_video_id(video_id):
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    if not is_supported_youtube_video_url(video_url):
+        if is_probable_youtube_video_id(video_id):
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+        else:
+            return None
+
+    return {
+        "title": video.get("title", "Unknown Title"),
+        "video_url": video_url,
+        "views": views_str,
+        "date_time": date_str,
+        "channel_url": candidate_url,
+        "configured_channel_url": configured_channel_url,
+    }
+
+
+def videos_for_channel(channel_url, limit=None):
+    limit = max(1, int(limit or os.getenv("SHORTFORM_FETCH_VIDEOS_PER_CHANNEL", "1")))
     ydl_opts = build_ytdl_opts({
         "extract_flat": True,
-        "playlist_items": "1",
-        "playlistend": 1,
+        "playlist_items": f"1:{limit}",
+        "playlistend": limit,
         "simulate": True,
         "skip_download": True,
     }, use_cookies=os.getenv("SHORTFORM_USE_COOKIES_FOR_FETCH") == "1")
@@ -144,42 +179,23 @@ def latest_video_for_channel(channel_url):
             if not info:
                 continue
 
-            if "entries" in info and info["entries"]:
-                video = info["entries"][0]
-            else:
-                video = info
+            entries = list(info.get("entries") or []) if "entries" in info else [info]
+            videos = []
+            seen_urls = set()
 
-            views_int = video.get("view_count", 0)
-            views_str = f"{views_int:,} views" if views_int else "N/A"
-            raw_date = video.get("upload_date")
-            date_str = (
-                datetime.strptime(raw_date, "%Y%m%d").strftime("%b %d, %Y")
-                if raw_date
-                else "N/A"
-            )
-            video_id = video.get("id") or video.get("url")
-            video_url = video.get("webpage_url") or video.get("url") or f"https://www.youtube.com/watch?v={video_id}"
+            for entry in entries[:limit]:
+                record = fetched_video_record(entry, candidate_url, channel_url)
 
-            if video_id and not str(video_url).startswith("http"):
-                video_url = f"https://www.youtube.com/watch?v={video_id}"
-
-            if not is_supported_youtube_video_url(video_url):
-                if is_probable_youtube_video_id(video_id):
-                    video_url = f"https://www.youtube.com/watch?v={video_id}"
-                else:
-                    errors.append(
-                        f"{candidate_url}: first result was not a playable video URL ({video_url})"
-                    )
+                if not record or record["video_url"] in seen_urls:
                     continue
 
-            return {
-                "title": video.get("title", "Unknown Title"),
-                "video_url": video_url,
-                "views": views_str,
-                "date_time": date_str,
-                "channel_url": candidate_url,
-                "configured_channel_url": channel_url,
-            }
+                seen_urls.add(record["video_url"])
+                videos.append(record)
+
+            if videos:
+                return videos
+
+            errors.append(f"{candidate_url}: no playable video URLs found in the first {limit} result(s)")
 
         except Exception as error:
             errors.append(f"{candidate_url}: {str(error).splitlines()[0][:220]}")
@@ -188,7 +204,12 @@ def latest_video_for_channel(channel_url):
         print(f"Skipping source after {len(errors)} fetch attempt(s): {channel_url}")
         print(f" -> {errors[-1]}")
 
-    return None
+    return []
+
+
+def latest_video_for_channel(channel_url):
+    videos = videos_for_channel(channel_url, limit=1)
+    return videos[0] if videos else None
 
 
 def pulled_record_has_generated_clips(record):
@@ -239,7 +260,8 @@ def run_video_fetch_for_theme(theme_name):
     secondary_channels = set(config.get("secondary_channels") or [])
     enable_episode_routing = os.getenv("SHORTFORM_ENABLE_EPISODE_ROUTING", "1") != "0"
 
-    print(f"=== Fetching latest videos for theme: {theme} ===")
+    fetch_depth = max(1, int(os.getenv("SHORTFORM_FETCH_VIDEOS_PER_CHANNEL", "1")))
+    print(f"=== Fetching latest {fetch_depth} video(s) per channel for theme: {theme} ===")
 
     if not channels:
         print(f"No channels found for theme '{theme}'. Add URLs to {paths['theme_config_file']}")
@@ -254,73 +276,74 @@ def run_video_fetch_for_theme(theme_name):
     routed_count = 0
 
     for channel in channels:
-        latest_video = latest_video_for_channel(channel)
+        channel_videos = videos_for_channel(channel, limit=fetch_depth)
 
-        if not latest_video:
+        if not channel_videos:
             continue
 
-        pulled_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        source_tier = "priority" if channel in priority_channels else ("secondary" if channel in secondary_channels else "legacy")
-        route_result = episode_route_targets(
-            theme,
-            channel,
-            latest_video.get("channel_url", ""),
-            latest_video.get("title", ""),
-        ) if enable_episode_routing else {"targets": [theme], "matches": []}
-        route_targets = [
-            clean_theme_name(target)
-            for target in route_result.get("targets", [theme])
-            if os.path.exists(theme_config_path(target))
-        ]
+        for fetched_video in channel_videos:
+            pulled_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            source_tier = "priority" if channel in priority_channels else ("secondary" if channel in secondary_channels else "legacy")
+            route_result = episode_route_targets(
+                theme,
+                channel,
+                fetched_video.get("channel_url", ""),
+                fetched_video.get("title", ""),
+            ) if enable_episode_routing else {"targets": [theme], "matches": []}
+            route_targets = [
+                clean_theme_name(target)
+                for target in route_result.get("targets", [theme])
+                if os.path.exists(theme_config_path(target))
+            ]
 
-        if theme not in route_targets:
-            route_targets.insert(0, theme)
+            if theme not in route_targets:
+                route_targets.insert(0, theme)
 
-        latest_video["theme"] = theme
-        latest_video["pulled_at"] = pulled_at
-        latest_video["source_tier"] = source_tier
-        latest_video["route_targets"] = route_targets
-        latest_video["routing_override_matches"] = route_result.get("matches", [])
+            fetched_video["theme"] = theme
+            fetched_video["pulled_at"] = pulled_at
+            fetched_video["source_tier"] = source_tier
+            fetched_video["route_targets"] = route_targets
+            fetched_video["routing_override_matches"] = route_result.get("matches", [])
 
-        for target_theme in route_targets:
-            guard_record = {
-                **latest_video,
-                "theme": target_theme,
-                "source_tier": source_tier,
-            }
-            disqualified, guard_hits = source_disqualified_by_theme_name(target_theme, guard_record)
+            for target_theme in route_targets:
+                guard_record = {
+                    **fetched_video,
+                    "theme": target_theme,
+                    "source_tier": source_tier,
+                }
+                disqualified, guard_hits = source_disqualified_by_theme_name(target_theme, guard_record)
 
-            if disqualified:
-                print(
-                    f"Skipping fetched source for theme '{target_theme}' by source guard: "
-                    f"{latest_video.get('title', 'Unknown Title')}"
-                )
-                print(f" -> guard signals: {', '.join(map(str, guard_hits))}")
-                continue
+                if disqualified:
+                    print(
+                        f"Skipping fetched source for theme '{target_theme}' by source guard: "
+                        f"{fetched_video.get('title', 'Unknown Title')}"
+                    )
+                    print(f" -> guard signals: {', '.join(map(str, guard_hits))}")
+                    continue
 
-            state_key = video_state_key(target_theme, latest_video["video_url"])
+                state_key = video_state_key(target_theme, fetched_video["video_url"])
 
-            if state_key in pulled:
-                if target_theme == theme:
-                    refreshed_count += 1
-                existing_record = pulled.get(state_key, {})
-            else:
-                if target_theme == theme:
-                    new_count += 1
+                if state_key in pulled:
+                    if target_theme == theme:
+                        refreshed_count += 1
+                    existing_record = pulled.get(state_key, {})
                 else:
-                    routed_count += 1
-                existing_record = {}
+                    if target_theme == theme:
+                        new_count += 1
+                    else:
+                        routed_count += 1
+                    existing_record = {}
 
-            merged_record = {
-                **existing_record,
-                **latest_video,
-                "theme": target_theme,
-                "origin_theme": existing_record.get("origin_theme") or theme,
-                "routed_from_theme": "" if target_theme == theme else theme,
-                "routing_status": "primary" if target_theme == theme else "episode_override",
-            }
-            mark_stage(merged_record, "fetched", pulled_at)
-            pulled[state_key] = merged_record
+                merged_record = {
+                    **existing_record,
+                    **fetched_video,
+                    "theme": target_theme,
+                    "origin_theme": existing_record.get("origin_theme") or theme,
+                    "routed_from_theme": "" if target_theme == theme else theme,
+                    "routing_status": "primary" if target_theme == theme else "episode_override",
+                }
+                mark_stage(merged_record, "fetched", pulled_at)
+                pulled[state_key] = merged_record
 
     removed_count, marked_count = prune_guard_disqualified_pulled_records(theme, pulled)
 
